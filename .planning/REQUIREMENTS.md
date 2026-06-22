@@ -111,27 +111,71 @@ Deferred to future milestones (ตามข้อ 10 เฟส 3 ของเอ
 
 ## Stakeholder Confirmations Required (ต้องยืนยันก่อน build เฟสที่เกี่ยวข้อง)
 
-| หัวข้อ | กระทบ requirement | ผู้ยืนยัน |
-|--------|-------------------|----------|
-| ข้อความ/รูปแบบใบเสร็จตามสรรพากร + เงื่อนไขลดหย่อน 1 เท่า/2 เท่า | FR-24 | ฝ่ายบัญชี/กฎหมาย รพ. |
-| ระยะเวลาเก็บข้อมูล (ภาษี ~5 ปี vs PDPA) | NFR-03 | ฝ่ายกฎหมาย/DPO |
-| รูปแบบ/ฟิลด์ไฟล์ export สำหรับ e-Donation | FR-30 | จากระบบ RD จริง |
-| รพ. เข้าเงื่อนไข mandate e-Donation 1 ม.ค. 2026 หรือไม่ | EDONATION-API-01 (อาจขยาย scope) | ฝ่ายกฎหมาย |
-| Email provider / KMS / hosting (on-prem vs cloud) | FR-25, NFR-02 | ฝ่าย IT/จัดซื้อ |
+| หัวข้อ | กระทบ requirement | ผู้ยืนยัน | เฟสที่เกี่ยวข้อง |
+|--------|-------------------|----------|------------------|
+| ข้อความ/รูปแบบใบเสร็จตามสรรพากร + เงื่อนไขลดหย่อน 1 เท่า/2 เท่า | FR-24 | ฝ่ายบัญชี/กฎหมาย รพ. | Phase 4 |
+| ระยะเวลาเก็บข้อมูล (ภาษี ~5 ปี vs PDPA) | NFR-03 | ฝ่ายกฎหมาย/DPO | Phase 1 (model), Phase 6 (donor request) |
+| รูปแบบ/ฟิลด์ไฟล์ export สำหรับ e-Donation | FR-30 | จากระบบ RD จริง | Phase 5 |
+| รพ. เข้าเงื่อนไข mandate e-Donation 1 ม.ค. 2026 หรือไม่ | EDONATION-API-01 (อาจขยาย scope) | ฝ่ายกฎหมาย | Phase 5 |
+| Email provider / KMS / hosting (on-prem vs cloud) | FR-25, NFR-02 | ฝ่าย IT/จัดซื้อ | Phase 1 / Phase 4 |
 
 ## Traceability
 
-Which phases cover which requirements. Populated during roadmap creation.
+Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (to be filled by roadmapper) | — | Pending |
+| NFR-01 | Phase 1 | Pending |
+| FR-34 | Phase 1 | Pending |
+| NFR-02 | Phase 1 | Pending |
+| NFR-05 | Phase 1 | Pending |
+| FR-13 | Phase 1 | Pending |
+| NFR-03 | Phase 1 | Pending |
+| FR-15 | Phase 2 | Pending |
+| FR-16 | Phase 2 | Pending |
+| FR-17 | Phase 2 | Pending |
+| FR-18 | Phase 2 | Pending |
+| NFR-04 | Phase 2 | Pending |
+| FR-07 | Phase 3 | Pending |
+| FR-09 | Phase 3 | Pending |
+| FR-11 | Phase 3 | Pending |
+| FR-10 | Phase 3 | Pending |
+| FR-12 | Phase 3 | Pending |
+| FR-14 | Phase 3 | Pending |
+| FR-19 | Phase 3 | Pending |
+| FR-29 | Phase 3 | Pending |
+| FR-20 | Phase 4 | Pending |
+| FR-21 | Phase 4 | Pending |
+| FR-22 | Phase 4 | Pending |
+| FR-24 | Phase 4 | Pending |
+| FR-23 | Phase 4 | Pending |
+| NFR-07 | Phase 4 | Pending |
+| FR-25 | Phase 4 | Pending |
+| FR-26 | Phase 4 | Pending |
+| FR-27 | Phase 4 | Pending |
+| FR-28 | Phase 4 | Pending |
+| FR-33 | Phase 4 | Pending |
+| NFR-09 | Phase 4 | Pending |
+| FR-30 | Phase 5 | Pending |
+| FR-31 | Phase 5 | Pending |
+| FR-32 | Phase 5 | Pending |
+| NFR-08 | Phase 5 | Pending |
+| FR-01 | Phase 6 | Pending |
+| FR-02 | Phase 6 | Pending |
+| FR-03 | Phase 6 | Pending |
+| FR-06 | Phase 6 | Pending |
+| FR-05 | Phase 6 | Pending |
+| FR-04 | Phase 6 | Pending |
+| FR-08 | Phase 6 | Pending |
+| NFR-06 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 38 total (FR ×27 ที่อยู่ในขอบเขต + NFR ×9, รวม FR/NFR ที่ใช้งานจริง)
-- Mapped to phases: TBD (roadmap)
-- Unmapped: TBD
+- v1 requirements: 43 active (FR ×34 + NFR ×9)
+- Mapped to phases: 43/43 ✓ (100%)
+- Unmapped: 0
+
+> Note: NFR-02 spans Phase 1 (transport TLS + encryption boundary) and Phase 3 (donor PII encrypt/mask usage); NFR-03 spans Phase 1 (retention/legal-basis model) and Phases 3/6 (consent capture for Flow A / Flow B). Each is assigned its primary owning phase above to keep one-phase-per-requirement; downstream phases reference them.
 
 ---
 *Requirements defined: 2026-06-22*
-*Last updated: 2026-06-22 after initialization*
+*Last updated: 2026-06-22 after roadmap creation (traceability populated)*
