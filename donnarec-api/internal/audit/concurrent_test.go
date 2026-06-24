@@ -78,6 +78,28 @@ func TestConcurrentAuditInserts(t *testing.T) {
 	assert.Equal(t, 0, dupCount,
 		"no prev_hash must appear more than once (each is linked to a unique previous row)")
 
+	// Independent linkage oracle (IN-05): assert directly in SQL that the chain is
+	// a single unbroken linked list — every row's prev_hash equals the row_hash of
+	// the row immediately before it (in id order). This is independent of
+	// VerifyChain's own recomputation, so a bug shared between the insert path and
+	// VerifyChain (e.g. a matching hash-formula error) cannot hide a broken chain.
+	var brokenLinks int
+	err = superPool.QueryRow(ctx, `
+		WITH ordered AS (
+			SELECT
+				id,
+				prev_hash,
+				LAG(row_hash) OVER (ORDER BY id) AS expected_prev
+			FROM audit_log
+		)
+		SELECT COUNT(*) FROM ordered
+		WHERE expected_prev IS NOT NULL          -- skip the genesis row
+		  AND prev_hash IS DISTINCT FROM expected_prev
+	`).Scan(&brokenLinks)
+	require.NoError(t, err)
+	assert.Equal(t, 0, brokenLinks,
+		"each row's prev_hash must equal the previous row's row_hash (unbroken linked list)")
+
 	// VerifyChain must return true on all 50 rows
 	ok, brokenID, err := svc.VerifyChain(ctx)
 	require.NoError(t, err)
