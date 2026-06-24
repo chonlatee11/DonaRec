@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -36,72 +35,6 @@ func (q *Queries) GetLastAuditRowForUpdate(ctx context.Context) (GetLastAuditRow
 	return i, err
 }
 
-const insertAuditLog = `-- name: InsertAuditLog :one
-
-INSERT INTO audit_log (
-    actor_id,
-    actor_email,
-    action,
-    resource,
-    before_json,
-    after_json,
-    ip_address,
-    prev_hash,
-    row_hash
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    $7,
-    $8,
-    $9
-)
-RETURNING id, created_at
-`
-
-type InsertAuditLogParams struct {
-	ActorID    pgtype.UUID `db:"actor_id" json:"actor_id"`
-	ActorEmail string      `db:"actor_email" json:"actor_email"`
-	Action     string      `db:"action" json:"action"`
-	Resource   string      `db:"resource" json:"resource"`
-	BeforeJson []byte      `db:"before_json" json:"before_json"`
-	AfterJson  []byte      `db:"after_json" json:"after_json"`
-	IpAddress  *netip.Addr `db:"ip_address" json:"ip_address"`
-	PrevHash   string      `db:"prev_hash" json:"prev_hash"`
-	RowHash    string      `db:"row_hash" json:"row_hash"`
-}
-
-type InsertAuditLogRow struct {
-	ID        int64              `db:"id" json:"id"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
-}
-
-// audit.sql — sqlc queries for the audit_log table
-// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
-// Parameterized queries only — no string concatenation (T-1-tamper-01).
-// Inserts one audit row and returns its id and created_at for hash computation.
-// The caller must set row_hash to the computed SHA-256 value before calling this.
-// Explicit column list (ห้ามใช้ * ใน INSERT — Foundational Rule 4).
-func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (InsertAuditLogRow, error) {
-	row := q.db.QueryRow(ctx, insertAuditLog,
-		arg.ActorID,
-		arg.ActorEmail,
-		arg.Action,
-		arg.Resource,
-		arg.BeforeJson,
-		arg.AfterJson,
-		arg.IpAddress,
-		arg.PrevHash,
-		arg.RowHash,
-	)
-	var i InsertAuditLogRow
-	err := row.Scan(&i.ID, &i.CreatedAt)
-	return i, err
-}
-
 const listAllAuditForVerify = `-- name: ListAllAuditForVerify :many
 SELECT
     id,
@@ -127,6 +60,9 @@ type ListAllAuditForVerifyRow struct {
 	RowHash    string             `db:"row_hash" json:"row_hash"`
 }
 
+// audit.sql — sqlc queries for the audit_log table
+// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
+// Parameterized queries only — no string concatenation (T-1-tamper-01).
 // Returns all audit rows in ascending id order for chain verification.
 // Used by VerifyChain to recompute each row_hash and detect tampering.
 // Admin / internal tool only — no pagination (verification reads entire chain).

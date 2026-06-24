@@ -27,10 +27,6 @@ type Querier interface {
 	// audit.sql — sqlc queries for the audit_log table
 	// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
 	// Parameterized queries only — no string concatenation (T-1-tamper-01).
-	// Inserts one audit row and returns its id and created_at for hash computation.
-	// The caller must set row_hash to the computed SHA-256 value before calling this.
-	// Explicit column list (ห้ามใช้ * ใน INSERT — Foundational Rule 4).
-	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (InsertAuditLogRow, error)
 	// Returns all audit rows in ascending id order for chain verification.
 	// Used by VerifyChain to recompute each row_hash and detect tampering.
 	// Admin / internal tool only — no pagination (verification reads entire chain).

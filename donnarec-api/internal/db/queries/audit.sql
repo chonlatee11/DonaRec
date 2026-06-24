@@ -2,32 +2,12 @@
 -- All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
 -- Parameterized queries only — no string concatenation (T-1-tamper-01).
 
--- name: InsertAuditLog :one
--- Inserts one audit row and returns its id and created_at for hash computation.
--- The caller must set row_hash to the computed SHA-256 value before calling this.
--- Explicit column list (ห้ามใช้ * ใน INSERT — Foundational Rule 4).
-INSERT INTO audit_log (
-    actor_id,
-    actor_email,
-    action,
-    resource,
-    before_json,
-    after_json,
-    ip_address,
-    prev_hash,
-    row_hash
-) VALUES (
-    @actor_id,
-    @actor_email,
-    @action,
-    @resource,
-    @before_json,
-    @after_json,
-    @ip_address,
-    @prev_hash,
-    @row_hash
-)
-RETURNING id, created_at;
+-- NOTE (WR-05): The previous InsertAuditLog :one query was removed. The audit
+-- service writes rows via a raw tx.Exec INSERT in AppendAuditEntryTx that also
+-- sets the reserved `id` and captured `created_at` explicitly (both feed the
+-- hash-chain). That sqlc query omitted id/created_at and was never used, so
+-- keeping two divergent insert definitions for the immutable audit table was a
+-- maintenance trap. There is now exactly one insert path (the raw exec).
 
 -- name: GetLastAuditRowForUpdate :one
 -- Fetches the most recent audit row's id and row_hash, locking it with FOR UPDATE.
