@@ -104,13 +104,17 @@ func (s *UserService) CreateUser(ctx context.Context, params CreateUserParams) (
 			Roles:           make([]UserRole, 0, len(params.Roles)),
 		}
 
-		// Assign roles (one INSERT per role; ON CONFLICT DO NOTHING for idempotency)
+		// Assign roles (one INSERT per role; ON CONFLICT DO NOTHING for idempotency).
+		// AssignRole is :one with RETURNING, so a conflict (DO NOTHING → zero rows)
+		// surfaces as pgx.ErrNoRows. That case means "role already assigned" and is a
+		// no-op success, NOT a failure — treat it as success so re-assignment stays
+		// idempotent and does not abort the transaction (WR-02).
 		for _, role := range params.Roles {
 			_, err := qtx.AssignRole(ctx, db.AssignRoleParams{
 				UserID: row.ID,
 				Role:   db.UserRoleEnum(role),
 			})
-			if err != nil {
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("assign role %q to user %s: %w", role, row.ID, err)
 			}
 			result.Roles = append(result.Roles, role)
