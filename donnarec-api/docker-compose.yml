@@ -59,9 +59,14 @@ services:
       KC_DB_USERNAME: ${DB_USER:-donnarec}
       KC_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
 
-      # Hostname (for OIDC issuer URL in JWTs — must match what clients use)
-      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-localhost}
-      KC_HOSTNAME_PORT: "8080"
+      # Hostname config (Keycloak 26):
+      # KC_HOSTNAME_URL sets the issuer URL returned in OIDC discovery.
+      # Using the internal Docker hostname so the Go API can reach Keycloak
+      # and the issuer URL in the discovery document matches what go-oidc
+      # sends for JWKS discovery.  KC_HOSTNAME_STRICT=false allows browser
+      # access via localhost:8080 for admin console without issuer mismatch.
+      KC_HOSTNAME_URL: "http://keycloak:8080"
+      KC_HOSTNAME_ADMIN_URL: "http://localhost:8080"
       KC_HOSTNAME_STRICT: "false"
       KC_HTTP_ENABLED: "true"
 
