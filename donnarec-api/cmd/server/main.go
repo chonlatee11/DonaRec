@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/donnarec/donnarec-api/internal/audit"
 	"github.com/donnarec/donnarec-api/internal/auth"
 	"github.com/donnarec/donnarec-api/internal/config"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
@@ -76,6 +77,9 @@ func main() {
 	// --------------------------------------------------------
 	// Services
 	// --------------------------------------------------------
+	// Audit service: append-only hash-chained audit trail (D-17, NFR-05)
+	auditSvc := audit.NewAuditService(pool, queries, logger)
+
 	userSvc := users.NewUserService(pool, queries, logger)
 
 	// --------------------------------------------------------
@@ -86,7 +90,7 @@ func main() {
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, userHandler, logger)
+	router := setupRouter(authMW, auditSvc, userHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -124,14 +128,14 @@ func main() {
 
 // setupRouter wires the Gin router with middleware and route groups.
 //
-// Middleware chain order (Pattern D):
-//  1. Recovery  — catch panics before anything else
+// Middleware chain order (Pattern D — from PATTERNS.md):
+//  1. Recovery   — catch panics before anything else
 //  2. Request logger — structured zap logging for all requests
-//  3. (Audit middleware placeholder — wired in plan 01-02)
+//  3. AuditMiddleware — BEFORE RequireAuth to capture auth-failure events too (D-15)
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
 //  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin)
-func setupRouter(authMW *auth.AuthMiddleware, userHandler *users.UserHandler, logger *zap.Logger) *gin.Engine {
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, userHandler *users.UserHandler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -140,8 +144,9 @@ func setupRouter(authMW *auth.AuthMiddleware, userHandler *users.UserHandler, lo
 	// 2. Structured request logging
 	router.Use(zapRequestLogger(logger))
 
-	// 3. TODO(01-02): audit middleware placeholder
-	// router.Use(auditMiddleware(auditSvc))
+	// 3. Audit middleware — BEFORE RequireAuth (Pattern D) so auth events are captured.
+	//    Skips plain GETs; audits all mutations + PII-reveal GETs (D-15, D-13).
+	router.Use(audit.AuditMiddleware(auditSvc))
 
 	// ---- Public routes ----
 	// /healthz: liveness probe (no auth — used by docker-compose healthcheck + load balancers)

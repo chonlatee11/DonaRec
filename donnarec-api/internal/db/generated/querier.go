@@ -17,8 +17,28 @@ type Querier interface {
 	// All queries use explicit column lists (no bare * in INSERT).
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeactivateUser(ctx context.Context, id pgtype.UUID) (DeactivateUserRow, error)
+	// Fetches the most recent audit row's id and row_hash, locking it with FOR UPDATE.
+	// This serializes concurrent hash-chain appends: the next INSERT cannot proceed
+	// until the current transaction releases this lock (Pitfall 2 mitigation, D-17).
+	// Returns pgx.ErrNoRows if audit_log is empty (caller sets prevHash = "GENESIS").
+	GetLastAuditRowForUpdate(ctx context.Context) (GetLastAuditRowForUpdateRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserByKeycloakSubject(ctx context.Context, keycloakSubject string) (User, error)
+	// audit.sql — sqlc queries for the audit_log table
+	// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
+	// Parameterized queries only — no string concatenation (T-1-tamper-01).
+	// Inserts one audit row and returns its id and created_at for hash computation.
+	// The caller must set row_hash to the computed SHA-256 value before calling this.
+	// Explicit column list (ห้ามใช้ * ใน INSERT — Foundational Rule 4).
+	InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) (InsertAuditLogRow, error)
+	// Returns all audit rows in ascending id order for chain verification.
+	// Used by VerifyChain to recompute each row_hash and detect tampering.
+	// Admin / internal tool only — no pagination (verification reads entire chain).
+	ListAllAuditForVerify(ctx context.Context) ([]ListAllAuditForVerifyRow, error)
+	// Admin-only paginated listing of audit entries, newest first.
+	// actor_id filter is optional: pass NULL to list all actors.
+	// Caller must enforce Admin role before invoking (D-16).
+	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
 	ListRolesForUser(ctx context.Context, userID pgtype.UUID) ([]UserRoleEnum, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
 }
