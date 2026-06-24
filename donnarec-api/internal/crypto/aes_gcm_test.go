@@ -22,7 +22,9 @@ func TestEncryptDecryptEmpty(t *testing.T) {
 
 	got, err := crypto.Decrypt(key, ct)
 	require.NoError(t, err)
-	assert.Equal(t, []byte{}, got, "Decrypt of encrypted empty plaintext must return empty slice")
+	// GCM Open returns nil for empty plaintext, which is semantically equivalent to []byte{}.
+	// Accept both nil and empty slice — the caller treats them identically.
+	assert.True(t, len(got) == 0, "Decrypt of encrypted empty plaintext must return zero-length slice (got %v)", got)
 }
 
 // TestEncryptKeyLength verifies that Encrypt rejects keys that are not 16/24/32 bytes.
