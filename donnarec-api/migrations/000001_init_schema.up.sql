@@ -42,14 +42,20 @@ CREATE TABLE user_roles (
 );
 
 -- retention_config: configurable retention policies (D-18, NFR-03)
--- Seeded with defaults; updated_by references users.id but we seed with
--- a sentinel zero-UUID that must be replaced by the admin seed script.
+-- updated_by is intentionally NOT a FK to users(id) (IN-02): this table is
+-- seeded by THIS migration, which runs before any user (and before seed-admin.sh)
+-- exists, so a FK would make the seed impossible at migration time. Instead we
+-- seed updated_by with the all-zero sentinel UUID below to mean "seeded by
+-- migration, not yet attributed to a real admin". seed-admin.sh / admin UI may
+-- later overwrite updated_by with a real users.id. The sentinel is an accepted,
+-- documented design choice, not an integrity bug.
 CREATE TABLE retention_config (
     id                  SERIAL          PRIMARY KEY,
     entity_type         TEXT            NOT NULL UNIQUE,
     default_retain_days INT             NOT NULL,
     legal_basis         legal_basis_enum NOT NULL,
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    -- updated_by: see note above — sentinel zero-UUID until an admin updates it.
     updated_by          UUID            NOT NULL
 );
 
@@ -62,8 +68,10 @@ CREATE INDEX idx_users_keycloak    ON users(keycloak_subject);
 
 -- ============================================================
 -- 4. Seed retention_config defaults
--- NOTE: updated_by uses the zero UUID as a sentinel for "seeded by migration".
---       The seed-admin.sh script updates this once the first admin is created.
+-- NOTE: updated_by uses the all-zero UUID as a documented sentinel meaning
+--       "seeded by migration" (IN-02). There is intentionally no FK to users(id)
+--       because no user exists at migration time. seed-admin.sh / admin UI may
+--       overwrite updated_by with a real users.id later.
 -- ============================================================
 
 INSERT INTO retention_config (entity_type, default_retain_days, legal_basis, updated_by)
