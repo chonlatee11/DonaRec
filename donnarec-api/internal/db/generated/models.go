@@ -7,6 +7,7 @@ package db
 import (
 	"database/sql/driver"
 	"fmt"
+	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -95,6 +96,20 @@ func (ns NullUserRoleEnum) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.UserRoleEnum), nil
+}
+
+type AuditLog struct {
+	ID         int64              `db:"id" json:"id"`
+	ActorID    pgtype.UUID        `db:"actor_id" json:"actor_id"`
+	ActorEmail string             `db:"actor_email" json:"actor_email"`
+	Action     string             `db:"action" json:"action"`
+	Resource   string             `db:"resource" json:"resource"`
+	BeforeJson []byte             `db:"before_json" json:"before_json"`
+	AfterJson  []byte             `db:"after_json" json:"after_json"`
+	IpAddress  *netip.Addr        `db:"ip_address" json:"ip_address"`
+	CreatedAt  pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	PrevHash   string             `db:"prev_hash" json:"prev_hash"`
+	RowHash    string             `db:"row_hash" json:"row_hash"`
 }
 
 type RetentionConfig struct {
