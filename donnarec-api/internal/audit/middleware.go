@@ -192,15 +192,30 @@ func extractNoun(route string) string {
 	return "unknown"
 }
 
+// singularNouns lists words that end in 's' but are NOT plural, so they must not
+// be naively de-pluralized (IN-03). Without this, singularize("status") would
+// yield "statu" and singularize("address") would yield "addres", producing
+// confusing audit action labels (e.g. "statu.read") that auditors will read.
+var singularNouns = map[string]bool{
+	"status":  true,
+	"address": true,
+	"news":    true,
+	"series":  true,
+	"species": true,
+}
+
 // singularize applies minimal English singularization for common resource names
-// used in this system. This is intentionally simple.
+// used in this system. This is intentionally simple, with an explicit exception
+// set for non-plural words ending in 's' (IN-03).
 func singularize(s string) string {
+	if singularNouns[strings.ToLower(s)] {
+		return s
+	}
 	switch {
 	case strings.HasSuffix(s, "ies") && len(s) > 3:
 		return s[:len(s)-3] + "y" // "categories" → "category"
 	case strings.HasSuffix(s, "s") && len(s) > 1:
 		// Simple dedup: "users" → "user", "receipts" → "receipt"
-		// Exception: words that end in 's' but aren't plural (e.g. "status", "address")
 		return s[:len(s)-1]
 	default:
 		return s
