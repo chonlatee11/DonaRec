@@ -61,7 +61,10 @@ func AuditMiddleware(svc *AuditService) gin.HandlerFunc {
 		if raw, exists := c.Get("claims"); exists {
 			if claims, ok := raw.(auth.KeycloakClaims); ok {
 				actorID = claims.Subject
-				actorEmail = claims.Email
+				// Use ActorIdentity() so actor_email falls back to
+				// preferred_username when "email" is absent from a Keycloak
+				// access token (CR-03) — avoids empty audit actor on FR-13.
+				actorEmail = claims.ActorIdentity()
 			}
 		}
 
