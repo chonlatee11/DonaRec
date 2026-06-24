@@ -1,0 +1,113 @@
+package auth
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+)
+
+// AuthMiddleware validates Bearer JWTs issued by the configured Keycloak realm.
+//
+// It uses coreos/go-oidc/v3 for OIDC discovery and token verification.
+// The verifier enforces:
+//   - Token signature (via JWKS fetched from Keycloak's discovery endpoint)
+//   - Issuer ("iss") must match the realm URL (auto-enforced by go-oidc)
+//   - Audience ("aud") must include the configured clientID (Pitfall 3)
+//
+// Roles are parsed from realm_access.roles — never from a top-level "roles" claim (Pitfall 1).
+type AuthMiddleware struct {
+	verifier *oidc.IDTokenVerifier
+	logger   *zap.Logger
+}
+
+// NewAuthMiddleware initialises an AuthMiddleware by discovering the Keycloak realm's
+// OIDC configuration and fetching its JWKS.
+//
+// keycloakBaseURL — base URL of the Keycloak server, e.g. "http://localhost:8080"
+// realm           — Keycloak realm name, e.g. "donnarec"
+// clientID        — backend client ID used as the expected JWT audience (Pitfall 3)
+func NewAuthMiddleware(keycloakBaseURL, realm, clientID string, logger *zap.Logger) (*AuthMiddleware, error) {
+	ctx := context.Background()
+
+	// providerURL follows the Keycloak realm URL format.
+	// go-oidc will GET {providerURL}/.well-known/openid-configuration to discover JWKS URI.
+	providerURL := fmt.Sprintf("%s/realms/%s", keycloakBaseURL, realm)
+
+	provider, err := oidc.NewProvider(ctx, providerURL)
+	if err != nil {
+		return nil, fmt.Errorf("oidc provider init for realm %q at %s: %w", realm, keycloakBaseURL, err)
+	}
+
+	// ClientID in oidc.Config causes the verifier to enforce that the token's
+	// "aud" claim includes this client ID. Without it, any token from the realm
+	// would be accepted — an audience bypass (RESEARCH.md Pitfall 3).
+	verifier := provider.Verifier(&oidc.Config{ClientID: clientID})
+
+	return &AuthMiddleware{
+		verifier: verifier,
+		logger:   logger,
+	}, nil
+}
+
+// RequireAuth returns a Gin middleware that validates the Bearer token in the
+// Authorization header. On success it sets "claims" in the Gin context so that
+// downstream handlers and RequireRoles can read them.
+//
+// Response codes:
+//   - 401: missing token, invalid token, wrong issuer/audience, expired token
+//   - Claims are set via c.Set("claims", KeycloakClaims{...})
+func (m *AuthMiddleware) RequireAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rawToken := extractBearerToken(c)
+		if rawToken == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "missing_token",
+			})
+			return
+		}
+
+		// Verify signature + expiry + iss + aud
+		idToken, err := m.verifier.Verify(c.Request.Context(), rawToken)
+		if err != nil {
+			m.logger.Debug("token verification failed",
+				zap.String("reason", err.Error()),
+				// Never log the raw token value
+			)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid_token",
+			})
+			return
+		}
+
+		// Parse custom claims — roles from realm_access.roles (Pitfall 1)
+		var claims KeycloakClaims
+		if err := idToken.Claims(&claims); err != nil {
+			m.logger.Error("failed to parse token claims",
+				zap.Error(err),
+			)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "claims_parse_error",
+			})
+			return
+		}
+
+		// Inject claims for downstream handlers and RBAC guard
+		c.Set("claims", claims)
+		c.Next()
+	}
+}
+
+// extractBearerToken extracts the raw JWT string from the Authorization header.
+// Returns an empty string if the header is absent or not in "Bearer <token>" format.
+func extractBearerToken(c *gin.Context) string {
+	h := c.GetHeader("Authorization")
+	if !strings.HasPrefix(h, "Bearer ") {
+		return ""
+	}
+	return strings.TrimPrefix(h, "Bearer ")
+}

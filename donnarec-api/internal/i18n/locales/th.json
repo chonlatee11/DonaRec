@@ -1,0 +1,41 @@
+{
+    "auth.missing_token": {
+        "other": "ไม่พบ token การยืนยันตัวตน"
+    },
+    "auth.invalid_token": {
+        "other": "token ไม่ถูกต้องหรือหมดอายุ"
+    },
+    "auth.insufficient_role": {
+        "other": "ไม่มีสิทธิ์เข้าถึง"
+    },
+    "auth.invalid_password": {
+        "other": "รหัสผ่านไม่ถูกต้อง"
+    },
+    "auth.no_auth_context": {
+        "other": "ไม่พบข้อมูลการยืนยันตัวตนในระบบ"
+    },
+    "validation.required": {
+        "other": "ช่องนี้จำเป็นต้องกรอก"
+    },
+    "validation.invalid_email": {
+        "other": "รูปแบบอีเมลไม่ถูกต้อง"
+    },
+    "validation.invalid_role": {
+        "other": "บทบาทไม่ถูกต้อง ต้องเป็น maker, checker หรือ admin"
+    },
+    "user.created": {
+        "other": "สร้างบัญชีผู้ใช้สำเร็จ"
+    },
+    "user.not_found": {
+        "other": "ไม่พบผู้ใช้"
+    },
+    "user.already_exists": {
+        "other": "อีเมลนี้มีในระบบแล้ว"
+    },
+    "retention.legal_hold_delete_blocked": {
+        "other": "ไม่สามารถลบข้อมูลที่อยู่ภายใต้ legal hold"
+    },
+    "error.internal": {
+        "other": "เกิดข้อผิดพลาดภายในระบบ กรุณาลองใหม่อีกครั้ง"
+    }
+}

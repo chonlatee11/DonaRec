@@ -1,0 +1,111 @@
+{
+  "realm": "donnarec",
+  "enabled": true,
+  "displayName": "DonaRec — ระบบออกใบเสร็จบริจาค",
+
+  "loginTheme": "keycloak",
+  "accountTheme": "keycloak.v2",
+  "adminTheme": "keycloak.v2",
+  "emailTheme": "keycloak",
+
+  "internationalizationEnabled": true,
+  "supportedLocales": ["th", "en"],
+  "defaultLocale": "th",
+
+  "_comment_security": "Password policy + lockout (D-06, D-07) — enforced in realm config",
+  "passwordPolicy": "length(8) and upperCase(1) and digits(1) and notUsername(undefined)",
+
+  "_comment_brute_force": "Lockout after 5 failed attempts (D-07)",
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxLoginFailures": 5,
+  "waitIncrementSeconds": 60,
+  "minimumQuickLoginWaitSeconds": 60,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+
+  "_comment_session": "Token lifetime (D-08): 5 min access token, 30 min idle, 8 hour max",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 28800,
+  "offlineSessionIdleTimeout": 2592000,
+  "accessCodeLifespan": 60,
+
+  "_comment_ssl": "SSL required for production; any for local dev (override via env)",
+  "sslRequired": "external",
+
+  "_comment_users": "No self-registration — Admin-only account creation (D-01)",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": true,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+
+  "roles": {
+    "realm": [
+      {
+        "name": "maker",
+        "description": "เจ้าหน้าที่ป้อนข้อมูลและสร้างใบเสร็จ"
+      },
+      {
+        "name": "checker",
+        "description": "ผู้อนุมัติใบเสร็จ (ห้ามอนุมัติใบที่ตนเองสร้าง — SoD)"
+      },
+      {
+        "name": "admin",
+        "description": "ผู้ดูแลระบบ สร้าง/จัดการบัญชีผู้ใช้"
+      }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "donnarec-backend",
+      "name": "DonaRec Backend API",
+      "description": "Go API backend — validates JWTs issued to this client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "bearerOnly": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "300"
+      }
+    },
+    {
+      "clientId": "donnarec-frontend",
+      "name": "DonaRec Front-end",
+      "description": "Next.js back-office UI — public client (no client secret)",
+      "enabled": true,
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+
+  "defaultDefaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+  "defaultOptionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+
+  "eventsEnabled": true,
+  "eventsExpiration": 604800,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+
+  "_note": "No test users seeded here — use scripts/seed-admin.sh to create the first admin after realm import (D-05)"
+}
