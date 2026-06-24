@@ -1,0 +1,41 @@
+{
+    "auth.missing_token": {
+        "other": "Authentication token not found"
+    },
+    "auth.invalid_token": {
+        "other": "Token is invalid or expired"
+    },
+    "auth.insufficient_role": {
+        "other": "Access denied: insufficient role"
+    },
+    "auth.invalid_password": {
+        "other": "Invalid password"
+    },
+    "auth.no_auth_context": {
+        "other": "Authentication context not found"
+    },
+    "validation.required": {
+        "other": "This field is required"
+    },
+    "validation.invalid_email": {
+        "other": "Invalid email format"
+    },
+    "validation.invalid_role": {
+        "other": "Invalid role. Must be one of: maker, checker, admin"
+    },
+    "user.created": {
+        "other": "User created successfully"
+    },
+    "user.not_found": {
+        "other": "User not found"
+    },
+    "user.already_exists": {
+        "other": "A user with this email already exists"
+    },
+    "retention.legal_hold_delete_blocked": {
+        "other": "Cannot delete data under legal hold"
+    },
+    "error.internal": {
+        "other": "Internal server error. Please try again."
+    }
+}
