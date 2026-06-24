@@ -32,7 +32,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Every login, role change, and data action writes an immutable audit row (actor, action, timestamp, before→after); attempting to UPDATE or DELETE an audit row is denied at the database level.
   4. Each donor/receipt record carries a `retain_until` value and a documented legal-basis field, and no code path can hard-delete a record under legal hold.
   5. Data in transit is served over HTTPS/TLS and the sensitive-ID column is stored encrypted at rest (application-level envelope encryption), never in plaintext.
-**Plans**: TBD
+**Plans**: 4 plans
+- [x] 01-01-PLAN.md — Walking skeleton: Keycloak OIDC auth + Go RBAC guard + sqlc/pgx data layer
+- [x] 01-02-PLAN.md — Append-only audit log with SHA-256 hash-chain immutability
+- [x] 01-03-PLAN.md — AES-256-GCM PII envelope encryption + retention/legal-hold model
+- [ ] 01-04-PLAN.md — Gap closure: fix docker-compose + Keycloak realm so local stack boots (5 UAT blockers)
 
 > Note: NFR-02 (HTTPS/TLS + encryption-at-rest) is split — the encryption boundary and transport are established here; full PII encrypt/decrypt/mask usage lands with the donor module in Phase 3. NFR-03 here covers the retention/legal-basis data model and policy; the donor-facing consent capture lands in Phase 3 (Flow A) and Phase 6 (Flow B).
 > **Stakeholder gate (non-blocking):** confirm exact PDPA retention period (~5 years) and erasure policy with DPO/legal; email provider / KMS / hosting (on-prem vs cloud) decisions. Model `retain_until` generically until confirmed.
