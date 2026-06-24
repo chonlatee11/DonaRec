@@ -38,6 +38,15 @@ func main() {
 		logger.Fatal("config load failed", zap.Error(err))
 	}
 
+	// Warn loudly if DATABASE_URL disables TLS against a non-localhost host
+	// (IN-04): unencrypted traffic to a remote Postgres violates PDPA/NFR-02.
+	if insecure, host := cfg.InsecureDatabaseTLS(); insecure {
+		logger.Warn("DATABASE_URL uses sslmode=disable against a non-localhost host — "+
+			"connection to Postgres is UNENCRYPTED; use sslmode=verify-full outside local dev (NFR-02)",
+			zap.String("db_host", host),
+		)
+	}
+
 	// Graceful shutdown context — listens for SIGINT / SIGTERM
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

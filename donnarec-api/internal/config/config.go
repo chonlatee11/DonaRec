@@ -4,8 +4,10 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds the full application configuration loaded from environment variables.
@@ -17,8 +19,8 @@ type Config struct {
 	DatabaseURL string
 
 	// Keycloak (OIDC authN)
-	KeycloakBaseURL string
-	KeycloakRealm   string
+	KeycloakBaseURL  string
+	KeycloakRealm    string
 	KeycloakClientID string
 
 	// Encryption (PDPA — NFR-02)
@@ -69,9 +71,9 @@ func Load() (*Config, error) {
 // validate checks that all required fields are set.
 func (c *Config) validate() error {
 	required := map[string]string{
-		"DATABASE_URL":       c.DatabaseURL,
-		"KEYCLOAK_BASE_URL":  c.KeycloakBaseURL,
-		"DONAREC_KEK":        c.DonarecKEK,
+		"DATABASE_URL":      c.DatabaseURL,
+		"KEYCLOAK_BASE_URL": c.KeycloakBaseURL,
+		"DONAREC_KEK":       c.DonarecKEK,
 	}
 	for name, val := range required {
 		if val == "" {
@@ -84,6 +86,35 @@ func (c *Config) validate() error {
 	}
 
 	return nil
+}
+
+// InsecureDatabaseTLS reports whether the configured DATABASE_URL uses
+// sslmode=disable against a NON-localhost host (IN-04). That combination is a
+// PDPA/NFR-02 risk: traffic to a remote Postgres would be unencrypted. It is
+// acceptable only for the local docker-compose stack (localhost/127.0.0.1/::1).
+//
+// Returns (insecure, host). insecure is false when the URL is unparseable,
+// when sslmode is not "disable", or when the host is local.
+func (c *Config) InsecureDatabaseTLS() (bool, string) {
+	u, err := url.Parse(c.DatabaseURL)
+	if err != nil {
+		// Can't parse — don't claim insecurity we can't prove.
+		return false, ""
+	}
+
+	sslmode := u.Query().Get("sslmode")
+	if !strings.EqualFold(sslmode, "disable") {
+		return false, u.Hostname()
+	}
+
+	host := u.Hostname()
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1", "":
+		// Local dev — sslmode=disable is acceptable here.
+		return false, host
+	default:
+		return true, host
+	}
 }
 
 func getEnvStr(key, fallback string) string {
