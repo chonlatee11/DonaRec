@@ -104,10 +104,16 @@ func (m *AuthMiddleware) RequireAuth() gin.HandlerFunc {
 
 // extractBearerToken extracts the raw JWT string from the Authorization header.
 // Returns an empty string if the header is absent or not in "Bearer <token>" format.
+//
+// The scheme is matched case-insensitively per RFC 6750/7235 ("Bearer", "bearer",
+// "BEARER" are all valid), and the remaining token is trimmed so that a header with
+// only whitespace after the scheme (e.g. "Bearer    ") yields "" (treated as missing)
+// rather than passing a whitespace token to Verify (WR-03).
 func extractBearerToken(c *gin.Context) string {
+	const prefix = "bearer "
 	h := c.GetHeader("Authorization")
-	if !strings.HasPrefix(h, "Bearer ") {
+	if len(h) < len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
 		return ""
 	}
-	return strings.TrimPrefix(h, "Bearer ")
+	return strings.TrimSpace(h[len(prefix):])
 }
