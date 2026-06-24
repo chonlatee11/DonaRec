@@ -9,7 +9,7 @@
 #   1. Copy .env.example to .env and fill in DB_PASSWORD and DONAREC_KEK
 #   2. docker compose up -d
 #   3. Import Keycloak realm: keycloak/realm-donnarec.json (auto-imported on first start)
-#   4. Run: bash scripts/seed-admin.sh  (creates first admin user)
+#   4. Run: bash ../scripts/seed-admin.sh  (creates first admin user)
 #
 # After startup:
 #   API:         http://localhost:8000/healthz
@@ -32,7 +32,7 @@ services:
       POSTGRES_MULTIPLE_DATABASES: donnarec_app,donnarec_keycloak
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/create-multiple-dbs.sh:/docker-entrypoint-initdb.d/create-multiple-dbs.sh:ro
+      - ../scripts/create-multiple-dbs.sh:/docker-entrypoint-initdb.d/create-multiple-dbs.sh:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -71,6 +71,9 @@ services:
 
       # Logging level
       KC_LOG_LEVEL: INFO
+
+      # Enable health endpoint on management port 9000 (required for /health/ready probe)
+      KC_HEALTH_ENABLED: "true"
     volumes:
       - ../keycloak:/opt/keycloak/data/import:ro
     ports:
@@ -79,7 +82,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8080/health/ready || exit 1"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
       interval: 30s
       timeout: 10s
       retries: 10
@@ -99,7 +102,7 @@ services:
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-donnarec}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-donnarec-backend}
-      DONAREC_KEK: ${DONAREC_KEK:?DONAREC_KEK is required — generate with: openssl rand -hex 32}
+      DONAREC_KEK: "${DONAREC_KEK:?DONAREC_KEK is required — generate with: openssl rand -hex 32}"
       RETENTION_DONATION_DAYS: ${RETENTION_DONATION_DAYS:-1825}
       RETENTION_AUDIT_DAYS: ${RETENTION_AUDIT_DAYS:-3650}
       RETENTION_DEFAULT_LEGAL_BASIS: ${RETENTION_DEFAULT_LEGAL_BASIS:-tax_obligation}
