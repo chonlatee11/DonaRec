@@ -1,5 +1,5 @@
 ---
-status: gaps-closed
+status: partial
 phase: 01-foundation-db-auth-rbac-audit-retention-model
 source: [01-VERIFICATION.md]
 started: 2026-06-24
@@ -8,13 +8,14 @@ updated: 2026-06-24
 
 ## Current Test
 
-[gaps ปิดครบแล้ว (execute-phase 01 --gaps-only → plan 01-04, commits a45e5c5/9e9a9ec/694427f) — `docker compose config -q` ผ่าน, realm JSON valid, ทุก fix verified แบบ static. Test 1 (argon2) **unblocked** → รอ human รัน `docker compose up -d --wait` แล้วยืนยัน argon2 ใน Keycloak Admin Console]
+[testing complete — Test 1 ผ่าน (human-verified argon2id + stack boots healthy); Test 2 ยัง blocked แบบ deploy-time]
 
 ## Tests
 
 ### 1. Keycloak ใช้ argon2id สำหรับ password hashing
 expected: หลัง `docker compose up` (stack: Postgres + Keycloak + API) เปิด Keycloak Admin Console → Realm `donnarec` → Authentication → Policies → Password policy / Realm defaults แล้วยืนยันว่า password hashing algorithm = `argon2` (argon2id). หมายเหตุ: Keycloak 24+ ตั้ง argon2 เป็น default algorithm อยู่แล้ว
-result: ready-to-retest
+result: pass
+verified: "[2026-06-24] human-verified หลัง gap-closure 01-04: `docker compose down -v && up -d --wait` → postgres/keycloak/api healthy ครบ; Keycloak Admin Console เข้าได้; Realm donnarec password hashing = argon2(id)"
 reported: "เข้า Keycloak Admin Console ไม่ได้เลย — docker log พัง: pgsql 'password authentication failed for user donnarec', keycloak 'Failed to obtain JDBC connection', api ไม่ start (ก่อนหน้านี้เจอ yaml: line 102 mapping values not allowed)"
 severity: blocker
 note: "local stack boot ไม่ขึ้นเลยจาก defect 5 จุดใน docker-compose.yml + realm-donnarec.json (ดู Gaps). แต่ละจุดถูก reproduce + ยืนยัน root cause ด้วยการรัน stack จริงระหว่าง verify (fix ถูก revert ออกแล้วเพื่อให้ execute-phase ลงมือพร้อม atomic commit). เมื่อ stack boot ได้ ค่อยทำ argon2 verification ตัวจริง"
@@ -29,8 +30,8 @@ reason: "เป็น deploy-time verification ที่ต้องทำตอ
 ## Summary
 
 total: 2
-passed: 0
-issues: 1
+passed: 1
+issues: 0
 pending: 0
 skipped: 0
 blocked: 1
