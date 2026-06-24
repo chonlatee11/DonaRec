@@ -124,7 +124,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 0/TBD | Not started | - |
+| 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 1/3 | In Progress|  |
 | 2. Gap-less Receipt Numbering Core | 0/TBD | Not started | - |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 0/TBD | Not started | - |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
