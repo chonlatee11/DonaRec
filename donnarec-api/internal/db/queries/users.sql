@@ -3,22 +3,21 @@
 -- All queries use explicit column lists (no bare * in INSERT).
 
 -- name: CreateUser :one
+-- created_at/updated_at are intentionally omitted: the columns carry
+-- DEFAULT now(), so we rely on the single source of truth in the schema
+-- rather than duplicating now() here (IN-01).
 INSERT INTO users (
     email,
     display_name,
     keycloak_subject,
     is_active,
-    legal_hold,
-    created_at,
-    updated_at
+    legal_hold
 ) VALUES (
     @email,
     @display_name,
     @keycloak_subject,
     true,
-    false,
-    now(),
-    now()
+    false
 ) RETURNING *;
 
 -- name: GetUserByID :one

@@ -37,17 +37,13 @@ INSERT INTO users (
     display_name,
     keycloak_subject,
     is_active,
-    legal_hold,
-    created_at,
-    updated_at
+    legal_hold
 ) VALUES (
     $1,
     $2,
     $3,
     true,
-    false,
-    now(),
-    now()
+    false
 ) RETURNING id, email, display_name, keycloak_subject, is_active, legal_hold, created_at, updated_at
 `
 
