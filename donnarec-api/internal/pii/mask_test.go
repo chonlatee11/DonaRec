@@ -13,10 +13,10 @@ import (
 // and masks all preceding characters (D-11).
 func TestMaskNationalID(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
+		name      string
+		input     string
 		wantLast4 string
-		wantLen int
+		wantLen   int
 	}{
 		{
 			name:      "standard 13-digit Thai national ID",
@@ -67,15 +67,24 @@ func TestMaskNationalID(t *testing.T) {
 		assert.NotEqual(t, "", got, "empty input should return a safe placeholder")
 	})
 
-	t.Run("short input (< 4 chars) handled safely", func(t *testing.T) {
+	t.Run("short input (< 10 chars) is fully masked (WR-04)", func(t *testing.T) {
+		// Values shorter than a plausible ID must not leak their last 4 chars —
+		// they are fully masked so no original digit is exposed.
 		got := pii.MaskNationalID("123")
-		// Must not panic
-		assert.NotEmpty(t, got)
+		assert.Equal(t, "xxx", got, "short value must be fully masked")
+		assert.NotContains(t, got, "1", "no original digit may appear")
 	})
 
-	t.Run("exactly 4 chars — all visible", func(t *testing.T) {
+	t.Run("exactly 4 chars — fully masked, not revealed (WR-04)", func(t *testing.T) {
+		// Revealing all 4 chars of a 4-char value would leak 100% of it; the
+		// last-4 rule only applies once the value is at least minRevealLen long.
 		got := pii.MaskNationalID("1234")
-		assert.Equal(t, "1234", got[len(got)-4:])
+		assert.Equal(t, "xxxx", got, "4-char value must be fully masked, not revealed")
+	})
+
+	t.Run("10-char value reveals last 4 (WR-04 boundary)", func(t *testing.T) {
+		got := pii.MaskNationalID("0123456789")
+		assert.Equal(t, "xxxxxx6789", got, "at minRevealLen, mask all but last 4")
 	})
 }
 
@@ -83,9 +92,9 @@ func TestMaskNationalID(t *testing.T) {
 // Admin → true, Checker → true, Maker-only → false.
 func TestCanRevealFull(t *testing.T) {
 	tests := []struct {
-		name   string
-		roles  []string
-		want   bool
+		name  string
+		roles []string
+		want  bool
 	}{
 		{
 			name:  "admin can reveal (D-10)",
