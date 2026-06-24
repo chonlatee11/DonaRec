@@ -12,7 +12,7 @@ DonaRec is a compliance-critical, back-office document-issuance system whose sin
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation (DB, Auth/RBAC, Audit, Retention model)** - Security, role separation, and an immutable audit trail that everything else depends on
+- [x] **Phase 1: Foundation (DB, Auth/RBAC, Audit, Retention model)** - Security, role separation, and an immutable audit trail that everything else depends on (completed 2026-06-24)
 - [ ] **Phase 2: Gap-less Receipt Numbering Core (★)** - Concurrency-proven, per-fiscal-year, gap-less number allocator built before any issuance flow
 - [ ] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt
 - [ ] **Phase 4: Receipt PDF + Email Delivery (Outbox Worker)** - Async Thai/EN tax-compliant PDF and email pipeline with retry, decoupled from the issuance transaction
@@ -124,7 +124,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 1/3 | In Progress|  |
+| 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 3/3 | Complete   | 2026-06-24 |
 | 2. Gap-less Receipt Numbering Core | 0/TBD | Not started | - |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 0/TBD | Not started | - |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
