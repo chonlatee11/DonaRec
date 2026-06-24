@@ -64,7 +64,12 @@ func NewUserService(pool *pgxpool.Pool, queries *db.Queries, logger *zap.Logger)
 // CreateUser inserts a new user row and assigns their roles, all within a single transaction.
 // It returns the created user with roles populated.
 //
-// TODO(01-02): audit-in-tx — wire audit middleware here once plan 01-02 implements audit service.
+// AUDIT NOTE (WR-01): the user-creation audit row is currently written by the
+// AuditMiddleware in its OWN transaction AFTER this mutation commits (best-effort,
+// post-commit). To make the audit write atomic with the mutation, accept an
+// audit.AuditService here and call AppendAuditEntryTx(ctx, tx, entry) inside the
+// WithTx below. That in-transaction wiring is deliberately deferred to a follow-up
+// phase — do not assume same-transaction auditing is in force for this handler.
 func (s *UserService) CreateUser(ctx context.Context, params CreateUserParams) (*User, error) {
 	if len(params.Roles) == 0 {
 		return nil, fmt.Errorf("at least one role must be assigned")

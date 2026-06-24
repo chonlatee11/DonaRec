@@ -2,9 +2,9 @@
 //
 // Design decisions realized here:
 //
-//   D-15: All mutations + auth events are audited via a generic interceptor.
-//   D-17: Tamper evidence via SHA-256 hash-chain (prev_hash → row_hash per row).
-//   NFR-05: Audit trail is append-only; UPDATE/DELETE denied at DB level for donnarec_app.
+//	D-15: All mutations + auth events are audited via a generic interceptor.
+//	D-17: Tamper evidence via SHA-256 hash-chain (prev_hash → row_hash per row).
+//	NFR-05: Audit trail is append-only; UPDATE/DELETE denied at DB level for donnarec_app.
 //
 // Concurrency model:
 //
@@ -24,7 +24,11 @@
 //
 // ANTI-PATTERN PROHIBITION (Foundational Rule 2):
 //
-//	ห้ามเขียน audit entry ใน goroutine แยก — ต้องเขียนใน transaction เดียวกับ data mutation.
+//	ห้ามเขียน audit entry ใน goroutine แยก — เขียนแบบ synchronous เสมอ.
+//	อุดมคติคือเขียนใน transaction เดียวกับ data mutation ผ่าน AppendAuditEntryTx.
+//	ข้อจำกัด Phase 1 (WR-01): audit middleware ใช้ AppendAuditEntry (own-tx, post-commit)
+//	ซึ่งเป็น best-effort — ยังไม่ได้ wire in-transaction audit ให้ mutating handler ใด
+//	ใน phase นี้. ใช้ AppendAuditEntryTx เมื่อต้องการ atomicity จริง.
 package audit
 
 import (
@@ -223,9 +227,14 @@ func (s *AuditService) AppendAuditEntryTx(ctx context.Context, tx pgx.Tx, entry 
 }
 
 // AppendAuditEntry appends one audit entry in its own transaction.
-// This is the "own-tx" path used by the audit middleware when no caller transaction
-// is available. For atomicity (audit + data mutation in same tx), callers should
-// use AppendAuditEntryTx inside their own transaction instead.
+//
+// This is the "own-tx" / best-effort path used by the audit middleware AFTER the
+// handler's mutation has already committed (WR-01). Because it runs in a separate
+// transaction, the data mutation can succeed while this audit write fails — the
+// middleware logs that failure but does not roll the mutation back.
+//
+// For true atomicity (audit + data mutation committed together), callers MUST use
+// AppendAuditEntryTx inside their own transaction instead of this method.
 func (s *AuditService) AppendAuditEntry(ctx context.Context, entry AuditEntry) error {
 	return dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		return s.AppendAuditEntryTx(ctx, tx, entry)

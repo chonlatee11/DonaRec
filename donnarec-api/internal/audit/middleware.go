@@ -18,6 +18,20 @@
 //
 //	ห้ามเขียน audit entry ใน goroutine แยก — ต้อง synchronous เสมอ.
 //	On audit error: log via zap but do NOT abort the request (c.Abort is forbidden here).
+//
+// PHASE 1 AUDIT-ATOMICITY SCOPE (WR-01 — read carefully):
+//
+//	This middleware writes the audit row via AuditService.AppendAuditEntry in its
+//	OWN transaction, AFTER c.Next() (i.e. after the handler's mutation has already
+//	committed). This is *best-effort post-commit* auditing: the write is synchronous
+//	(no goroutine) but it is NOT in the same transaction as the data mutation, so a
+//	mutation can commit while the audit write fails (logged, not aborted).
+//
+//	The strict "audit ใน transaction เดียวกับ data mutation" invariant is satisfied
+//	only by handlers that call AuditService.AppendAuditEntryTx inside their own
+//	WithTx. Phase 1 has no such mutating handler wired yet; full in-transaction
+//	auditing is owned by a follow-up phase. Do NOT read this middleware as enforcing
+//	the same-transaction invariant — it deliberately does not.
 package audit
 
 import (
