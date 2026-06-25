@@ -56,7 +56,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 4 plans
 - [x] 02-01-PLAN.md — Migration 000004 (counter/ledger/config tables + UNIQUE backstop + REVOKE) and sqlc queries
 - [x] 02-02-PLAN.md — Pure fiscalYear() boundary helper + formatReceiptNo() (TDD)
-- [ ] 02-03-PLAN.md — Caller-managed gap-less allocator service Allocate(ctx, tx, issueDate) (TDD)
+- [x] 02-03-PLAN.md — Caller-managed gap-less allocator service Allocate(ctx, tx, issueDate) (TDD)
 - [ ] 02-04-PLAN.md — Concurrency + rollback + UNIQUE-backstop proof under -race (★ SC#4/NFR-04)
 
 > **Research flag:** verify the chosen ORM path for `UPDATE ... RETURNING` / `SELECT FOR UPDATE` and write the concurrency harness; this is the #1 correctness risk (Pitfalls 1 & 2).
@@ -134,7 +134,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
-| 2. Gap-less Receipt Numbering Core | 2/4 | In Progress|  |
+| 2. Gap-less Receipt Numbering Core | 3/4 | In Progress|  |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 0/TBD | Not started | - |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |

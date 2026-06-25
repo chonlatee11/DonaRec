@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-06-25T16:13:51.816Z"
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-06-25T16:23:24.460Z"
 last_activity: 2026-06-25
 progress:
   total_phases: 6
   completed_phases: 1
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 17
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 02 (gap-less-receipt-numbering-core) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-06-25
 
-Progress: [████████░░] 78%
+Progress: [█████████░] 89%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [████████░░] 78%
 *Updated after each plan completion*
 | Phase 02-gap-less-receipt-numbering-core P01 | 262s | 2 tasks | 8 files |
 | Phase 02 P02 | 254 | 2 tasks | 4 files |
+| Phase 02 P03 | 256 | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Recent decisions affecting current work:
 - Roadmap: Foundation (audit + RBAC + retention model) first — expensive to retrofit; everything depends on it.
 - Roadmap: PDF + email decoupled behind an async outbox worker (Phase 4); kept out of the issuance transaction.
 - Roadmap: Public donation web form (Flow B) built LAST (Phase 6) — reuses the entire Flow-A pipeline.
+- [Phase ?]: Allocator.queries field is *db.Queries (concrete) not db.Querier — WithTx bind requires concrete type (02-PATTERNS Key Observation #1)
+- [Phase ?]: allocator_test.go uses black-box package receiptno_test; Allocator/NewAllocator/AllocatedReceipt are exported
 
 ### Pending Todos
 
@@ -89,6 +92,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-25T16:13:51.801Z
-Stopped at: Phase 2 context gathered
+Last session: 2026-06-25T16:23:24.444Z
+Stopped at: Completed 02-03-PLAN.md
 Resume file: None
