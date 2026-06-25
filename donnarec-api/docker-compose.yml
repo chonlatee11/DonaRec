@@ -3,11 +3,15 @@
 # Services:
 #   postgres  — PostgreSQL 17 (shared for both app and Keycloak databases)
 #   keycloak  — Self-hosted Keycloak 26.6.3 (OIDC identity provider)
+#   migrate   — golang-migrate init-service (runs DB migrations before api starts)
 #   api       — donnarec-api Go backend
 #
 # Usage:
-#   1. Copy .env.example to .env and fill in DB_PASSWORD and DONAREC_KEK
-#   2. docker compose up -d
+#   1. Copy .env.example to .env and fill in DB_PASSWORD, KC_ADMIN_PASSWORD,
+#      DONAREC_KEK (openssl rand -hex 32), and OIDC_ISSUER
+#   2. docker compose up -d --wait
+#      Migrations run automatically via the migrate service before api starts.
+#      No manual 'make migrate-up' required.
 #   3. Import Keycloak realm: keycloak/realm-donnarec.json (auto-imported on first start)
 #   4. Run: bash ../scripts/seed-admin.sh  (creates first admin user)
 #
@@ -95,6 +99,32 @@ services:
     restart: unless-stopped
 
   # ----------------------------------------------------------------
+  # migrate — golang-migrate init-service (GAP 1)
+  #
+  # Runs all pending DB migrations before the api service starts.
+  # Uses the official migrate/migrate image (pinned tag matches Makefile v4.19.1).
+  # This is an init-container pattern: it runs once, exits 0 on success, and
+  # api depends_on it with condition: service_completed_successfully.
+  # golang-migrate is idempotent via schema_migrations — up on an already-migrated
+  # DB is a no-op (exit 0), so repeated `docker compose up` on the same volume is safe.
+  # ----------------------------------------------------------------
+  migrate:
+    image: migrate/migrate:v4.19.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://${DB_USER:-donnarec}:${DB_PASSWORD}@postgres:5432/donnarec_app?sslmode=disable",
+        "up"
+      ]
+    # No restart policy — this is an init-service that must exit after completing.
+    # restart: unless-stopped would cause a restart loop after exit 0.
+
+  # ----------------------------------------------------------------
   # donnarec-api — Go backend
   # ----------------------------------------------------------------
   api:
@@ -118,6 +148,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/healthz || exit 1"]
       interval: 15s
