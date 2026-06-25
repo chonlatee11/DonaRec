@@ -1,0 +1,28 @@
+meta {
+  name: Create User - no token 401
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{apiUrl}}/api/admin/users
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "email": "anon@hospital.th",
+    "display_name": "No Auth",
+    "keycloak_subject": "kc-sub-anon",
+    "roles": ["maker"]
+  }
+}
+
+assert {
+  res.status: eq 401
+}
+
+docs {
+  ไม่มี Authorization header → RequireAuth ตอบ 401 ก่อนถึง RBAC/handler
+}

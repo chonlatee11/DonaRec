@@ -1,0 +1,38 @@
+meta {
+  name: Get Checker Token
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token
+  body: formUrlEncoded
+  auth: none
+}
+
+headers {
+  Host: {{issuerHost}}
+}
+
+body:form-urlencoded {
+  grant_type: password
+  client_id: {{testClient}}
+  username: {{checkerUser}}
+  password: {{checkerPass}}
+  scope: openid
+}
+
+assert {
+  res.status: eq 200
+  res.body.access_token: isDefined
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setVar("checkerToken", res.getBody().access_token);
+  }
+}
+
+docs {
+  ดึง access token ของ checker-test (role checker) เก็บไว้ในตัวแปร checkerToken
+}
