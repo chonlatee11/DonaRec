@@ -1,0 +1,39 @@
+meta {
+  name: Get Admin Token
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token
+  body: formUrlEncoded
+  auth: none
+}
+
+headers {
+  Host: {{issuerHost}}
+}
+
+body:form-urlencoded {
+  grant_type: password
+  client_id: {{testClient}}
+  username: {{adminUser}}
+  password: {{adminPass}}
+  scope: openid
+}
+
+assert {
+  res.status: eq 200
+  res.body.access_token: isDefined
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setVar("adminToken", res.getBody().access_token);
+  }
+}
+
+docs {
+  ดึง access token ของ admin-test (role admin) ผ่าน password grant แล้วเก็บไว้ในตัวแปร adminToken
+  token มี aud=donnarec-backend จาก audience mapper ที่ setup-test-users.sh ตั้งไว้
+}

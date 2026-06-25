@@ -1,0 +1,9 @@
+{
+  "version": "1",
+  "name": "DonaRec",
+  "type": "collection",
+  "ignore": [
+    "node_modules",
+    ".git"
+  ]
+}

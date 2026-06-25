@@ -1,0 +1,30 @@
+meta {
+  name: Create User - missing fields 422
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{apiUrl}}/api/admin/users
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+body:json {
+  {
+    "email": "valid@hospital.th"
+  }
+}
+
+assert {
+  res.status: eq 422
+}
+
+docs {
+  JSON ถูกรูปแต่ขาด field ที่ required (display_name/keycloak_subject/roles)
+  → validator.Struct ล้ม → 422 validation_failed
+}

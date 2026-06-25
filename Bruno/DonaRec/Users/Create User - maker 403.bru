@@ -1,0 +1,32 @@
+meta {
+  name: Create User - maker 403
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{apiUrl}}/api/admin/users
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{makerToken}}
+}
+
+body:json {
+  {
+    "email": "blocked-maker@hospital.th",
+    "display_name": "Should Not Be Created",
+    "keycloak_subject": "kc-sub-maker-blocked",
+    "roles": ["maker"]
+  }
+}
+
+assert {
+  res.status: eq 403
+}
+
+docs {
+  RBAC: token role=maker ถูก RequireRoles(admin) บล็อกที่ router → 403 (ไม่ถึง handler)
+}

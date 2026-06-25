@@ -1,0 +1,167 @@
+# docker-compose.yml — Local development stack for donnarec-api
+#
+# Services:
+#   postgres  — PostgreSQL 17 (shared for both app and Keycloak databases)
+#   keycloak  — Self-hosted Keycloak 26.6.3 (OIDC identity provider)
+#   migrate   — golang-migrate init-service (runs DB migrations before api starts)
+#   api       — donnarec-api Go backend
+#
+# Usage:
+#   1. Copy .env.example to .env and fill in DB_PASSWORD, KC_ADMIN_PASSWORD,
+#      DONAREC_KEK (openssl rand -hex 32), and OIDC_ISSUER
+#   2. docker compose up -d --wait
+#      Migrations run automatically via the migrate service before api starts.
+#      No manual 'make migrate-up' required.
+#   3. Import Keycloak realm: keycloak/realm-donnarec.json (auto-imported on first start)
+#   4. Run: bash ../scripts/seed-admin.sh  (creates first admin user)
+#
+# After startup:
+#   API:         http://localhost:8000/healthz
+#   Keycloak:    http://localhost:8080 (admin console)
+
+x-common-env: &postgres-common
+  POSTGRES_USER: ${DB_USER:-donnarec}
+  POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required — copy .env.example to .env}
+
+services:
+  # ----------------------------------------------------------------
+  # PostgreSQL 17 — primary data store for both app and Keycloak
+  # ----------------------------------------------------------------
+  postgres:
+    image: postgres:17
+    environment:
+      <<: *postgres-common
+      POSTGRES_DB: donnarec_app
+      # Create additional database for Keycloak on first startup
+      POSTGRES_MULTIPLE_DATABASES: donnarec_app,donnarec_keycloak
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../scripts/create-multiple-dbs.sh:/docker-entrypoint-initdb.d/create-multiple-dbs.sh:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-donnarec} -d donnarec_app"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------
+  # Keycloak 26.6.3 — OIDC identity provider (self-hosted)
+  #
+  # IMPORTANT: uses `start` (production mode), NOT `start-dev` (Pitfall 4).
+  # start-dev uses an in-memory H2 database; data is lost on restart.
+  # Production mode uses our PostgreSQL database for persistence.
+  # ----------------------------------------------------------------
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6.3
+    command: start --import-realm
+    environment:
+      # Database backend for Keycloak (persistence — not start-dev ephemeral)
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/donnarec_keycloak
+      KC_DB_USERNAME: ${DB_USER:-donnarec}
+      KC_DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+
+      # Hostname config (Keycloak 26):
+      # KC_HOSTNAME_URL sets the issuer URL returned in OIDC discovery.
+      # Using the internal Docker hostname so the Go API can reach Keycloak
+      # and the issuer URL in the discovery document matches what go-oidc
+      # sends for JWKS discovery.  KC_HOSTNAME_STRICT=false allows browser
+      # access via localhost:8080 for admin console without issuer mismatch.
+      KC_HOSTNAME_URL: "http://keycloak:8080"
+      KC_HOSTNAME_ADMIN_URL: "http://localhost:8080"
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+
+      # Keycloak admin credentials (for initial setup only)
+      KEYCLOAK_ADMIN: ${KC_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD:?KC_ADMIN_PASSWORD is required}
+
+      # Logging level
+      KC_LOG_LEVEL: INFO
+
+      # Enable health endpoint on management port 9000 (required for /health/ready probe)
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ../keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------
+  # migrate — golang-migrate init-service (GAP 1)
+  #
+  # Runs all pending DB migrations before the api service starts.
+  # Uses the official migrate/migrate image (pinned tag matches Makefile v4.19.1).
+  # This is an init-container pattern: it runs once, exits 0 on success, and
+  # api depends_on it with condition: service_completed_successfully.
+  # golang-migrate is idempotent via schema_migrations — up on an already-migrated
+  # DB is a no-op (exit 0), so repeated `docker compose up` on the same volume is safe.
+  # ----------------------------------------------------------------
+  migrate:
+    image: migrate/migrate:v4.19.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      [
+        "-path", "/migrations",
+        "-database", "postgres://${DB_USER:-donnarec}:${DB_PASSWORD:?DB_PASSWORD is required}@postgres:5432/donnarec_app?sslmode=disable",
+        "up"
+      ]
+    # No restart policy — this is an init-service that must exit after completing.
+    # restart: unless-stopped would cause a restart loop after exit 0.
+
+  # ----------------------------------------------------------------
+  # donnarec-api — Go backend
+  # ----------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgres://${DB_USER:-donnarec}:${DB_PASSWORD:?}@postgres:5432/donnarec_app?sslmode=disable
+      KEYCLOAK_BASE_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-donnarec}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-donnarec-backend}
+      # OIDC_ISSUER: expected "iss" claim in tokens (GAP 2).
+      # Tokens fetched via browser/localhost carry iss=http://localhost:8080/realms/donnarec.
+      # KEYCLOAK_BASE_URL stays as the internal discovery URL (keycloak:8080).
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8080/realms/donnarec}
+      DONAREC_KEK: "${DONAREC_KEK:?DONAREC_KEK is required — generate with: openssl rand -hex 32}"
+      RETENTION_DONATION_DAYS: ${RETENTION_DONATION_DAYS:-1825}
+      RETENTION_AUDIT_DAYS: ${RETENTION_AUDIT_DAYS:-3650}
+      RETENTION_DEFAULT_LEGAL_BASIS: ${RETENTION_DEFAULT_LEGAL_BASIS:-tax_obligation}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local

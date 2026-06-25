@@ -1,0 +1,31 @@
+meta {
+  name: Create User - invalid body 400
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{apiUrl}}/api/admin/users
+  body: text
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+body:text {
+  { "email": "broken", }
+}
+
+assert {
+  res.status: eq 400
+}
+
+docs {
+  JSON ผิดรูป (trailing comma) → ShouldBindJSON ล้ม → 400 invalid_request_body
+}

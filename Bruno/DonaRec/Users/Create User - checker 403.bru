@@ -1,0 +1,32 @@
+meta {
+  name: Create User - checker 403
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{apiUrl}}/api/admin/users
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{checkerToken}}
+}
+
+body:json {
+  {
+    "email": "blocked-checker@hospital.th",
+    "display_name": "Should Not Be Created",
+    "keycloak_subject": "kc-sub-checker-blocked",
+    "roles": ["maker"]
+  }
+}
+
+assert {
+  res.status: eq 403
+}
+
+docs {
+  RBAC: token role=checker ถูก RequireRoles(admin) บล็อก → 403
+}

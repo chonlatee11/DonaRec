@@ -1,0 +1,38 @@
+meta {
+  name: Get Maker Token
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{keycloakUrl}}/realms/{{realm}}/protocol/openid-connect/token
+  body: formUrlEncoded
+  auth: none
+}
+
+headers {
+  Host: {{issuerHost}}
+}
+
+body:form-urlencoded {
+  grant_type: password
+  client_id: {{testClient}}
+  username: {{makerUser}}
+  password: {{makerPass}}
+  scope: openid
+}
+
+assert {
+  res.status: eq 200
+  res.body.access_token: isDefined
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    bru.setVar("makerToken", res.getBody().access_token);
+  }
+}
+
+docs {
+  ดึง access token ของ maker-test (role maker) เก็บไว้ในตัวแปร makerToken
+}

@@ -1,0 +1,40 @@
+meta {
+  name: Create User - admin 201
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{apiUrl}}/api/admin/users
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+body:json {
+  {
+    "email": "{{newEmail}}",
+    "display_name": "New Test User",
+    "keycloak_subject": "{{newSub}}",
+    "roles": ["maker"]
+  }
+}
+
+script:pre-request {
+  const n = Date.now();
+  bru.setVar("newEmail", "newuser-" + n + "@hospital.th");
+  bru.setVar("newSub", "kc-sub-" + n);
+}
+
+assert {
+  res.status: eq 201
+  res.body.data.email: eq {{newEmail}}
+}
+
+docs {
+  HAPPY PATH: admin สร้าง user สำเร็จ → 201
+  email/keycloak_subject สุ่มต่อรอบ (pre-request) กัน unique-constraint conflict
+}

@@ -1,0 +1,103 @@
+{
+  "realm": "donnarec",
+  "enabled": true,
+  "displayName": "DonaRec — ระบบออกใบเสร็จบริจาค",
+
+  "loginTheme": "keycloak",
+  "accountTheme": "keycloak.v2",
+  "adminTheme": "keycloak.v2",
+  "emailTheme": "keycloak",
+
+  "internationalizationEnabled": true,
+  "supportedLocales": ["th", "en"],
+  "defaultLocale": "th",
+
+  "passwordPolicy": "length(8) and upperCase(1) and digits(1) and notUsername(undefined)",
+
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "waitIncrementSeconds": 60,
+  "minimumQuickLoginWaitSeconds": 60,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 28800,
+  "offlineSessionIdleTimeout": 2592000,
+  "accessCodeLifespan": 60,
+
+  "sslRequired": "external",
+
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": true,
+  "rememberMe": false,
+  "verifyEmail": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+
+  "roles": {
+    "realm": [
+      {
+        "name": "maker",
+        "description": "เจ้าหน้าที่ป้อนข้อมูลและสร้างใบเสร็จ"
+      },
+      {
+        "name": "checker",
+        "description": "ผู้อนุมัติใบเสร็จ (ห้ามอนุมัติใบที่ตนเองสร้าง — SoD)"
+      },
+      {
+        "name": "admin",
+        "description": "ผู้ดูแลระบบ สร้าง/จัดการบัญชีผู้ใช้"
+      }
+    ]
+  },
+
+  "clients": [
+    {
+      "clientId": "donnarec-backend",
+      "name": "DonaRec Backend API",
+      "description": "Go API backend — validates JWTs issued to this client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "bearerOnly": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "300"
+      }
+    },
+    {
+      "clientId": "donnarec-frontend",
+      "name": "DonaRec Front-end",
+      "description": "Next.js back-office UI — public client (no client secret)",
+      "enabled": true,
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    }
+  ],
+
+  "defaultDefaultClientScopes": ["web-origins", "acr", "profile", "roles", "email"],
+  "defaultOptionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"],
+
+  "eventsEnabled": true,
+  "eventsExpiration": 604800,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true
+}

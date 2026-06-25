@@ -1,0 +1,25 @@
+meta {
+  name: Me - admin
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{apiUrl}}/api/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{adminToken}}
+}
+
+assert {
+  res.status: eq 200
+  res.body.roles: contains admin
+}
+
+docs {
+  GET /api/me อ่าน sub/email/roles จาก JWT claims (auth smoke test)
+  ยืนยันว่า token ผ่าน OIDC verify (iss+aud+signature) และ realm_access.roles มี admin
+}
