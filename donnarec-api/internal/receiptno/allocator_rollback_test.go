@@ -59,9 +59,10 @@ func TestAllocator_Rollback(t *testing.T) {
 	queries := db.New(pool)
 	alloc := receiptno.NewAllocator(queries)
 
-	// FY 2576: unused fiscal year — guaranteed clean counter (no prior allocations).
-	issueDate := bkkTime(2032, 5, 20, 10, 0, 0) // May 20 2032 BKK → FY 2576
-	const expectedFY = 2576
+	// FY 2575: unused fiscal year — guaranteed clean counter (no prior allocations).
+	// May (month 5) is Jan–Sep → fiscal year = CE year + 543 = 2032 + 543 = 2575.
+	issueDate := bkkTime(2032, 5, 20, 10, 0, 0) // May 20 2032 BKK → FY 2575
+	const expectedFY = 2575
 
 	// Step 1: Allocate then rollback.
 	var rolledBackNo int
@@ -151,9 +152,10 @@ func TestAllocator_RollbackMixedSequence(t *testing.T) {
 	queries := db.New(pool)
 	alloc := receiptno.NewAllocator(queries)
 
-	// FY 2577: unused fiscal year to isolate from other tests.
-	issueDate := bkkTime(2033, 2, 10, 9, 0, 0) // Feb 10 2033 BKK → FY 2577
-	const expectedFY = 2577
+	// FY 2576: unused fiscal year to isolate from other tests.
+	// Feb (month 2) is Jan–Sep → fiscal year = CE year + 543 = 2033 + 543 = 2576.
+	issueDate := bkkTime(2033, 2, 10, 9, 0, 0) // Feb 10 2033 BKK → FY 2576
+	const expectedFY = 2576
 	const N = 30
 	const rollbackEvery = 3 // rollback goroutine index i when i%rollbackEvery == 0
 
@@ -162,45 +164,22 @@ func TestAllocator_RollbackMixedSequence(t *testing.T) {
 	var mu sync.Mutex
 	committed := make([]int, 0, N)
 
+	// errgroup.WithContext: if any goroutine returns a non-nil error that is not the
+	// deliberate rollback sentinel, gctx2 is cancelled and Wait() returns that error.
+	// Deliberate rollback errors are swallowed by each goroutine so they do not
+	// cancel gctx2 prematurely (which would abort other in-flight allocations).
 	g, gctx := errgroup.WithContext(ctx)
 	for i := 0; i < N; i++ {
 		idx := i
 		g.Go(func() error {
-			return dbhelpers.WithTx(gctx, pool, func(tx pgx.Tx) error {
-				r, err := alloc.Allocate(gctx, tx, issueDate)
-				if err != nil {
-					return err
-				}
-				if idx%rollbackEvery == 0 {
-					// Deliberate rollback: counter + ledger INSERT both rolled back.
-					return errDeliberateRollback
-				}
-				mu.Lock()
-				committed = append(committed, r.RunningNo)
-				mu.Unlock()
-				return nil
-			})
-		})
-	}
-
-	// errgroup returns the first non-nil error. Since deliberate rollback errors are
-	// returned by the closure but NOT re-returned by the goroutine (the goroutine swallows
-	// sentinel errors via the logic below), Wait() returns nil on full success.
-	// NOTE: errgroup propagates ALL errors, so we need a wrapper that swallows sentinels.
-	//
-	// Re-launch with sentinel-swallowing wrapper to prevent errgroup from canceling gctx
-	// early on the first deliberate rollback.
-	committed = committed[:0]
-	g2, gctx2 := errgroup.WithContext(ctx)
-	for i := 0; i < N; i++ {
-		idx := i
-		g2.Go(func() error {
-			err := dbhelpers.WithTx(gctx2, pool, func(tx pgx.Tx) error {
-				r, allocErr := alloc.Allocate(gctx2, tx, issueDate)
+			err := dbhelpers.WithTx(gctx, pool, func(tx pgx.Tx) error {
+				r, allocErr := alloc.Allocate(gctx, tx, issueDate)
 				if allocErr != nil {
 					return allocErr
 				}
 				if idx%rollbackEvery == 0 {
+					// Deliberate rollback: counter UPDATE + ledger INSERT both rolled back.
+					// The freed running_no will be reused by a subsequent commit → no gap.
 					return errDeliberateRollback
 				}
 				mu.Lock()
@@ -216,7 +195,7 @@ func TestAllocator_RollbackMixedSequence(t *testing.T) {
 		})
 	}
 
-	require.NoError(t, g2.Wait(), "all non-rollback goroutines must succeed")
+	require.NoError(t, g.Wait(), "all non-rollback goroutines must succeed")
 
 	committedCount := len(committed)
 	sort.Ints(committed)
