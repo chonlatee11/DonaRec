@@ -1,8 +1,8 @@
 ---
 phase: 01-foundation-db-auth-rbac-audit-retention-model
-reviewed: 2026-06-24T00:00:00Z
+reviewed: 2026-06-25T20:00:00Z
 depth: standard
-files_reviewed: 28
+files_reviewed: 34
 files_reviewed_list:
   - donnarec-api/cmd/server/main.go
   - donnarec-api/internal/audit/middleware.go
@@ -32,20 +32,20 @@ files_reviewed_list:
   - donnarec-api/.env.example
   - donnarec-api/internal/db/queries/audit.sql
   - donnarec-api/internal/db/queries/users.sql
+  - donnarec-api/internal/auth/middleware_integration_test.go
 findings:
   critical: 3
-  blocker: 3
-  warning: 6
-  info: 5
-  total: 14
+  warning: 9
+  info: 7
+  total: 19
 status: issues_found
 ---
 
 # Phase 1: Code Review Report
 
-**Reviewed:** 2026-06-24
+**Reviewed:** 2026-06-25 (01-05 gap-closure pass added; earlier findings retained)
 **Depth:** standard
-**Files Reviewed:** 28
+**Files Reviewed:** 34 (28 original + 6 from 01-05 gap-closure)
 **Status:** issues_found
 
 ## Summary
@@ -57,14 +57,18 @@ CLAUDE.md spec. The audit hash-chain concurrency design (advisory xact lock inst
 FOR-UPDATE-on-empty-table) is correct and well-reasoned, and the immutability/concurrency
 tests are meaningful (not coverage theater).
 
-However, the review surfaced three security blockers and several correctness/maintainability
-issues. The most serious is the **complete absence of any `.gitignore`** combined with a
-working-tree `.env` containing credentials — secrets will be committed the moment anyone runs
-`git add .`. There is also a **shell SQL-injection vector in `seed-admin.sh`**, and the audit
-middleware's own-transaction path **violates the project's stated atomicity invariant** (audit
-must be written in the same transaction as the data mutation). The auth middleware verifies
-tokens with the **ID-token verifier** while a `bearerOnly` Keycloak backend receives
-**access tokens**, which is a likely runtime/audience mismatch that needs verification.
+The 01-05 gap-closure changes correctly add the migrate init-service to docker-compose.yml
+and make the OIDC expected issuer configurable via `OIDC_ISSUER` env using
+`oidc.InsecureIssuerURLContext`. Security-critical checks confirm: no `SkipIssuerCheck`,
+`SkipClientIDCheck`, or `SkipExpiryCheck` flags are present; signature (JWKS), audience, and
+expiry enforcement are intact. No new critical/blocker security issues were introduced by
+01-05.
+
+New issues surfaced in 01-05 scope: two warnings and two info items. The most operationally
+significant is that the migrate service command leaves `DB_PASSWORD` without a required-guard
+(`${DB_PASSWORD}` instead of `${DB_PASSWORD:?}`) inconsistent with all other services.
+
+Previously found blockers (CR-01 through CR-03) from the 2026-06-24 review are retained unchanged.
 
 ## Critical Issues
 
@@ -192,6 +196,8 @@ const p = "bearer "
 if len(h) < len(p) || !strings.EqualFold(h[:len(p)], p) { return "" }
 return strings.TrimSpace(h[len(p):])
 ```
+Note: The 01-05 revision of `middleware.go` already implements this fix (lines 139-144). This
+warning applies only if an older version of the file is used.
 
 ### WR-04 (WARNING): `MaskNationalID` non-13-length branch can leak more than intended; format comment is self-contradictory
 
@@ -233,6 +239,79 @@ opens a tamper window if `down` is ever run against a populated prod DB. The hea
 explicitly-opt-in teardown), and revoke the audit grants before re-granting nothing — do not
 re-enable UPDATE/DELETE just to drop. At minimum, document that 000002 down must never run in prod.
 
+### WR-07 (WARNING): migrate service `DB_PASSWORD` has no required-guard — silent empty password allowed
+
+**File:** `donnarec-api/docker-compose.yml:121`
+**Issue:** The migrate service command embeds the database connection string directly in the
+`command` array:
+```yaml
+"-database", "postgres://${DB_USER:-donnarec}:${DB_PASSWORD}@postgres:5432/donnarec_app?sslmode=disable",
+```
+`${DB_PASSWORD}` has no `:?` error-guard, so if `DB_PASSWORD` is unset or empty, Docker Compose
+silently substitutes an empty string. The migration will attempt a connection with an empty
+password. By contrast, all other services that use `DB_PASSWORD` include the required guard:
+- `postgres` line 24: `${DB_PASSWORD:?DB_PASSWORD is required ...}`
+- `keycloak` line 64: `${DB_PASSWORD:?DB_PASSWORD is required}`
+- `api` line 136: `${DB_PASSWORD:?}`
+
+This inconsistency means a misconfigured `.env` that is missing `DB_PASSWORD` will silently fail
+in the migrate service rather than producing the clear compose-parse error that the other services
+generate.
+**Fix:** Add the required guard consistently:
+```yaml
+"-database", "postgres://${DB_USER:-donnarec}:${DB_PASSWORD:?DB_PASSWORD is required}@postgres:5432/donnarec_app?sslmode=disable",
+```
+
+### WR-08 (WARNING): `DB_PASSWORD` in migrate command not URL-encoded — connection fails with special characters
+
+**File:** `donnarec-api/docker-compose.yml:121`
+**Issue:** The migrate `command` array builds a Postgres connection DSN by direct string
+interpolation of `${DB_PASSWORD}`. If `DB_PASSWORD` contains URL-special characters (`@`, `/`,
+`?`, `#`, `:`), the resulting DSN is malformed and the connection will fail with a parse error
+rather than an auth error. The `api` service avoids this because `pgxpool.New` accepts a DSN
+string and `pgx` is lenient, but `golang-migrate`'s DSN parser is strict about URL structure.
+The `postgres` and `keycloak` services are not affected because they pass the password via
+separate env vars, not embedded in a URL.
+**Fix:** Use a URL-encoded password via `$()` shell substitution, or switch the migrate service to
+use the `PGPASSWORD` env var form with `postgresql://` DSN that only URL-encodes by convention.
+A simpler workaround is to set a separate `MIGRATE_DATABASE_URL` variable in `.env` with the
+password already URL-percent-encoded and reference it in compose:
+```yaml
+"-database", "${MIGRATE_DATABASE_URL:?MIGRATE_DATABASE_URL is required}",
+```
+Document in `.env.example` that special characters in `DB_PASSWORD` require URL-encoding in
+`MIGRATE_DATABASE_URL`.
+
+### WR-09 (WARNING): OIDC_ISSUER / KC_HOSTNAME_URL dependency on Keycloak 26 non-strict hostname behavior is undocumented
+
+**File:** `donnarec-api/docker-compose.yml:72-74, 143`
+**Issue:** The working OIDC flow depends on a Keycloak 26-specific behavior:
+`KC_HOSTNAME_STRICT=false` causes Keycloak to reflect the request's `Host` header as the `iss`
+claim in issued tokens, instead of using `KC_HOSTNAME_URL` (`http://keycloak:8080`). This is why
+browser-requested tokens carry `iss=http://localhost:8080/realms/donnarec` and match the
+`OIDC_ISSUER` default. The compose comment on lines 67-71 does not explain this mechanism.
+
+The risk is:
+1. **Version drift**: upgrading to a Keycloak version that changes `KC_HOSTNAME_STRICT=false`
+   semantics silently breaks all token verification (all requests return 401).
+2. **Config drift**: setting `KC_HOSTNAME_STRICT=true` (a reasonable hardening step) silently
+   locks out all users because tokens would then carry `iss=http://keycloak:8080/realms/donnarec`
+   which no longer matches `OIDC_ISSUER=http://localhost:8080/...`.
+3. **Production use**: in production `KC_HOSTNAME_STRICT=false` should be `true`; at that point
+   `OIDC_ISSUER` must equal `KC_HOSTNAME_URL` (the canonical domain), not the browser-access URL.
+   The current `.env.example` value `http://localhost:8080/realms/donnarec` would be incorrect.
+
+**Fix:** Add a comment in docker-compose.yml explaining the dependency:
+```yaml
+# KC_HOSTNAME_STRICT=false: in Keycloak 26, when strict mode is off, the issuer
+# in issued tokens follows the request's Host header. This means browser requests
+# via localhost:8080 produce tokens with iss=http://localhost:8080/realms/donnarec,
+# matching OIDC_ISSUER. For production, set KC_HOSTNAME_STRICT=true and align
+# KC_HOSTNAME_URL and OIDC_ISSUER to the same canonical public domain.
+```
+Also add a production note in `.env.example` under `OIDC_ISSUER` warning that when
+`KC_HOSTNAME_STRICT=true` (production), `OIDC_ISSUER` must equal the `KC_HOSTNAME_URL` value.
+
 ## Info
 
 ### IN-01 (INFO): `created_at` written twice on user insert (query `now()` + column default)
@@ -266,7 +345,7 @@ than heuristic singularization (more robust for an audit label that auditors wil
 
 ### IN-04 (INFO): `.env.example` ships `sslmode=disable` for a PDPA/TLS-mandated system
 
-**File:** `donnarec-api/.env.example:14`, `docker-compose.yml:106`
+**File:** `donnarec-api/.env.example:14`, `docker-compose.yml:136`
 **Issue:** CLAUDE.md mandates TLS `verify-full` to Postgres as a baseline. The example and compose
 default to `sslmode=disable`. Acceptable for local Docker, but the example is the template most
 people copy; shipping `disable` invites it into staging/prod.
@@ -284,8 +363,36 @@ assertion would harden the most important invariant in the system.
 **Fix:** Add a SQL self-join asserting `cur.prev_hash = prev.row_hash` for consecutive ids, as an
 oracle independent of the Go hash function.
 
+### IN-06 (INFO): Dead code in middleware_integration_test.go — unused context variable
+
+**File:** `donnarec-api/internal/auth/middleware_integration_test.go:146-147`
+**Issue:** `TestNewAuthMiddleware_InvalidProvider` contains:
+```go
+ctx := context.Background()
+_ = ctx
+```
+The variable is created and immediately discarded. It appears to be a remnant of the signature
+change in 01-05 where a context parameter was removed from `NewAuthMiddleware`. The `context`
+import on line 4 exists solely for this dead code.
+**Fix:** Remove lines 146-147 and the `"context"` import. Run `go vet` / `golangci-lint` to
+catch this class of issue before review.
+
+### IN-07 (INFO): Test "expired token returns 401" does not test expiry — tests malformed token
+
+**File:** `donnarec-api/internal/auth/middleware_integration_test.go:74-83`
+**Issue:** The test is named `"expired token returns 401"` but its implementation sends
+`"Bearer not.a.real.jwt.token"` — a structurally invalid JWT. The test comment acknowledges:
+"We cannot easily create a truly expired token via the test server without time mocking." The
+token expiry code path (go-oidc's expiry check) is therefore untested. In a PDPA system where
+session lifetime is a compliance control, an untested expiry check is a gap.
+**Fix:** Either rename the test to `"malformed token returns 401"` (accurate description) and
+add a separate expiry test using time-injection (e.g., mint a token with `exp = time.Now().Unix() - 1`
+and ensure the verifier rejects it), or use a test clock via the `oidc.Config.Now` field if
+available.
+
 ---
 
-_Reviewed: 2026-06-24_
+_Original review: 2026-06-24_
+_01-05 gap-closure pass: 2026-06-25_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
