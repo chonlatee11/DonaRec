@@ -112,6 +112,31 @@ type AuditLog struct {
 	RowHash    string             `db:"row_hash" json:"row_hash"`
 }
 
+type ReceiptNumber struct {
+	ID          int64              `db:"id" json:"id"`
+	FiscalYear  int32              `db:"fiscal_year" json:"fiscal_year"`
+	RunningNo   int32              `db:"running_no" json:"running_no"`
+	Formatted   string             `db:"formatted" json:"formatted"`
+	AllocatedAt pgtype.Timestamptz `db:"allocated_at" json:"allocated_at"`
+}
+
+type ReceiptNumberConfig struct {
+	ID               bool               `db:"id" json:"id"`
+	Separator        string             `db:"separator" json:"separator"`
+	RunningNoPadding int32              `db:"running_no_padding" json:"running_no_padding"`
+	YearFormat       string             `db:"year_format" json:"year_format"`
+	Prefix           string             `db:"prefix" json:"prefix"`
+	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	UpdatedBy        pgtype.UUID        `db:"updated_by" json:"updated_by"`
+}
+
+type ReceiptNumberCounter struct {
+	FiscalYear    int32              `db:"fiscal_year" json:"fiscal_year"`
+	LastRunningNo int32              `db:"last_running_no" json:"last_running_no"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
 type RetentionConfig struct {
 	ID                int32              `db:"id" json:"id"`
 	EntityType        string             `db:"entity_type" json:"entity_type"`

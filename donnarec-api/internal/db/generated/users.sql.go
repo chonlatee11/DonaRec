@@ -56,6 +56,9 @@ type CreateUserParams struct {
 // internal/db/queries/users.sql
 // sqlc-annotated queries for the users and user_roles tables.
 // All queries use explicit column lists (no bare * in INSERT).
+// created_at/updated_at are intentionally omitted: the columns carry
+// DEFAULT now(), so we rely on the single source of truth in the schema
+// rather than duplicating now() here (IN-01).
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.DisplayName, arg.KeycloakSubject)
 	var i User

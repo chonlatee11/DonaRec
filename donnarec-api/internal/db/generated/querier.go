@@ -15,18 +15,46 @@ type Querier interface {
 	// internal/db/queries/users.sql
 	// sqlc-annotated queries for the users and user_roles tables.
 	// All queries use explicit column lists (no bare * in INSERT).
+	// created_at/updated_at are intentionally omitted: the columns carry
+	// DEFAULT now(), so we rely on the single source of truth in the schema
+	// rather than duplicating now() here (IN-01).
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeactivateUser(ctx context.Context, id pgtype.UUID) (DeactivateUserRow, error)
+	// audit.sql — sqlc queries for the audit_log table
+	// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
+	// Parameterized queries only — no string concatenation (T-1-tamper-01).
+	// NOTE (WR-05): The previous InsertAuditLog :one query was removed. The audit
+	// service writes rows via a raw tx.Exec INSERT in AppendAuditEntryTx that also
+	// sets the reserved `id` and captured `created_at` explicitly (both feed the
+	// hash-chain). That sqlc query omitted id/created_at and was never used, so
+	// keeping two divergent insert definitions for the immutable audit table was a
+	// maintenance trap. There is now exactly one insert path (the raw exec).
 	// Fetches the most recent audit row's id and row_hash, locking it with FOR UPDATE.
 	// This serializes concurrent hash-chain appends: the next INSERT cannot proceed
 	// until the current transaction releases this lock (Pitfall 2 mitigation, D-17).
 	// Returns pgx.ErrNoRows if audit_log is empty (caller sets prevHash = "GENESIS").
 	GetLastAuditRowForUpdate(ctx context.Context) (GetLastAuditRowForUpdateRow, error)
+	// Read the number format config row (called within the same allocation transaction — D-32).
+	// Reading inside the tx ensures the allocator sees config consistent with its own snapshot;
+	// the formatted snapshot is frozen in the ledger at this moment (D-42).
+	GetReceiptNumberConfig(ctx context.Context) (GetReceiptNumberConfigRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserByKeycloakSubject(ctx context.Context, keycloakSubject string) (User, error)
-	// audit.sql — sqlc queries for the audit_log table
-	// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
-	// Parameterized queries only — no string concatenation (T-1-tamper-01).
+	// Increment last_running_no by 1 and return the new value.
+	// MUST be called only while holding the FOR UPDATE lock from LockCounterForUpdate.
+	// updated_at is refreshed here so the counter row has an accurate last-modified timestamp.
+	IncrementCounter(ctx context.Context, fiscalYear int32) (int32, error)
+	// Create a counter row for a new fiscal year if one does not exist yet.
+	// ON CONFLICT (fiscal_year) DO NOTHING: safe under concurrent first-allocation of the same
+	// fiscal year — both sessions attempt the INSERT; one wins, one silently skips.
+	// The losing session then proceeds to LockCounterForUpdate (row now exists) and blocks
+	// until the winning session commits, ensuring correct serialization (D-41, Pitfall 1).
+	InitCounterRow(ctx context.Context, fiscalYear int32) error
+	// Record the allocated receipt number in the append-only ledger (D-37, D-42).
+	// allocated_at uses DB-side now() for clock consistency across application instances.
+	// The UNIQUE(fiscal_year, running_no) backstop fires here if a logic bug produces a
+	// duplicate — the constraint is the last line of defense independent of app logic (D-37).
+	InsertReceiptNumberLedger(ctx context.Context, arg InsertReceiptNumberLedgerParams) (ReceiptNumber, error)
 	// Returns all audit rows in ascending id order for chain verification.
 	// Used by VerifyChain to recompute each row_hash and detect tampering.
 	// Admin / internal tool only — no pagination (verification reads entire chain).
@@ -37,6 +65,22 @@ type Querier interface {
 	ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error)
 	ListRolesForUser(ctx context.Context, userID pgtype.UUID) ([]UserRoleEnum, error)
 	ListUsers(ctx context.Context, arg ListUsersParams) ([]User, error)
+	// internal/db/queries/receiptno.sql
+	// sqlc queries for Phase 2: gap-less receipt number allocator
+	// All queries use named @params and explicit column lists (no SELECT * in writes).
+	// Parameterized only — no string concatenation (T-02-03 mitigation).
+	//
+	// Query naming follows Path A: SELECT FOR UPDATE + UPDATE RETURNING (D-36, 02-RESEARCH Q1)
+	// Anti-patterns explicitly absent (T-02-03/T-02-04):
+	//   - NO MAX(running_no) — race-prone "read max+1" pattern
+	//   - NO nextval() / SEQUENCE for running_no — not rollback-safe (CLAUDE.md What NOT to Use)
+	// Lock the counter row for the given fiscal year using SELECT FOR UPDATE.
+	// This serializes concurrent allocations: only one transaction may increment
+	// last_running_no at a time; all others block until the lock holder commits/rolls back.
+	//
+	// Returns pgx.ErrNoRows if no counter row exists yet (first allocation of a new fiscal year).
+	// Caller (allocator.go) must handle ErrNoRows by calling InitCounterRow first (Pitfall 1).
+	LockCounterForUpdate(ctx context.Context, fiscalYear int32) (int32, error)
 }
 
 var _ Querier = (*Queries)(nil)
