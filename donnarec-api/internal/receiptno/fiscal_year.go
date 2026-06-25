@@ -17,29 +17,37 @@
 //	not a runtime error. Missing tzdata is a deployment configuration bug.
 package receiptno
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // bangkokLoc caches the loaded Asia/Bangkok *time.Location.
-// It is populated once by loadBangkok() and is safe for concurrent reads
-// because Go's time.LoadLocation is thread-safe and the result is immutable.
-var bangkokLoc *time.Location
+// It is populated exactly once by loadBangkok() via bangkokOnce and is then
+// safe for concurrent reads because the result is immutable. sync.Once is
+// required because the very first allocation batch after a cold start can call
+// loadBangkok() from many goroutines at once (e.g. concurrent approvals); a
+// plain check-then-set would be a data race on the first concurrent call (CR-01).
+var (
+	bangkokLoc  *time.Location
+	bangkokOnce sync.Once
+)
 
 // loadBangkok returns the Asia/Bangkok *time.Location, panicking if tzdata is
 // unavailable (programming-error guard — deployment configuration bug, not a
 // recoverable runtime error).
 func loadBangkok() *time.Location {
-	if bangkokLoc != nil {
-		return bangkokLoc
-	}
-	loc, err := time.LoadLocation("Asia/Bangkok")
-	if err != nil {
-		// Asia/Bangkok is a standard IANA timezone.
-		// Panic only if the binary/container is missing tzdata (Pitfall 5).
-		// Fix: add 'import _ "time/tzdata"' in main.go, or install tzdata in the container.
-		panic("Asia/Bangkok timezone not available: " + err.Error())
-	}
-	bangkokLoc = loc
-	return loc
+	bangkokOnce.Do(func() {
+		loc, err := time.LoadLocation("Asia/Bangkok")
+		if err != nil {
+			// Asia/Bangkok is a standard IANA timezone.
+			// Panic only if the binary/container is missing tzdata (Pitfall 5).
+			// Fix: add 'import _ "time/tzdata"' in main.go, or install tzdata in the container.
+			panic("Asia/Bangkok timezone not available: " + err.Error())
+		}
+		bangkokLoc = loc
+	})
+	return bangkokLoc
 }
 
 // fiscalYear returns the Thai Buddhist Era fiscal year for the given timestamp.

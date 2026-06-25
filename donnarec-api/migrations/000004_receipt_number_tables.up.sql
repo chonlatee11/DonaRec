@@ -30,7 +30,8 @@ CREATE TABLE receipt_number_config (
     separator           TEXT        NOT NULL DEFAULT '/',        -- D-28: "/"
     running_no_padding  INT         NOT NULL DEFAULT 6           -- D-29: minimum width (not hard cap)
                             CHECK (running_no_padding >= 1),
-    year_format         TEXT        NOT NULL DEFAULT 'BE4',      -- 'BE4' = พ.ศ. 4 digits; 'CE4' = ค.ศ.
+    year_format         TEXT        NOT NULL DEFAULT 'BE4'       -- 'BE4' = พ.ศ. 4 digits; 'CE4' = ค.ศ.
+                            CHECK (year_format IN ('BE4', 'CE4')),  -- reject unknown formats; no silent fallback (IN-02)
     prefix              TEXT        NOT NULL DEFAULT '',         -- D-28: empty prefix
 
     -- Audit fields
@@ -39,8 +40,10 @@ CREATE TABLE receipt_number_config (
 );
 
 -- Seed default config row (D-28: sep '/', pad 6, BE4 year format, empty prefix)
--- ON CONFLICT ensures idempotent re-runs without error.
-INSERT INTO receipt_number_config DEFAULT VALUES;
+-- ON CONFLICT makes the seed idempotent — the single-row id=true PK means a
+-- re-run conflicts on the existing row and is skipped instead of raising (WR-02).
+INSERT INTO receipt_number_config DEFAULT VALUES
+ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================
 -- 2. receipt_number_counters — one row per fiscal year (D-39)
@@ -79,8 +82,8 @@ CREATE TABLE receipt_numbers (
     CONSTRAINT uq_receipt_numbers_fy_no UNIQUE (fiscal_year, running_no)
 );
 
--- Index for Phase 3 queries by fiscal_year + running_no
-CREATE INDEX idx_receipt_numbers_fy_no      ON receipt_numbers (fiscal_year, running_no);
+-- NOTE: no separate index on (fiscal_year, running_no) — the UNIQUE constraint
+-- uq_receipt_numbers_fy_no already creates a B-tree index covering Phase 3 lookups (WR-01).
 
 -- Index for lookup / search by formatted receipt number (Phase 3/5)
 CREATE INDEX idx_receipt_numbers_formatted  ON receipt_numbers (formatted);
@@ -99,7 +102,9 @@ GRANT SELECT, INSERT, UPDATE ON receipt_number_counters  TO donnarec_app;
 GRANT SELECT, INSERT         ON receipt_numbers          TO donnarec_app;
 
 -- Immutable ledger enforcement (T-02-01): no UPDATE or DELETE allowed at DB level.
--- Even a future GRANT ALL will not restore these until explicitly re-granted.
+-- NOTE: this REVOKE is not permanent armor — a later explicit GRANT UPDATE/DELETE
+-- (or GRANT ALL) would restore the privilege. It is defense-in-depth against the
+-- app role's normal grants, not a substitute for not issuing such a grant (WR-03).
 REVOKE UPDATE, DELETE        ON receipt_numbers          FROM donnarec_app;
 
 -- Sequence for surrogate PK — app needs USAGE + SELECT for nextval/currval
