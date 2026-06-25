@@ -54,7 +54,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. A concurrency + rollback test running parallel allocations asserts zero gaps and zero duplicates, and a `UNIQUE(fiscal_year, running_no)` constraint backstops any logic bug.
   5. The allocator is the only code path that can hand out a number, and it never pre-computes or reserves a number on a draft.
 **Plans**: 4 plans
-- [ ] 02-01-PLAN.md — Migration 000004 (counter/ledger/config tables + UNIQUE backstop + REVOKE) and sqlc queries
+- [x] 02-01-PLAN.md — Migration 000004 (counter/ledger/config tables + UNIQUE backstop + REVOKE) and sqlc queries
 - [ ] 02-02-PLAN.md — Pure fiscalYear() boundary helper + formatReceiptNo() (TDD)
 - [ ] 02-03-PLAN.md — Caller-managed gap-less allocator service Allocate(ctx, tx, issueDate) (TDD)
 - [ ] 02-04-PLAN.md — Concurrency + rollback + UNIQUE-backstop proof under -race (★ SC#4/NFR-04)
@@ -134,7 +134,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
-| 2. Gap-less Receipt Numbering Core | 0/4 | Planned | - |
+| 2. Gap-less Receipt Numbering Core | 1/4 | In Progress|  |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 0/TBD | Not started | - |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
