@@ -37,7 +37,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 01-02-PLAN.md — Append-only audit log with SHA-256 hash-chain immutability
 - [x] 01-03-PLAN.md — AES-256-GCM PII envelope encryption + retention/legal-hold model
 - [x] 01-04-PLAN.md — Gap closure: fix docker-compose + Keycloak realm so local stack boots (5 UAT blockers)
-- [ ] 01-05-PLAN.md — Gap closure: migrate init-service for cold-start + configurable OIDC issuer (2 live infra gaps)
+- [x] 01-05-PLAN.md — Gap closure: migrate init-service for cold-start + configurable OIDC issuer (2 live infra gaps)
 
 > Note: NFR-02 (HTTPS/TLS + encryption-at-rest) is split — the encryption boundary and transport are established here; full PII encrypt/decrypt/mask usage lands with the donor module in Phase 3. NFR-03 here covers the retention/legal-basis data model and policy; the donor-facing consent capture lands in Phase 3 (Flow A) and Phase 6 (Flow B).
 > **Stakeholder gate (non-blocking):** confirm exact PDPA retention period (~5 years) and erasure policy with DPO/legal; email provider / KMS / hosting (on-prem vs cloud) decisions. Model `retain_until` generically until confirmed.
@@ -129,7 +129,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 4/4 | Complete   | 2026-06-24 |
+| 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 0/TBD | Not started | - |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 0/TBD | Not started | - |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |

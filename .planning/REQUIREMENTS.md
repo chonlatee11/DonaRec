@@ -10,8 +10,8 @@
 
 ### Foundation & Security (รากฐาน/ความปลอดภัย)
 
-- [ ] **NFR-01**: ผู้ใช้เข้าสู่ระบบด้วยบัญชี, รหัสผ่านถูกเข้ารหัส (hash), และจำกัดสิทธิ์ตามบทบาท RBAC [M]
-- [ ] **FR-34**: Admin จัดการผู้ใช้และสิทธิ์ (RBAC) — Maker / Checker / Admin แยกบทบาท [M]
+- [x] **NFR-01**: ผู้ใช้เข้าสู่ระบบด้วยบัญชี, รหัสผ่านถูกเข้ารหัส (hash), และจำกัดสิทธิ์ตามบทบาท RBAC [M]
+- [x] **FR-34**: Admin จัดการผู้ใช้และสิทธิ์ (RBAC) — Maker / Checker / Admin แยกบทบาท [M]
 - [ ] **NFR-02**: เข้ารหัสข้อมูลขณะส่ง (HTTPS/TLS) และเข้ารหัสข้อมูลอ่อนไหวขณะจัดเก็บ (เลขบัตร ปชช./เลขผู้เสียภาษี) [M]
 - [ ] **NFR-05**: เก็บ audit log ทุกการกระทำสำคัญแบบลบไม่ได้ และเก็บได้ตามระยะเวลาที่กำหนด [M]
 - [ ] **FR-13**: บันทึก audit trail ทุกการกระทำ (ใคร ทำอะไร เมื่อไร) [M]
@@ -125,8 +125,8 @@ Which phases cover which requirements.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| NFR-01 | Phase 1 | Pending |
-| FR-34 | Phase 1 | Pending |
+| NFR-01 | Phase 1 | Complete |
+| FR-34 | Phase 1 | Complete |
 | NFR-02 | Phase 1 | Pending |
 | NFR-05 | Phase 1 | Pending |
 | FR-13 | Phase 1 | Pending |
