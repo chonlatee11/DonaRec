@@ -30,7 +30,7 @@ func TestOIDCMiddleware_Integration(t *testing.T) {
 
 	clientID := "donnarec-backend"
 
-	authMW, err := NewAuthMiddleware(kcServer.Server.URL, "donnarec", clientID, logger)
+	authMW, err := NewAuthMiddleware(kcServer.Server.URL, "donnarec", clientID, kcServer.IssuerURL, logger)
 	require.NoError(t, err, "NewAuthMiddleware must succeed with test OIDC server")
 
 	router := gin.New()
@@ -131,7 +131,7 @@ func TestOIDCProvider(t *testing.T) {
 	kcServer := testutil.NewKeycloakTestServer(t)
 	logger := zap.NewNop()
 
-	_, err := NewAuthMiddleware(kcServer.Server.URL, "donnarec", "donnarec-backend", logger)
+	_, err := NewAuthMiddleware(kcServer.Server.URL, "donnarec", "donnarec-backend", kcServer.IssuerURL, logger)
 	require.NoError(t, err, "NewAuthMiddleware must succeed — OIDC discovery must work")
 }
 
@@ -146,6 +146,6 @@ func TestNewAuthMiddleware_InvalidProvider(t *testing.T) {
 	ctx := context.Background()
 	_ = ctx
 
-	_, err := NewAuthMiddleware("http://localhost:19999", "donnarec", "donnarec-backend", logger)
+	_, err := NewAuthMiddleware("http://localhost:19999", "donnarec", "donnarec-backend", "http://localhost:19999/realms/donnarec", logger)
 	assert.Error(t, err, "unreachable OIDC server must return an error")
 }

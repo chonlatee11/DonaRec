@@ -22,6 +22,16 @@ type Config struct {
 	KeycloakBaseURL  string
 	KeycloakRealm    string
 	KeycloakClientID string
+	// KeycloakIssuer is the expected "iss" claim value in Keycloak-issued JWTs.
+	// It should match the issuer URL as seen by the client (browser/app), not the
+	// internal Docker hostname used for OIDC discovery.
+	//
+	// Dev:  http://localhost:8080/realms/donnarec   (browser fetches token via localhost)
+	// Prod: https://<domain>/realms/donnarec        (public HTTPS domain)
+	//
+	// Loaded from env OIDC_ISSUER. If unset, defaults to <KeycloakBaseURL>/realms/<realm>
+	// which preserves the original behaviour (discovery URL == expected issuer).
+	KeycloakIssuer string
 
 	// Encryption (PDPA — NFR-02)
 	// DonarecKEK is the hex-encoded 32-byte Key Encryption Key for envelope encryption.
@@ -47,12 +57,22 @@ type RetentionConfig struct {
 // Load reads configuration from environment variables and returns a Config.
 // Returns an error if any required variable is missing or invalid.
 func Load() (*Config, error) {
+	keycloakBaseURL := os.Getenv("KEYCLOAK_BASE_URL")
+	keycloakRealm := getEnvStr("KEYCLOAK_REALM", "donnarec")
+
+	// OIDC_ISSUER: expected "iss" claim in tokens. When unset, fall back to the
+	// discovery URL (<KeycloakBaseURL>/realms/<realm>) to preserve original behaviour.
+	// This default is safe: discovery URL == issuer (no host mismatch in that scenario).
+	// Set OIDC_ISSUER explicitly when the public hostname (localhost / prod domain)
+	// differs from the internal Docker discovery hostname (keycloak:8080).
+	oidcIssuerDefault := fmt.Sprintf("%s/realms/%s", keycloakBaseURL, keycloakRealm)
 	cfg := &Config{
 		Port:             getEnvStr("PORT", "8000"),
 		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		KeycloakBaseURL:  os.Getenv("KEYCLOAK_BASE_URL"),
-		KeycloakRealm:    getEnvStr("KEYCLOAK_REALM", "donnarec"),
+		KeycloakBaseURL:  keycloakBaseURL,
+		KeycloakRealm:    keycloakRealm,
 		KeycloakClientID: getEnvStr("KEYCLOAK_CLIENT_ID", "donnarec-backend"),
+		KeycloakIssuer:   getEnvStr("OIDC_ISSUER", oidcIssuerDefault),
 		DonarecKEK:       os.Getenv("DONAREC_KEK"),
 		Retention: RetentionConfig{
 			DonationRetainDays: getEnvInt("RETENTION_DONATION_DAYS", 1825),

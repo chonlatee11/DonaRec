@@ -77,6 +77,7 @@ func main() {
 		cfg.KeycloakBaseURL,
 		cfg.KeycloakRealm,
 		cfg.KeycloakClientID,
+		cfg.KeycloakIssuer,
 		logger,
 	)
 	if err != nil {

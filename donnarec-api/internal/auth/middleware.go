@@ -16,8 +16,13 @@ import (
 // It uses coreos/go-oidc/v3 for OIDC discovery and token verification.
 // The verifier enforces:
 //   - Token signature (via JWKS fetched from Keycloak's discovery endpoint)
-//   - Issuer ("iss") must match the realm URL (auto-enforced by go-oidc)
+//   - Issuer ("iss") must match expectedIssuer (configurable via OIDC_ISSUER env)
 //   - Audience ("aud") must include the configured clientID (Pitfall 3)
+//
+// The discovery URL (keycloakBaseURL/realms/realm) may differ from expectedIssuer.
+// This supports deployments where the Go API reaches Keycloak via an internal Docker
+// hostname (keycloak:8080) for discovery, but tokens carry the public hostname
+// (localhost:8080 or prod domain) in their "iss" claim.
 //
 // Roles are parsed from realm_access.roles — never from a top-level "roles" claim (Pitfall 1).
 type AuthMiddleware struct {
@@ -28,15 +33,35 @@ type AuthMiddleware struct {
 // NewAuthMiddleware initialises an AuthMiddleware by discovering the Keycloak realm's
 // OIDC configuration and fetching its JWKS.
 //
-// keycloakBaseURL — base URL of the Keycloak server, e.g. "http://localhost:8080"
+// keycloakBaseURL — base URL of the Keycloak server for OIDC discovery (internal Docker URL)
+//
+//	e.g. "http://keycloak:8080" (docker-compose) or "http://localhost:8080" (local dev)
+//
 // realm           — Keycloak realm name, e.g. "donnarec"
 // clientID        — backend client ID used as the expected JWT audience (Pitfall 3)
-func NewAuthMiddleware(keycloakBaseURL, realm, clientID string, logger *zap.Logger) (*AuthMiddleware, error) {
-	ctx := context.Background()
-
+// expectedIssuer  — expected "iss" claim in tokens (OIDC_ISSUER env); typically the
+//
+//	public URL seen by the browser, e.g. "http://localhost:8080/realms/donnarec".
+//	When empty, falls back to <keycloakBaseURL>/realms/<realm> (original behaviour).
+func NewAuthMiddleware(keycloakBaseURL, realm, clientID, expectedIssuer string, logger *zap.Logger) (*AuthMiddleware, error) {
 	// providerURL follows the Keycloak realm URL format.
 	// go-oidc will GET {providerURL}/.well-known/openid-configuration to discover JWKS URI.
 	providerURL := fmt.Sprintf("%s/realms/%s", keycloakBaseURL, realm)
+
+	// If no expectedIssuer supplied, fall back to the discovery URL (original behaviour).
+	if expectedIssuer == "" {
+		expectedIssuer = providerURL
+	}
+
+	// InsecureIssuerURLContext instructs go-oidc to accept providerURL as the discovery
+	// endpoint even when its issuer claim in the discovery document differs from providerURL.
+	// The context carries the override; oidc.NewProvider respects it during discovery.
+	// This solves the hostname mismatch (GAP 2): discovery at internal keycloak:8080 while
+	// tokens carry iss=http://localhost:8080/realms/donnarec (public hostname).
+	//
+	// Security note: this does NOT skip signature, audience, or expiry checks.
+	// provider.Verifier enforces all of those via the standard JWKS path.
+	ctx := oidc.InsecureIssuerURLContext(context.Background(), expectedIssuer)
 
 	provider, err := oidc.NewProvider(ctx, providerURL)
 	if err != nil {
@@ -46,6 +71,7 @@ func NewAuthMiddleware(keycloakBaseURL, realm, clientID string, logger *zap.Logg
 	// ClientID in oidc.Config causes the verifier to enforce that the token's
 	// "aud" claim includes this client ID. Without it, any token from the realm
 	// would be accepted — an audience bypass (RESEARCH.md Pitfall 3).
+	// Signature (JWKS), expiry, and aud checks remain in full effect.
 	verifier := provider.Verifier(&oidc.Config{ClientID: clientID})
 
 	return &AuthMiddleware{

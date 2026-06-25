@@ -137,6 +137,10 @@ services:
       KEYCLOAK_BASE_URL: http://keycloak:8080
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-donnarec}
       KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-donnarec-backend}
+      # OIDC_ISSUER: expected "iss" claim in tokens (GAP 2).
+      # Tokens fetched via browser/localhost carry iss=http://localhost:8080/realms/donnarec.
+      # KEYCLOAK_BASE_URL stays as the internal discovery URL (keycloak:8080).
+      OIDC_ISSUER: ${OIDC_ISSUER:-http://localhost:8080/realms/donnarec}
       DONAREC_KEK: "${DONAREC_KEK:?DONAREC_KEK is required — generate with: openssl rand -hex 32}"
       RETENTION_DONATION_DAYS: ${RETENTION_DONATION_DAYS:-1825}
       RETENTION_AUDIT_DAYS: ${RETENTION_AUDIT_DAYS:-3650}
