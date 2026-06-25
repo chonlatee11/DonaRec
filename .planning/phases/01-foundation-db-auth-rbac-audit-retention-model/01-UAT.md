@@ -1,14 +1,15 @@
 ---
-status: diagnosed
+status: resolved
 phase: 01-foundation-db-auth-rbac-audit-retention-model
 source: [01-01-SUMMARY.md, 01-02-SUMMARY.md, 01-03-SUMMARY.md, 01-04-SUMMARY.md]
 started: 2026-06-25T11:38:09Z
-updated: 2026-06-25T12:12:00Z
+updated: 2026-06-25T20:30:00Z
+resolved_by: 01-05-PLAN.md
 ---
 
 ## Current Test
 
-[testing complete — 6/6 pass; 2 infra gaps diagnosed (live), รอ fix plan]
+[testing complete — 6/6 pass; 2 infra gaps fixed by 01-05 และ live human-verified 2026-06-25 (cold-start 5 ตาราง + token localhost ไม่ต้องมี Host workaround → 201)]
 
 ## Tests
 
@@ -45,7 +46,7 @@ issues: 0
 pending: 0
 skipped: 0
 blocked: 0
-open_gaps: 2
+open_gaps: 0
 
 ## Gaps
 
@@ -53,7 +54,7 @@ open_gaps: 2
      แต่ live stack ใช้งานจริงไม่ได้จนกว่าจะแก้ 2 จุดนี้ -->
 
 - truth: "หลัง `docker compose up` (cold start) ระบบใช้งาน end-to-end ได้จริง — endpoint ที่แตะ DB (user-creation, audit) ทำงานได้"
-  status: failed
+  status: resolved
   reason: "พบระหว่าง Test 3: live `donnarec_app` ไม่มีตารางเลย (ไม่มีแม้ schema_migrations). docker-compose ไม่มีขั้น migrate และ main.go ไม่รัน migrate ตอน startup → migration รันเฉพาะใน testcontainers เท่านั้น. POST /api/admin/users + audit ล้มด้วย 'relation \"audit_log\"/\"users\" does not exist' จนกว่าจะ `make migrate-up` เอง"
   severity: major
   test: 1
@@ -66,9 +67,10 @@ open_gaps: 2
   missing:
     - "เพิ่มขั้นรัน migration ใน cold-start path (init container migrate/migrate, หรือ run-on-startup ใน main.go, หรือ document `make migrate-up` ใน compose flow ให้ชัด)"
   debug_session: ""
+  resolution: "01-05 Task 1 (commit f7ac2c7) เพิ่ม migrate init-service (migrate/migrate:v4.19.1) ใน docker-compose.yml + api depends_on migrate (service_completed_successfully). Live-verified 2026-06-25: cold-start `down -v && up -d --build --wait` → 5 ตารางครบอัตโนมัติ, migrate exit 0, POST /api/admin/users ไม่เจอ 'relation does not exist'"
 
 - truth: "token ที่ออกโดย Keycloak ผ่าน URL ที่ client เข้าถึง (localhost:8080) ผ่านการ verify ของ API"
-  status: failed
+  status: resolved
   reason: "พบระหว่าง Test 3: token ที่ขอผ่าน http://localhost:8080 มี iss=http://localhost:8080/realms/donnarec แต่ API คาดหวัง iss=http://keycloak:8080/... (KEYCLOAK_BASE_URL). KC_HOSTNAME_STRICT=false ทำให้ iss อิง Host ของ request → go-oidc reject 401 ทุก token. Bruno เลี่ยงชั่วคราวด้วย header Host:keycloak:8080 แต่ frontend จริง (Phase 6) ที่ login ผ่าน localhost จะเจอ 401"
   severity: major
   test: 3
@@ -79,3 +81,4 @@ open_gaps: 2
   missing:
     - "ทำให้ iss สอดคล้องกันทั้ง browser และ backend (เช่น ใช้ canonical hostname เดียว + เพิ่ม host alias ให้ api เข้าถึง Keycloak ด้วยชื่อเดียวกับ browser, หรือปรับ go-oidc ให้ accept issuer ที่ตั้งไว้)"
   debug_session: ""
+  resolution: "01-05 Task 2 (commit dafb149) แก้ฝั่ง go-oidc: discovery ที่ internal URL (keycloak:8080) แต่ validate iss = OIDC_ISSUER ที่ configurable ผ่าน oidc.InsecureIssuerURLContext; คง provider.Verifier(ClientID) (aud/signature/expiry ไม่ถูก skip). Live-verified 2026-06-25: token จาก localhost:8080 (NO Host workaround) → POST /api/admin/users 201; negative (no/bad token → 401, maker → 403) ยังถูกต้อง"
