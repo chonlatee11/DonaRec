@@ -118,7 +118,7 @@ services:
     command:
       [
         "-path", "/migrations",
-        "-database", "postgres://${DB_USER:-donnarec}:${DB_PASSWORD}@postgres:5432/donnarec_app?sslmode=disable",
+        "-database", "postgres://${DB_USER:-donnarec}:${DB_PASSWORD:?DB_PASSWORD is required}@postgres:5432/donnarec_app?sslmode=disable",
         "up"
       ]
     # No restart policy — this is an init-service that must exit after completing.
