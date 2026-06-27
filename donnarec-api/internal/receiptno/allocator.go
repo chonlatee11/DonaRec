@@ -72,8 +72,18 @@ func NewAllocator(queries *db.Queries) *Allocator {
 //
 // The caller MUST:
 //   - Supply an open pgx.Tx (not a pool).
+//   - Run the tx at READ COMMITTED isolation (see below).
 //   - Commit or roll back the transaction after Allocate returns.
 //   - Roll back on error to undo both the counter increment and the ledger insert.
+//
+// Isolation requirement (READ COMMITTED): the gap-less + non-blocking serialization
+// guarantee depends on the caller's tx running at READ COMMITTED — pgxpool's
+// pool.Begin (used by db.WithTx) defaults to this, so the standard path is safe.
+// Under REPEATABLE READ or SERIALIZABLE the re-lock (LockCounterForUpdate /
+// IncrementCounter) after a concurrent commit raises SQLSTATE 40001
+// ("could not serialize access due to concurrent update") instead of re-reading
+// the committed value, and Allocate does NOT retry (D-36) — a concurrent approval
+// would surface as a hard failure. Do NOT call Allocate from a stricter-isolation tx.
 //
 // Allocate MUST NOT be called with a nil tx — the UNIQUE constraint backstop and
 // the counter rollback-safety both depend on counter + ledger being in the same tx.
