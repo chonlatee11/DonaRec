@@ -1,219 +1,137 @@
 ---
 phase: 02-gap-less-receipt-numbering-core
-reviewed: 2026-06-25T16:42:12Z
+reviewed: 2026-06-27T00:00:00Z
 depth: standard
-files_reviewed: 11
+files_reviewed: 12
 files_reviewed_list:
   - donnarec-api/migrations/000004_receipt_number_tables.up.sql
   - donnarec-api/migrations/000004_receipt_number_tables.down.sql
   - donnarec-api/internal/db/queries/receiptno.sql
-  - donnarec-api/internal/receiptno/allocator.go
+  - donnarec-api/internal/db/generated/receiptno.sql.go
   - donnarec-api/internal/receiptno/fiscal_year.go
   - donnarec-api/internal/receiptno/format.go
+  - donnarec-api/internal/receiptno/fiscalyear_test.go
+  - donnarec-api/internal/receiptno/format_test.go
+  - donnarec-api/internal/receiptno/allocator.go
   - donnarec-api/internal/receiptno/allocator_test.go
   - donnarec-api/internal/receiptno/allocator_concurrency_test.go
   - donnarec-api/internal/receiptno/allocator_rollback_test.go
-  - donnarec-api/internal/receiptno/fiscalyear_test.go
-  - donnarec-api/internal/receiptno/format_test.go
 findings:
-  critical: 1
-  warning: 4
-  info: 2
+  critical: 0
+  warning: 3
+  info: 4
   total: 7
 status: issues_found
 ---
 
-# Phase 02: Code Review Report
+# Phase 02: Code Review Report (รอบที่ 2)
 
-**Reviewed:** 2026-06-25T16:42:12Z
+**Reviewed:** 2026-06-27T00:00:00Z
 **Depth:** standard
-**Files Reviewed:** 11
+**Files Reviewed:** 12
 **Status:** issues_found
 
 ## Summary
 
-ทบทวน 11 ไฟล์ที่ครอบคลุม path หลักของการออกเลขใบเสร็จแบบ gap-less ได้แก่ migration, SQL queries, allocator, fiscal year helper, format renderer และ test suite ทั้งสาม (unit, concurrency, rollback)
+นี่คือหัวใจของ gap-less receipt numbering ซึ่งเป็นข้อกำหนดความถูกต้องที่ยากที่สุดของโปรเจกต์ การรีวิวรอบนี้เป็นการตรวจซ้ำหลังจาก commit `1eab44a` ได้แก้ findings รอบก่อนครบแล้ว (ยืนยันว่าแก้จริง: `bangkokLoc` ใช้ `sync.Once` แล้ว, index ซ้ำถูกลบ, comment ที่ผิดถูกแก้, `year_format` มี CHECK constraint แล้ว)
 
-โดยรวม design สอดคล้องกับข้อกำหนดของโปรเจกต์อย่างแม่นยำ: ใช้ counter table + `SELECT … FOR UPDATE` ไม่มี SEQUENCE/SERIAL สำหรับ running_no, transaction boundary เป็น caller-managed, fiscal year คำนวณด้วย Asia/Bangkok, UNIQUE backstop อยู่ครบ และ REVOKE UPDATE/DELETE บน ledger ถูกต้อง
+**core ของ concurrency ถูกต้องจริง** ผมไล่ trace ทุก race ที่สร้างได้:
+- การออกเลขแบบ sequential ภายใต้ READ COMMITTED serialize ถูกต้อง (ถือ lock จนถึง commit, หลัง block แล้ว re-read ค่าที่ committed)
+- การ first-allocation พร้อมกันของปีงบใหม่ปลอดภัย: `InitCounterRow` (`ON CONFLICT DO NOTHING`) ทำให้ session ที่แพ้ block บน insert ที่ยังไม่ commit ของผู้ชนะ แล้ว re-lock row ที่มีอยู่จริง อ่านค่าที่ committed → ไม่มี duplicate ไม่มี gap
+- การ rollback ของ `Allocate` คืนเลขถูกต้อง (counter increment + ledger insert ถูก undo พร้อมกัน) และเลขที่คืนถูกใช้ซ้ำโดย commit ถัดไป — พิสูจน์จุดต่างของ counter-table vs SEQUENCE
+- SQL parameterized ครบผ่าน sqlc, ไม่มี string concatenation, grant แบบ least-privilege พร้อม `REVOKE UPDATE, DELETE` บน ledger, และ `UNIQUE(fiscal_year, running_no)` backstop ผ่าน test
 
-พบ **1 BLOCKER** (data race บน package-level var ที่ตรวจพบได้ด้วย `-race`), **4 WARNING** และ **2 INFO**
+logic fiscal year (Oct→+544, Jan–Sep→+543, normalise เป็น Asia/Bangkok ก่อนอ่านเดือน) ถูกต้องและมี test ครอบคลุม รวมถึงการข้าม boundary UTC→BKK; guard `sync.Once` สำหรับ tz เหมาะสม
 
----
-
-## Critical Issues
-
-### CR-01: Data race บน `bangkokLoc` package-level variable ใน `fiscal_year.go`
-
-**File:** `donnarec-api/internal/receiptno/fiscal_year.go:25-43`
-
-**Issue:** `bangkokLoc` เป็น package-level `*time.Location` ที่ `loadBangkok()` อ่านและเขียนโดยไม่มีการป้องกัน concurrent access เลย pattern ที่ใช้คือ check-then-set:
-
-```go
-// line 31-41
-if bangkokLoc != nil {
-    return bangkokLoc
-}
-loc, err := time.LoadLocation("Asia/Bangkok")
-...
-bangkokLoc = loc   // unprotected write
-return loc
-```
-
-เมื่อ 50 goroutine จาก `TestAllocator_Concurrency` เรียก `alloc.Allocate()` พร้อมกัน แต่ละ goroutine เรียก `fiscalYear()` ซึ่งเรียก `loadBangkok()` หลาย goroutine จะเห็น `bangkokLoc == nil` พร้อมกัน และแต่ละตัวจะเขียนไปที่ตัวแปรเดียวกันโดยไม่มี lock Go race detector (`-race`) ซึ่งทั้ง `TestAllocator_Concurrency` และ `TestAllocator_ConcurrentNewYear` ประกาศว่ารันภายใต้ `-race` จะ **รายงาน DATA RACE** ทำให้ test ล้มเหลว
-
-ผลลัพธ์ที่ได้ (การอ่านซ้ำ `time.Location` ที่เหมือนกัน) ไม่มี semantic bug แต่การมี unsynchronized concurrent read/write บน pointer เป็น undefined behavior ใน Go memory model
-
-**Fix:** ใช้ `sync.Once`:
-
-```go
-import (
-    "sync"
-    "time"
-)
-
-var (
-    bangkokOnce sync.Once
-    bangkokLoc  *time.Location
-)
-
-func loadBangkok() *time.Location {
-    bangkokOnce.Do(func() {
-        loc, err := time.LoadLocation("Asia/Bangkok")
-        if err != nil {
-            panic("Asia/Bangkok timezone not available: " + err.Error())
-        }
-        bangkokLoc = loc
-    })
-    return bangkokLoc
-}
-```
+**ไม่พบ BLOCKER** findings ด้านล่างเป็นเรื่อง robustness และ defense-in-depth ซึ่งสำคัญกว่าปกติในเฟสนี้เพราะ ledger เป็น **immutable** (`REVOKE DELETE`) — row ผิดที่เขียนลงไปจะลบไม่ได้ถาวร
 
 ---
 
 ## Warnings
 
-### WR-01: Index ซ้ำกับ UNIQUE constraint บน `(fiscal_year, running_no)`
+### WR-01: `Allocate` ไม่ได้บังคับ/ระบุ isolation level ที่ต้องการ
 
-**File:** `donnarec-api/migrations/000004_receipt_number_tables.up.sql:79,83`
+**File:** `donnarec-api/internal/receiptno/allocator.go:83-110`
 
-**Issue:** `CONSTRAINT uq_receipt_numbers_fy_no UNIQUE (fiscal_year, running_no)` สร้าง B-tree index อัตโนมัติบน `(fiscal_year, running_no)` อยู่แล้ว แต่ migration ยังสร้าง `idx_receipt_numbers_fy_no` บน column เดิมซ้ำอีกครั้ง:
+**Issue:** การรับประกัน gap-less + serialization แบบ non-blocking ขึ้นกับว่า tx ของ caller รันที่ **READ COMMITTED** ตอนนี้ helper ในโปรเจกต์ (`internal/db/helpers.go:26`) ใช้ `pool.Begin(ctx)` ซึ่ง default เป็น READ COMMITTED จึงปลอดภัยอยู่ แต่ `Allocate` รับ `pgx.Tx` จาก caller ใด ๆ และถูกระบุว่าเป็น single allocation path สำหรับ Phase 3+ หาก caller ในอนาคตเปิด tx ด้วย `REPEATABLE READ` หรือ `SERIALIZABLE` การ re-lock หลัง block (`LockCounterForUpdate`/`IncrementCounter`) จะ throw `40001 could not serialize access due to concurrent update` แทนที่จะ re-read — ทำให้ approval ที่ทำพร้อมกันกลายเป็น hard failure (allocator ไม่ retry ตาม D-36) ทั้ง signature และ doc comment ไม่ได้ระบุข้อกำหนด isolation นี้ไว้
 
-```sql
-CONSTRAINT uq_receipt_numbers_fy_no UNIQUE (fiscal_year, running_no)   -- line 79: creates implicit index
-...
-CREATE INDEX idx_receipt_numbers_fy_no ON receipt_numbers (fiscal_year, running_no);  -- line 83: duplicate
-```
-
-index สองตัวนี้มี structure เหมือนกันทุกประการ PostgreSQL จะ maintain ทั้งสองตัวในทุก INSERT — ทำให้ write path (ซึ่งคือ hot path ของ allocation) ช้าลงโดยไม่จำเป็น และเปลืองพื้นที่ index สองเท่า
-
-**Fix:** ลบ `CREATE INDEX idx_receipt_numbers_fy_no` ออก และใช้ `uq_receipt_numbers_fy_no` ที่สร้างโดย UNIQUE constraint ซึ่งทำหน้าที่เป็น index อยู่แล้ว ทุก query ที่ระบุ `fiscal_year` + `running_no` จะใช้ unique-constraint index ได้โดยตรง
-
----
-
-### WR-02: Comment เท็จ — `INSERT INTO receipt_number_config DEFAULT VALUES` ไม่มี `ON CONFLICT`
-
-**File:** `donnarec-api/migrations/000004_receipt_number_tables.up.sql:42-43`
-
-**Issue:** Comment บรรทัด 42 บอกว่า:
-```sql
--- ON CONFLICT ensures idempotent re-runs without error.
-INSERT INTO receipt_number_config DEFAULT VALUES;
-```
-
-แต่ SQL จริงไม่มี `ON CONFLICT` clause เลย หากนำ SQL ไปรันซ้ำโดยตรง (เช่น manual apply หรือสคริปต์ที่ไม่ผ่าน golang-migrate) จะได้รับ:
-```
-ERROR: duplicate key value violates unique constraint "receipt_number_config_pkey"
-```
-
-comment ที่ผิดนี้จะทำให้ DBA หรือผู้ดูแลระบบสรุปผิดว่า statement นี้ re-runnable อย่างปลอดภัย
-
-**Fix:** แก้ SQL ให้ตรงกับ comment:
-```sql
--- ON CONFLICT ensures idempotent re-runs without error.
-INSERT INTO receipt_number_config DEFAULT VALUES
-ON CONFLICT (id) DO NOTHING;
-```
-
----
-
-### WR-03: Comment เท็จเกี่ยวกับ `REVOKE` — future `GRANT` สามารถ re-grant ได้เสมอ
-
-**File:** `donnarec-api/migrations/000004_receipt_number_tables.up.sql:101-103`
-
-**Issue:** Comment กล่าวว่า:
-```sql
--- Immutable ledger enforcement (T-02-01): no UPDATE or DELETE allowed at DB level.
--- Even a future GRANT ALL will not restore these until explicitly re-granted.
-REVOKE UPDATE, DELETE ON receipt_numbers FROM donnarec_app;
-```
-
-ประโยค "a future GRANT ALL will not restore these" เป็น **ข้อมูลที่ผิด** ใน PostgreSQL `REVOKE` เพียงแค่เพิกถอน privilege ที่ grant ไปแล้ว แต่ไม่ได้ตั้ง "deny rule" ถาวร superuser ที่รัน `GRANT UPDATE ON receipt_numbers TO donnarec_app` ในภายหลังจะคืน privilege นั้นได้ทันที comment นี้อาจทำให้ทีม DBA เข้าใจผิดว่า REVOKE ป้องกัน future grant ได้
-
-**Fix:** แก้ comment ให้ถูกต้อง:
-```sql
--- Immutable ledger enforcement (T-02-01): no UPDATE or DELETE allowed at DB level.
--- REVOKE strips current privileges from donnarec_app; a future explicit GRANT can re-grant them.
--- Production hardening: monitor pg_roles / audit any GRANT on receipt_numbers.
-REVOKE UPDATE, DELETE ON receipt_numbers FROM donnarec_app;
-```
-
----
-
-### WR-04: No-op `fmt.Sprintf("%s", appConnStr)` ใน `testutil/postgres.go`
-
-**File:** `donnarec-api/internal/testutil/postgres.go:127`
-
-**Issue:** บรรทัด 127 เป็น dead code ที่ไม่ทำอะไรเลย:
+**Fix:** ระบุข้อกำหนดใน doc comment ของ `Allocate` ให้ชัด และพิจารณา assert แบบเบา ๆ:
 ```go
-appConnStr = fmt.Sprintf("%s", appConnStr)
+// tx ที่ส่งเข้ามา MUST เป็น READ COMMITTED. ภายใต้ REPEATABLE READ / SERIALIZABLE
+// การ re-lock FOR UPDATE หลัง concurrent commit จะ raise SQLSTATE 40001 และ
+// Allocate ไม่ retry (D-36).
 ```
 
-`fmt.Sprintf("%s", x)` กับ `string` argument จะ return ค่าเดิมทุกประการ บรรทัดนี้อาจเหลือมาจากการ refactor ที่ไม่สมบูรณ์ (อาจตั้งใจจะ format URL แต่ logic ถูกย้ายออก) แต่ยังคงอยู่ ทำให้โค้ดน่าสับสน และ `golangci-lint` อาจ report ว่าเป็น redundant statement
+---
 
-**Fix:** ลบบรรทัดนั้นออก:
+### WR-02: `formatted` ประกอบจาก `prefix`/`separator` ที่ admin ตั้งค่าได้ โดยไม่ validate อักขระ แล้วถูก render เป็น PDF ผ่าน headless Chromium HTML
+
+**File:** `donnarec-api/internal/receiptno/format.go:40-58`, `donnarec-api/migrations/000004_receipt_number_tables.up.sql:30-35`
+
+**Issue:** `prefix` และ `separator` เป็นค่า config `TEXT` แบบอิสระที่ไหลเข้า `formatted` โดยไม่ escape แล้วถูก freeze ลง ledger (immutable) และ (ตาม CLAUDE.md) ถูก render ผ่าน pipeline HTML→Chromium เพื่อสร้าง PDF ค่า config เช่น `prefix = "<img src=x onerror=...>"` จะกลายเป็น stored markup/script-injection payload ในทุกใบเสร็จ หาก renderer ปลายทางไม่ escape เนื่องจาก ledger เป็น append-only `formatted` ที่ปนเปื้อนแก้ด้วย UPDATE/DELETE ไม่ได้ ปัจจุบัน DB constrain เฉพาะ `year_format` (CHECK IN) ไม่ได้ constrain `prefix`/`separator`
+
+**Fix:** defense-in-depth: จำกัดอักขระที่ขอบ config เช่น `CHECK (prefix ~ '^[A-Za-z0-9 _./-]*$')` (และทำนองเดียวกันกับ `separator`) และ/หรือรับประกันว่ามี HTML-escaping ตอน render ใน Phase 4 อย่าพึ่งพา renderer อย่างเดียวเพราะ snapshot เป็น immutable
+
+---
+
+### WR-03: `Allocate` ไม่ปฏิเสธ `issueDate` ที่เป็น zero / ค่าผิดปกติ และผลลัพธ์ที่ผิดเป็นถาวร
+
+**File:** `donnarec-api/internal/receiptno/allocator.go:83-85`, `donnarec-api/internal/receiptno/fiscal_year.go:71-90`
+
+**Issue:** `fiscalYear` รับ `issueDate` จาก caller ตรง ๆ โดยไม่มี sanity check ค่า `time.Time{}` (ปี ค.ศ. 1) จะให้ fiscal year `544`/`545`; timestamp ขยะใด ๆ จาก bug ฝั่ง Phase 3 จะ allocate เลขใต้ปีงบที่ไร้สาระเงียบ ๆ สร้าง counter row และ ledger row ที่ — เพราะ `REVOKE UPDATE, DELETE` — ลบไม่ได้ตลอดไป สัญญาบอกว่า caller ส่ง approval timestamp มาก็จริง แต่ guard ราคาถูกป้องกันความผิดพลาดถาวรที่กู้คืนไม่ได้ในตารางที่สำคัญที่สุดของโปรเจกต์
+
+**Fix:** ปฏิเสธ zero value และวันที่เก่า/อนาคตที่ผิดปกติก่อน allocate:
 ```go
-// Remove: appConnStr = fmt.Sprintf("%s", appConnStr)
-// appConnStr is already built by strings.Replace on the line above; no further transformation needed.
+if issueDate.IsZero() {
+    return AllocatedReceipt{}, fmt.Errorf("allocate: issueDate must not be zero")
+}
 ```
+และอาจ bound ช่วงปีที่สมเหตุสมผล (เช่น ปี >= 2020) เพื่อจับ input ที่เสียหาย
 
 ---
 
 ## Info
 
-### IN-01: `TestAllocator_ConcurrentNewYear` และ `TestAllocator_Rollback` ต่างอ้างสิทธิ์ FY 2575 ว่า "unused by any other test"
+### IN-01: `GetReceiptNumberConfig` ใช้ `LIMIT 1` โดยไม่มี `ORDER BY`
 
-**File:** `donnarec-api/internal/receiptno/allocator_concurrency_test.go:134,148` และ `donnarec-api/internal/receiptno/allocator_rollback_test.go:62`
+**File:** `donnarec-api/internal/db/queries/receiptno.sql:48-50`
 
-**Issue:** ทั้งสองฟังก์ชัน comment ว่า FY 2575 เป็น "unused by any other test":
-- `allocator_concurrency_test.go:134`: "FY 2575 — unused by any other test"
-- `allocator_rollback_test.go:62`: "FY 2575: unused fiscal year — guaranteed clean counter"
+**Issue:** ความ deterministic พึ่งพา invariant `single_row CHECK (id = true)` ที่รับประกันว่ามีแถวเดียว ตอนนี้จริง แต่ `LIMIT 1` ไม่มี `ORDER BY` จะ non-deterministic ถ้า invariant แถวเดียวถูกผ่อนในอนาคต ความเสี่ยงต่ำ — บันทึกไว้เพื่อความทนทาน
 
-แต่ทั้งคู่ใช้ FY 2575 จริง (Nov 2031 = CE+544 = 2575; May 2032 = CE+543 = 2575) ไม่มี runtime bug เพราะแต่ละ test เรียก `SetupTestPostgres(t)` ซึ่ง spin up container แยกกัน แต่ comment ทั้งสองผิดและสร้างความสับสนให้คนอ่าน
-
-**Fix:** แก้ comment ใน `allocator_rollback_test.go` ให้ใช้ FY อื่นที่ยังว่างจริง เช่น FY 2577 (Feb 2034 BKK) หรืออัปเดต comment ว่า "each test has its own isolated container so FY reuse is safe":
-
-```go
-// TestAllocator_Rollback: FY 2577 — isolated per test container; FY 2575 is used by TestAllocator_ConcurrentNewYear.
-issueDate := bkkTime(2034, 2, 20, 10, 0, 0) // Feb 20 2034 BKK → FY 2577
-const expectedFY = 2577
-```
+**Fix:** คงไว้ได้ (ยอมรับได้เพราะมี CHECK) หรือเพิ่ม `WHERE id = true` ให้ intent ชัดเจนขึ้น
 
 ---
 
-### IN-02: `year_format` column ใน `receipt_number_config` ไม่มี CHECK constraint สำหรับ valid values
+### IN-02: lock แบบ explicit ก่อน `UPDATE` ที่ lock อยู่แล้ว (ซ้ำซ้อนเล็กน้อย)
 
-**File:** `donnarec-api/migrations/000004_receipt_number_tables.up.sql:33`
+**File:** `donnarec-api/internal/receiptno/allocator.go:94-117`
 
-**Issue:** `formatReceiptNo()` รู้จัก 2 ค่า: `"BE4"` และ `"CE4"` โดย `default` branch ทำหน้าที่เป็น BE4 silent fallback แต่ DB ไม่มี CHECK constraint บังคับค่าที่ถูกต้อง ผู้ดูแลระบบที่ set `year_format = 'AD4'` ผ่าน Phase 4 UI จะได้รับ BE4 output โดยไม่มีข้อความ error ใด ๆ
+**Issue:** `IncrementCounter` (`UPDATE … RETURNING`) ก็ถือ row lock อยู่แล้ว ดังนั้น `LockCounterForUpdate` ที่นำหน้าจึงซ้ำซ้อนบางส่วน — มีไว้เพื่อ detect กรณี row หาย (ปีงบใหม่) ก่อนทำ UPDATE ไม่ใช่ defect; การ lock แบบ explicit ทำให้ branch ปีงบใหม่อ่านง่าย บันทึกเป็นโอกาส simplify เท่านั้น (`IncrementCounter` → ถ้า `ErrNoRows` → `InitCounterRow` → `IncrementCounter`)
 
-**Fix:** เพิ่ม CHECK constraint บน column:
-```sql
-year_format  TEXT  NOT NULL DEFAULT 'BE4'
-                 CHECK (year_format IN ('BE4', 'CE4')),
-```
+**Fix:** optional ไม่ต้องแก้ — รูปแบบปัจจุบันถูกต้องและชัดเจน
 
 ---
 
-_Reviewed: 2026-06-25T16:42:12Z_
+### IN-03: down migration ลบข้อมูล ledger ที่มีนัยทางกฎหมายแบบกู้คืนไม่ได้
+
+**File:** `donnarec-api/migrations/000004_receipt_number_tables.down.sql:11-13`
+
+**Issue:** down migration `DROP TABLE` receipt_numbers ledger (เอกสารภาษี/audit) comment DANGER เขียนดี แต่ไม่มีกลไกเชิงเทคนิคป้องกันการรันกับ DB ที่ไม่ใช่ dev
+
+**Fix:** ยอมรับได้สำหรับตอนนี้เพราะมี warning ชัด ถ้าทำได้ ควร guard ที่ระดับ migration-runner ไม่ให้ production apply down step นี้
+
+---
+
+### IN-04: comment ลำดับการ drop ใน down migration อ้าง FK-safety ที่ยังไม่มีจริง
+
+**File:** `donnarec-api/migrations/000004_receipt_number_tables.down.sql:8-9`
+
+**Issue:** comment อธิบายลำดับ drop แบบ "child → parent (foreign key safe)" แต่ migration นี้ยังไม่มี FK constraint ระหว่างสามตารางเลย (FK ของ `receipts` ใน Phase 3 เป็นของอนาคต) comment จึงเป็น aspirational และอาจทำให้เข้าใจผิด
+
+**Fix:** แก้ถ้อยคำให้ระบุว่า FK เป็นเรื่องอนาคต หรือตัดข้ออ้าง FK-safety ออกจนกว่า Phase 3 จะเพิ่ม constraint
+
+---
+
+_Reviewed: 2026-06-27T00:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
