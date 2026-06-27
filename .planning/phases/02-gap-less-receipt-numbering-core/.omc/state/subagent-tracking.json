@@ -1,0 +1,17 @@
+{
+  "agents": [
+    {
+      "agent_id": "a8683fa50b6831788",
+      "agent_type": "gsd-security-auditor",
+      "started_at": "2026-06-27T05:24:49.662Z",
+      "parent_mode": "none",
+      "status": "completed",
+      "completed_at": "2026-06-27T05:26:00.219Z",
+      "duration_ms": 70557
+    }
+  ],
+  "total_spawned": 2,
+  "total_completed": 18,
+  "total_failed": 0,
+  "last_updated": "2026-06-27T05:26:00.321Z"
+}

@@ -1,0 +1,149 @@
+{
+  "updatedAt": "2026-06-27T05:26:00.219Z",
+  "missions": [
+    {
+      "id": "session:2255b42e-39ba-4630-9a93-1a42c2d2d414:none",
+      "source": "session",
+      "name": "none",
+      "objective": "Session mission",
+      "createdAt": "2026-06-27T05:19:56.569Z",
+      "updatedAt": "2026-06-27T05:26:00.219Z",
+      "status": "done",
+      "workerCount": 1,
+      "taskCounts": {
+        "total": 1,
+        "pending": 0,
+        "blocked": 0,
+        "inProgress": 0,
+        "completed": 1,
+        "failed": 0
+      },
+      "agents": [
+        {
+          "name": "gsd-security-auditor:a8683fa",
+          "role": "gsd-security-auditor",
+          "ownership": "a8683fa50b6831788",
+          "status": "done",
+          "currentStep": null,
+          "latestUpdate": "completed",
+          "completedSummary": null,
+          "updatedAt": "2026-06-27T05:26:00.219Z"
+        }
+      ],
+      "timeline": [
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:24:32.201Z",
+          "at": "2026-06-27T05:24:32.201Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:24:34.756Z",
+          "at": "2026-06-27T05:24:34.756Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-start:a8683fa50b6831788:2026-06-27T05:24:49.662Z",
+          "at": "2026-06-27T05:24:49.662Z",
+          "kind": "update",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "started gsd-security-auditor:a8683fa",
+          "sourceKey": "session-start:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:25:15.645Z",
+          "at": "2026-06-27T05:25:15.645Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a2ec1d2057a7af866:2026-06-27T05:25:23.752Z",
+          "at": "2026-06-27T05:25:23.752Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a2ec1d2057a7af866"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:25:29.330Z",
+          "at": "2026-06-27T05:25:29.330Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:25:33.920Z",
+          "at": "2026-06-27T05:25:33.920Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:25:38.375Z",
+          "at": "2026-06-27T05:25:38.375Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:25:45.897Z",
+          "at": "2026-06-27T05:25:45.897Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:25:48.950Z",
+          "at": "2026-06-27T05:25:48.950Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:25:52.169Z",
+          "at": "2026-06-27T05:25:52.169Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a6fa7b0ebc581bc71:2026-06-27T05:25:57.185Z",
+          "at": "2026-06-27T05:25:57.185Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a6fa7b0ebc581bc71"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:25:57.264Z",
+          "at": "2026-06-27T05:25:57.264Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        },
+        {
+          "id": "session-stop:a8683fa50b6831788:2026-06-27T05:26:00.219Z",
+          "at": "2026-06-27T05:26:00.219Z",
+          "kind": "completion",
+          "agent": "gsd-security-auditor:a8683fa",
+          "detail": "completed",
+          "sourceKey": "session-stop:a8683fa50b6831788"
+        }
+      ]
+    }
+  ]
+}
