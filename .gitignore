@@ -16,3 +16,10 @@ vendor/
 # OS / editor
 .DS_Store
 *.swp
+
+# GSD graphify generated artifacts (regenerable, large, include caches)
+graphify-out/
+.planning/graphs/
+
+# OMC tooling state (regenerable, per-session)
+.omc/

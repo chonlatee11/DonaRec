@@ -3,7 +3,6 @@ package testutil
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -122,9 +121,6 @@ func SetupTestPostgresAsAppRole(t *testing.T) (*pgxpool.Pool, *pgxpool.Pool) {
 	// Build connection string for donnarec_app role
 	// Replace "test:test@" with "donnarec_app:donnarec_app_test@" in connStr
 	appConnStr := strings.Replace(connStr, "test:test@", "donnarec_app:donnarec_app_test@", 1)
-	// Extract host:port from connStr for building the app pool URL
-	// connStr looks like: postgres://test:test@host:port/donnarec_test?sslmode=disable
-	appConnStr = fmt.Sprintf("%s", appConnStr)
 
 	appPool, err := pgxpool.New(ctx, appConnStr)
 	require.NoError(t, err, "failed to create donnarec_app pgxpool")

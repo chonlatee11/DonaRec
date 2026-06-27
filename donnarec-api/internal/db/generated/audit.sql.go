@@ -12,6 +12,8 @@ import (
 )
 
 const getLastAuditRowForUpdate = `-- name: GetLastAuditRowForUpdate :one
+
+
 SELECT id, row_hash
 FROM audit_log
 ORDER BY id DESC
@@ -24,6 +26,15 @@ type GetLastAuditRowForUpdateRow struct {
 	RowHash string `db:"row_hash" json:"row_hash"`
 }
 
+// audit.sql — sqlc queries for the audit_log table
+// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
+// Parameterized queries only — no string concatenation (T-1-tamper-01).
+// NOTE (WR-05): The previous InsertAuditLog :one query was removed. The audit
+// service writes rows via a raw tx.Exec INSERT in AppendAuditEntryTx that also
+// sets the reserved `id` and captured `created_at` explicitly (both feed the
+// hash-chain). That sqlc query omitted id/created_at and was never used, so
+// keeping two divergent insert definitions for the immutable audit table was a
+// maintenance trap. There is now exactly one insert path (the raw exec).
 // Fetches the most recent audit row's id and row_hash, locking it with FOR UPDATE.
 // This serializes concurrent hash-chain appends: the next INSERT cannot proceed
 // until the current transaction releases this lock (Pitfall 2 mitigation, D-17).
@@ -60,9 +71,6 @@ type ListAllAuditForVerifyRow struct {
 	RowHash    string             `db:"row_hash" json:"row_hash"`
 }
 
-// audit.sql — sqlc queries for the audit_log table
-// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
-// Parameterized queries only — no string concatenation (T-1-tamper-01).
 // Returns all audit rows in ascending id order for chain verification.
 // Used by VerifyChain to recompute each row_hash and detect tampering.
 // Admin / internal tool only — no pagination (verification reads entire chain).
