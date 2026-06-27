@@ -16,3 +16,7 @@ vendor/
 # OS / editor
 .DS_Store
 *.swp
+
+# GSD graphify generated artifacts (regenerable, large, include caches)
+graphify-out/
+.planning/graphs/
