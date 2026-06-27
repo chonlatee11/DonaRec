@@ -101,3 +101,20 @@
 - PDF/email/outbox worker (FR-20..28, NFR-07) → Phase 4
 - ข้อความลดหย่อน 1 เท่า/2 เท่า + template/config UI (FR-24, FR-33, NFR-09) → Phase 4
 - e-Donation export + reports + "คีย์แล้ว" flag (FR-30/31/32) → Phase 5
+
+---
+
+## Follow-up session (update) — 2026-06-27
+
+**Areas discussed:** Consent capture (NFR-03), Cancellation Void & Reissue, e-Donation keyed flag, Approval concurrency, Search scope, Slip retention
+
+| Area | Options presented | Selected | Notes |
+|------|-------------------|----------|-------|
+| Cancellation scope | Void & Reissue full / Void + link fields only / Void only (D-47) | **Void & Reissue full (D-50)** | ใบแทนได้เลขรันใหม่ + link replaces/replaced_by; ผ่าน maker-checker ปกติ ไม่ bypass SoD |
+| e-Donation keyed | flag in Phase 3 / defer to Phase 5 / flag no-block | **flag edonation_keyed in Phase 3 (D-51)** | true → เตือน+บังคับยืนยัน RD reconciliation (manual); Phase 5 set flag ตอน export |
+| Consent capture (NFR-03) | Full per snapshot / minimal legal_basis / defer Phase 6 | **Full consent per donation snapshot (D-49)** | flag+timestamp+text version+purpose ผูก retain_until/legal_basis (Phase 1) |
+| Approval concurrency | (default accepted) | **row-lock + status guard (D-52)** | SELECT FOR UPDATE donation row + precondition pending_review→issued |
+| Search scope (FR-10) | (default accepted) | **name/date/status/receiptno only (D-53)** | ไม่ค้นเลขภาษี (encrypted, no blind index — D-43) |
+| Slip retention | (default accepted) | **retain + soft-delete + audit (D-54)** | ไม่ hard-delete ไฟล์เมื่อ reject/cancel/remove |
+
+**User's deciding insight:** "คีย์เข้า e-Donation แล้วหรือยัง" คือตัวแปรชี้ขาดของ cancellation — ถ้าคีย์ RD แล้วต้องแก้/เพิกถอนฝั่งสรรพากรด้วย (manual) ไม่งั้นผู้บริจาคมีสิทธิลดหย่อนค้าง = ความเสี่ยงสูงสุด
