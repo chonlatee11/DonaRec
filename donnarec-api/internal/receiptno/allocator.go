@@ -91,6 +91,23 @@ func NewAllocator(queries *db.Queries) *Allocator {
 // On success, returns AllocatedReceipt with Formatted equal to the value stored in
 // the ledger (D-42). On error, returns an empty AllocatedReceipt and a wrapped error.
 func (a *Allocator) Allocate(ctx context.Context, tx pgx.Tx, issueDate time.Time) (AllocatedReceipt, error) {
+	// Step 0: Reject a zero / garbage issueDate before any DB work.
+	// The ledger is immutable (REVOKE UPDATE, DELETE), so a counter + ledger row
+	// written under a nonsense fiscal year can NEVER be corrected. A zero time.Time{}
+	// (CE year 1) would silently allocate under fiscal year 544; any garbage timestamp
+	// from a future caller bug would do likewise. This cheap guard prevents a permanent,
+	// unrecoverable bad row in the project's most critical table.
+	if issueDate.IsZero() {
+		return AllocatedReceipt{}, fmt.Errorf("allocate: issueDate must not be zero")
+	}
+	// Conservative lower-bound sanity check: receipts are issued from approval timestamps
+	// that are always present-or-future, so any CE year before 2020 indicates a corrupted
+	// input rather than a legitimate approval. Kept deliberately loose so it never rejects
+	// a real timestamp.
+	if issueDate.Year() < 2020 {
+		return AllocatedReceipt{}, fmt.Errorf("allocate: issueDate year %d is implausibly old (corrupted input?)", issueDate.Year())
+	}
+
 	// Step 1: Compute fiscal year (pure function — no DB call, no time.Now()).
 	fy := fiscalYear(issueDate)
 
