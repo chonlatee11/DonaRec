@@ -11,7 +11,21 @@
 //   - D-42: caller persists the returned string; subsequent reads use the stored snapshot
 package receiptno
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
+
+// configCharAllowlist constrains the admin-configurable prefix/separator components.
+// The formatted string is frozen into the immutable ledger (REVOKE UPDATE, DELETE) and
+// later rendered into PDFs via an HTML→headless-Chromium pipeline (see CLAUDE.md), so a
+// dangerous value such as prefix="<img src=x onerror=...>" would become a permanent stored
+// markup/injection payload that no UPDATE can scrub. Defense-in-depth: reject anything
+// outside a conservative safe set (alphanumerics, space, and "_./-") at the formatting
+// boundary so the tainted value never reaches the ledger. The DB-level CHECK constraint
+// suggested in review is deferred — this Go-side guard at the single allocation path
+// covers Phase 2 without altering the already-applied 000004 migration.
+var configCharAllowlist = regexp.MustCompile(`^[A-Za-z0-9 _./-]*$`)
 
 // formatReceiptNo renders the receipt number string from its primitive components.
 //
@@ -37,7 +51,19 @@ import "fmt"
 //	formatReceiptNo(2569, 1000000, "/", 6, "BE4",  "")     → "2569/1000000"  (D-29: expands)
 //	formatReceiptNo(2569, 5,       "-", 4, "BE4",  "HOSP") → "HOSP2569-0005"
 //	formatReceiptNo(2569, 7,       "/", 6, "CE4",  "")     → "2026/000007"   (CE 2569-543=2026)
-func formatReceiptNo(fiscalYear int, runningNo int, separator string, padding int, yearFormat string, prefix string) string {
+//
+// It returns an error if separator or prefix contains a character outside the safe
+// allowlist (see configCharAllowlist) — the allocator propagates this so the surrounding
+// transaction rolls back and no tainted value is frozen into the immutable ledger.
+func formatReceiptNo(fiscalYear int, runningNo int, separator string, padding int, yearFormat string, prefix string) (string, error) {
+	// Defense-in-depth: validate admin-configurable components before they are frozen.
+	if !configCharAllowlist.MatchString(prefix) {
+		return "", fmt.Errorf("format receipt no: prefix %q contains disallowed characters (allowed: A-Za-z0-9 _./-)", prefix)
+	}
+	if !configCharAllowlist.MatchString(separator) {
+		return "", fmt.Errorf("format receipt no: separator %q contains disallowed characters (allowed: A-Za-z0-9 _./-)", separator)
+	}
+
 	// Render fiscal year string
 	var yearStr string
 	switch yearFormat {
@@ -55,5 +81,5 @@ func formatReceiptNo(fiscalYear int, runningNo int, separator string, padding in
 	runningStr := fmt.Sprintf("%0*d", padding, runningNo)
 
 	// Assemble: prefix + year + separator + running_no
-	return prefix + yearStr + separator + runningStr
+	return prefix + yearStr + separator + runningStr, nil
 }

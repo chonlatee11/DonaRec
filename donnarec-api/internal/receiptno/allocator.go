@@ -152,7 +152,7 @@ func (a *Allocator) Allocate(ctx context.Context, tx pgx.Tx, issueDate time.Time
 
 	// Step 6: Render the frozen formatted string from primitive components (D-42).
 	// formatReceiptNo accepts primitives (not the sqlc row) for wave-independent testability.
-	formatted := formatReceiptNo(
+	formatted, err := formatReceiptNo(
 		fy,
 		int(next),
 		cfg.Separator,
@@ -160,6 +160,11 @@ func (a *Allocator) Allocate(ctx context.Context, tx pgx.Tx, issueDate time.Time
 		cfg.YearFormat,
 		cfg.Prefix,
 	)
+	if err != nil {
+		// Reject tainted config (disallowed prefix/separator chars) before it is
+		// frozen into the immutable ledger — caller rolls back this tx (D-33).
+		return AllocatedReceipt{}, fmt.Errorf("render formatted receipt number: %w", err)
+	}
 
 	// Step 7: Insert the ledger row — this is where the number is "born" (D-35).
 	// The UNIQUE(fiscal_year, running_no) constraint fires here if a logic bug

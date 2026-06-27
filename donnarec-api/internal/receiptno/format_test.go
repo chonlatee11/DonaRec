@@ -76,10 +76,33 @@ func TestFormatReceiptNo(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := formatReceiptNo(tc.fiscalYear, tc.runningNo, tc.separator, tc.padding, tc.yearFormat, tc.prefix)
+			got, err := formatReceiptNo(tc.fiscalYear, tc.runningNo, tc.separator, tc.padding, tc.yearFormat, tc.prefix)
+			require.NoError(t, err)
 			require.Equal(t, tc.expected, got,
 				"formatReceiptNo(%d, %d, %q, %d, %q, %q) = %q; want %q",
 				tc.fiscalYear, tc.runningNo, tc.separator, tc.padding, tc.yearFormat, tc.prefix, got, tc.expected)
+		})
+	}
+}
+
+// TestFormatReceiptNo_RejectsDangerousConfigChars verifies the defense-in-depth
+// allowlist (WR-02): a prefix or separator carrying HTML/script-injection characters
+// must be rejected with an error so the tainted value never reaches the immutable ledger.
+func TestFormatReceiptNo_RejectsDangerousConfigChars(t *testing.T) {
+	cases := []struct {
+		name      string
+		separator string
+		prefix    string
+	}{
+		{name: "script tag in prefix", separator: "/", prefix: "<img src=x onerror=alert(1)>"},
+		{name: "angle brackets in separator", separator: "</td><td>", prefix: ""},
+		{name: "quote in prefix", separator: "/", prefix: `HOSP"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := formatReceiptNo(2569, 1, tc.separator, 6, "BE4", tc.prefix)
+			require.Error(t, err, "dangerous config chars must be rejected")
 		})
 	}
 }
