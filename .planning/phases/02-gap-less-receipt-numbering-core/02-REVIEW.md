@@ -19,9 +19,12 @@ files_reviewed_list:
 findings:
   critical: 0
   warning: 3
+  warning_resolved: 3
+  warning_outstanding: 0
   info: 4
+  info_outstanding: 4
   total: 7
-status: issues_found
+status: warnings_resolved
 ---
 
 # Phase 02: Code Review Report (รอบที่ 2)
@@ -51,6 +54,8 @@ logic fiscal year (Oct→+544, Jan–Sep→+543, normalise เป็น Asia/Ban
 
 ### WR-01: `Allocate` ไม่ได้บังคับ/ระบุ isolation level ที่ต้องการ
 
+> **RESOLVED** (commit `350f63b`): เพิ่ม doc comment บน `Allocate` ระบุชัดว่า tx ของ caller **MUST เป็น READ COMMITTED** พร้อมอธิบายว่าใต้ REPEATABLE READ/SERIALIZABLE การ re-lock หลัง concurrent commit จะ raise SQLSTATE 40001 และ allocator ไม่ retry (D-36). ใช้ doc comment เป็น fix หลักตามคำแนะนำ (ไม่เพิ่ม runtime assertion ที่หนักเกินจำเป็น)
+
 **File:** `donnarec-api/internal/receiptno/allocator.go:83-110`
 
 **Issue:** การรับประกัน gap-less + serialization แบบ non-blocking ขึ้นกับว่า tx ของ caller รันที่ **READ COMMITTED** ตอนนี้ helper ในโปรเจกต์ (`internal/db/helpers.go:26`) ใช้ `pool.Begin(ctx)` ซึ่ง default เป็น READ COMMITTED จึงปลอดภัยอยู่ แต่ `Allocate` รับ `pgx.Tx` จาก caller ใด ๆ และถูกระบุว่าเป็น single allocation path สำหรับ Phase 3+ หาก caller ในอนาคตเปิด tx ด้วย `REPEATABLE READ` หรือ `SERIALIZABLE` การ re-lock หลัง block (`LockCounterForUpdate`/`IncrementCounter`) จะ throw `40001 could not serialize access due to concurrent update` แทนที่จะ re-read — ทำให้ approval ที่ทำพร้อมกันกลายเป็น hard failure (allocator ไม่ retry ตาม D-36) ทั้ง signature และ doc comment ไม่ได้ระบุข้อกำหนด isolation นี้ไว้
@@ -66,6 +71,8 @@ logic fiscal year (Oct→+544, Jan–Sep→+543, normalise เป็น Asia/Ban
 
 ### WR-02: `formatted` ประกอบจาก `prefix`/`separator` ที่ admin ตั้งค่าได้ โดยไม่ validate อักขระ แล้วถูก render เป็น PDF ผ่าน headless Chromium HTML
 
+> **RESOLVED** (commit `85392d6`): เพิ่ม Go-side allowlist guard ที่ขอบ formatting — `formatReceiptNo` validate `prefix`/`separator` กับ `^[A-Za-z0-9 _./-]*$` และคืน error ถ้าไม่ผ่าน, `Allocate` propagate error ทำให้ tx ของ caller rollback ก่อนค่าเปื้อนจะถูก freeze ลง ledger (immutable). เลือก Go-side guard แทน DB CHECK เพื่อ **ไม่แก้ migration 000004 ที่ apply ไปแล้ว** — DB-level CHECK ถูก defer ไว้. เพิ่ม unit test `TestFormatReceiptNo_RejectsDangerousConfigChars` ครอบ payload เช่น `<img src=x onerror=...>`
+
 **File:** `donnarec-api/internal/receiptno/format.go:40-58`, `donnarec-api/migrations/000004_receipt_number_tables.up.sql:30-35`
 
 **Issue:** `prefix` และ `separator` เป็นค่า config `TEXT` แบบอิสระที่ไหลเข้า `formatted` โดยไม่ escape แล้วถูก freeze ลง ledger (immutable) และ (ตาม CLAUDE.md) ถูก render ผ่าน pipeline HTML→Chromium เพื่อสร้าง PDF ค่า config เช่น `prefix = "<img src=x onerror=...>"` จะกลายเป็น stored markup/script-injection payload ในทุกใบเสร็จ หาก renderer ปลายทางไม่ escape เนื่องจาก ledger เป็น append-only `formatted` ที่ปนเปื้อนแก้ด้วย UPDATE/DELETE ไม่ได้ ปัจจุบัน DB constrain เฉพาะ `year_format` (CHECK IN) ไม่ได้ constrain `prefix`/`separator`
@@ -75,6 +82,8 @@ logic fiscal year (Oct→+544, Jan–Sep→+543, normalise เป็น Asia/Ban
 ---
 
 ### WR-03: `Allocate` ไม่ปฏิเสธ `issueDate` ที่เป็น zero / ค่าผิดปกติ และผลลัพธ์ที่ผิดเป็นถาวร
+
+> **RESOLVED** (commit `a69abd1`): เพิ่ม guard ที่ต้นฟังก์ชัน `Allocate` — ปฏิเสธ `issueDate.IsZero()` ด้วย wrapped error และเพิ่ม lower-bound check แบบ conservative (`issueDate.Year() < 2020` → error) เพื่อจับ input ที่เสียหายก่อนเขียน counter+ledger row ที่ลบไม่ได้. ตั้งขอบล่างไว้หลวมพอที่จะไม่ปฏิเสธ approval timestamp จริง (ปัจจุบัน/อนาคต)
 
 **File:** `donnarec-api/internal/receiptno/allocator.go:83-85`, `donnarec-api/internal/receiptno/fiscal_year.go:71-90`
 
