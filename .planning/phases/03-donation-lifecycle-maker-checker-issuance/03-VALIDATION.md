@@ -10,6 +10,8 @@ created: 2026-06-28
 # Phase 03 — Validation Strategy
 
 > Per-phase validation contract for feedback sampling during execution.
+>
+> **NOTE — source of truth:** This file is an intentional scaffold; the concrete validation strategy lives in `03-RESEARCH.md` §"Validation Architecture" and in each plan's per-task `<verify>` / `<acceptance_criteria>` blocks. Treat those as authoritative; the placeholders below are non-blocking and intentionally left for later population.
 
 ---
 

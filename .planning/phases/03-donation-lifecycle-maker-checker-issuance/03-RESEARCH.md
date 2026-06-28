@@ -721,21 +721,24 @@ LIMIT @limit OFFSET @offset;
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Next.js frontend ใน Phase 3 หรือเปล่า?**
    - What we know: ROADMAP §Phase 3 มี "UI hint: yes"; ไม่มี frontend ใน repo; CONTEXT.md ไม่มี UI decisions
    - What's unclear: planner จะ bootstrap Next.js ใน Phase 3 หรือ defer ไป Phase 4?
    - Recommendation: ถ้า MVP = vertical slice end-to-end → bootstrap Next.js + minimal forms ใน Phase 3; ถ้า API-first → defer UI
+   - **RESOLVED:** Yes — Phase 3 bootstraps Next.js and ships the back-office UI as vertical slices (03-02 shell/auth, 03-07 list/detail, 03-08 create/edit + dialogs). MVP end-to-end path chosen.
 
 2. **`issueDate` parameter ใน Allocate() — ใช้ค่าอะไร?**
    - What we know: D-40 กำหนดว่า allocator รับ issueDate จาก caller; Phase 3 approval context คือ "เวลาอนุมัติ"
    - What's unclear: ควร pass `time.Now()` ณ เวลา approve หรือ DB `NOW()` ภายใน tx?
    - Recommendation: ใช้ `time.Now()` ใน Go service layer (consistent กับ approved_at field); ผลต่าง < millisecond ใน single-server scenario; สำคัญกว่าคือ timezone ต้อง UTC → allocator normalize เป็น Asia/Bangkok เอง (D-40)
+   - **RESOLVED:** Pass `time.Now()` from the Go service layer at approve time (03-05 Task 1 / 03-PATTERNS §Issuance step 4, D-40); the allocator normalizes to Asia/Bangkok internally.
 
 3. **Slip attachment ใน migration เดี่ยวหรือ รวมกับ donations?**
    - What we know: slip_attachments FK ไป donations; แยกจะง่าย rollback
    - Recommendation: แยก migration 000006 (slip_attachments) — ถ้า MinIO setup ยังไม่พร้อม planner ข้ามได้โดยไม่กระทบ donation table
+   - **RESOLVED:** Separate migrations — donations = 000005 (03-01), slip_attachments = 000006 (03-04), outbox_jobs = 000007 (03-01). Independent rollback retained per recommendation.
 
 ---
 
