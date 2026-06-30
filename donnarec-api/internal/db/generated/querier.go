@@ -12,6 +12,16 @@ import (
 
 type Querier interface {
 	AssignRole(ctx context.Context, arg AssignRoleParams) (UserRole, error)
+	// Cancel an issued receipt: issued → cancelled (FR-19, D-47).
+	// IMPORTANT: receipt_number_id and receipt_formatted are intentionally NOT modified.
+	// The CHECK constraint chk_receipt_only_on_issued_or_cancelled enforces they remain set
+	// for 'cancelled' status — preserving the sequence without a gap (D-47).
+	// cancel_reason is mandatory at service layer before this call.
+	CancelDonation(ctx context.Context, arg CancelDonationParams) error
+	// Insert a new donation record in 'draft' status with donor snapshot + PII ciphertext.
+	// created_at/updated_at omitted from VALUES — rely on DEFAULT now() (IN-01).
+	// donor_tax_id_enc/dek accept ciphertext only — plaintext is encrypted at service layer (D-44).
+	CreateDonation(ctx context.Context, arg CreateDonationParams) (CreateDonationRow, error)
 	// internal/db/queries/users.sql
 	// sqlc-annotated queries for the users and user_roles tables.
 	// All queries use explicit column lists (no bare * in INSERT).
@@ -20,6 +30,21 @@ type Querier interface {
 	// rather than duplicating now() here (IN-01).
 	CreateUser(ctx context.Context, arg CreateUserParams) (User, error)
 	DeactivateUser(ctx context.Context, id pgtype.UUID) (DeactivateUserRow, error)
+	// internal/db/queries/outbox.sql
+	// sqlc queries for the transactional outbox_jobs table (Phase 3 enqueue only).
+	// Phase 4 adds worker queries (poll, update status, mark done/failed).
+	//
+	// Design: INSERT happens inside the issuance transaction — if the receipt issuance
+	// rolls back, the outbox row is also rolled back (atomically linked, CLAUDE.md §"Email Delivery").
+	// Enqueue an outbox job inside the issuance transaction (Step 7 of Pattern 1).
+	// Caller MUST call this within the same pgx.Tx as IssueDonation so the job exists
+	// IFF the receipt was issued — all-or-nothing guarantee.
+	// job_type: e.g. 'issue_receipt'
+	// payload:  e.g. {"donation_id": "uuid-string"} as JSON bytes
+	EnqueueOutboxJob(ctx context.Context, arg EnqueueOutboxJobParams) error
+	// Full read of a donation row including PII ciphertext columns.
+	// PII decrypt + masking is done at service layer (never in SQL).
+	GetDonationByID(ctx context.Context, id pgtype.UUID) (Donation, error)
 	// audit.sql — sqlc queries for the audit_log table
 	// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
 	// Parameterized queries only — no string concatenation (T-1-tamper-01).
@@ -55,6 +80,12 @@ type Querier interface {
 	// The UNIQUE(fiscal_year, running_no) backstop fires here if a logic bug produces a
 	// duplicate — the constraint is the last line of defense independent of app logic (D-37).
 	InsertReceiptNumberLedger(ctx context.Context, arg InsertReceiptNumberLedgerParams) (ReceiptNumber, error)
+	// Stamp receipt fields on approval: pending_review → issued (FR-14, D-38, D-42).
+	// WHERE status='pending_review' is an extra DB-side precondition — the primary guard is
+	// LockDonationForUpdate + code check in service; this is defense-in-depth (D-52).
+	// receipt_number_id must reference an allocated receipt_numbers row (D-38 FK constraint).
+	// receipt_formatted is the frozen snapshot from the allocator (D-42 — never recomputed).
+	IssueDonation(ctx context.Context, arg IssueDonationParams) error
 	// Returns all audit rows in ascending id order for chain verification.
 	// Used by VerifyChain to recompute each row_hash and detect tampering.
 	// Admin / internal tool only — no pagination (verification reads entire chain).
@@ -81,6 +112,48 @@ type Querier interface {
 	// Returns pgx.ErrNoRows if no counter row exists yet (first allocation of a new fiscal year).
 	// Caller (allocator.go) must handle ErrNoRows by calling InitCounterRow first (Pitfall 1).
 	LockCounterForUpdate(ctx context.Context, fiscalYear int32) (int32, error)
+	// internal/db/queries/donations.sql
+	// sqlc queries for Phase 3: donation lifecycle (create/submit/review/approve/cancel/search)
+	// All queries use named @params and explicit column lists (no SELECT * in writes, Pattern F).
+	// Parameterized only — no string concatenation (T-03 threat model mitigation).
+	//
+	// Key design constraints:
+	//   - LockDonationForUpdate uses SELECT … FOR UPDATE (D-52, NFR-04) to serialize approvals
+	//   - IssueDonation has a WHERE status='pending_review' precondition (extra DB-side safety)
+	//   - CancelDonation retains receipt_number_id/receipt_formatted (FR-19, D-47)
+	//   - SearchDonations uses nullable @param::TYPE IS NULL pattern for optional filters (D-53)
+	// Lock the donation row FOR UPDATE to serialize concurrent approval attempts (D-52).
+	// Returns the columns needed for precondition checks (status, created_by) and
+	// downstream use (receipt_number_id for idempotency, edonation_keyed for cancel guard).
+	// Caller MUST hold this lock for the full issuance transaction (see 03-PATTERNS §Issuance).
+	//
+	// Returns pgx.ErrNoRows if the donation does not exist (caller maps to 404).
+	LockDonationForUpdate(ctx context.Context, id pgtype.UUID) (LockDonationForUpdateRow, error)
+	// Checker permanently rejects pending_review → rejected with a mandatory reason (D-45, FR-12).
+	// 'rejected' is a terminal state — no further transitions are allowed.
+	// review_reason is enforced as non-empty at service layer before this call.
+	RejectDonation(ctx context.Context, arg RejectDonationParams) error
+	// Checker returns pending_review → draft with a mandatory reason (D-45, FR-12).
+	// review_reason is enforced as non-empty at service layer before this call.
+	ReturnDonation(ctx context.Context, arg ReturnDonationParams) error
+	// Search donations by name / date range / status / receipt number (FR-10, D-53).
+	// All filter params are optional (nullable @param::TYPE IS NULL pattern):
+	//   pass NULL  → filter is skipped (no restriction applied)
+	//   pass value → filter is applied
+	// Results exclude PII ciphertext columns for performance and least-privilege.
+	// Pagination: caller passes @limit_n rows starting at @offset_n.
+	SearchDonations(ctx context.Context, arg SearchDonationsParams) ([]SearchDonationsRow, error)
+	// Link a cancelled record to its reissued successor (D-50 Void & Reissue).
+	// Called after the replacement donation has been created and committed.
+	// Only updates the replaced_by pointer — no status change here.
+	SetReplacedBy(ctx context.Context, arg SetReplacedByParams) error
+	// Transition draft → pending_review (FR-11 state machine).
+	// submitted_at records when the Maker sent it for review.
+	SubmitDonation(ctx context.Context, id pgtype.UUID) error
+	// Update Maker-editable donor fields. Only allowed while status = 'draft' (FR-09).
+	// Checker-set fields (reviewed_by/at/reason) are NOT included here.
+	// PII columns accept ciphertext — re-encrypt at service layer before calling.
+	UpdateDraftDonation(ctx context.Context, arg UpdateDraftDonationParams) error
 }
 
 var _ Querier = (*Queries)(nil)
