@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-06-28T12:50:04.332Z"
-last_activity: 2026-06-28 -- Phase 03 execution started
+last_updated: "2026-06-30T18:41:12.531Z"
+last_activity: 2026-06-30
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 17
-  completed_plans: 9
+  completed_plans: 15
   percent: 33
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
-Plan: 1 of 8
-Status: Executing Phase 03
-Last activity: 2026-06-28 -- Phase 03 execution started
+Plan: 2 of 8
+Status: Ready to execute
+Last activity: 2026-06-30
 
-Progress: [██████████] 100%
+Progress: [█████████░] 88%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [██████████] 100%
 | Phase 02 P02 | 254 | 2 tasks | 4 files |
 | Phase 02 P03 | 256 | 1 tasks | 2 files |
 | Phase 02-gap-less-receipt-numbering-core P04 | 502 | 2 tasks | 4 files |
+| Phase 03 P05 | 120 | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -70,6 +71,9 @@ Recent decisions affecting current work:
 - Roadmap: Public donation web form (Flow B) built LAST (Phase 6) — reuses the entire Flow-A pipeline.
 - [Phase ?]: Allocator.queries field is *db.Queries (concrete) not db.Querier — WithTx bind requires concrete type (02-PATTERNS Key Observation #1)
 - [Phase ?]: allocator_test.go uses black-box package receiptno_test; Allocator/NewAllocator/AllocatedReceipt are exported
+- [Phase 03]: Atomic 7-step Approve tx: lock→SoD→Allocate→Issue→Audit→Outbox in one WithTx closure — any failure rolls back all effects; receipt number exists only on issued records
+- [Phase 03]: SoD enforced at code layer (approverID != createdBy) AND DB CHECK (chk_sod_approver) — defense-in-depth; both layers tested by integration tests
+- [Phase 03]: Checker route group RequireRoles(Checker, Admin) at HTTP layer in addition to service-layer SoD guard — defense-in-depth over service layer
 
 ### Pending Todos
 
@@ -93,6 +97,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-28T11:49:26.869Z
+Last session: 2026-06-30T18:40:11.574Z
 Stopped at: Phase 3 UI-SPEC approved
-Resume file: .planning/phases/03-donation-lifecycle-maker-checker-issuance/03-UI-SPEC.md
+Resume file: None
