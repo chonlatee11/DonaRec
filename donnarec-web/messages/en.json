@@ -1,0 +1,132 @@
+{
+  "app": {
+    "title": "DonaRec",
+    "subtitle": "Hospital Donation Receipt System"
+  },
+  "nav": {
+    "donations": "Donations",
+    "queue": "Pending Review",
+    "settings": "Settings"
+  },
+  "locale": {
+    "th": "ภาษาไทย",
+    "en": "English",
+    "switch": "Switch Language"
+  },
+  "actions": {
+    "create": "Create Donation",
+    "saveDraft": "Save Draft",
+    "submitForReview": "Submit for Review",
+    "resubmit": "Resubmit",
+    "approve": "Approve",
+    "returnForEdit": "Return for Edit",
+    "reject": "Reject",
+    "cancelReceipt": "Cancel Receipt",
+    "voidAndReissue": "Void & Reissue",
+    "revealPii": "Reveal",
+    "hidePii": "Hide",
+    "attachSlip": "Attach Slip",
+    "removeSlip": "Remove",
+    "search": "Search",
+    "clearFilters": "Clear Filters",
+    "viewDetails": "View Details",
+    "confirmReveal": "Confirm Reveal",
+    "cancel": "Cancel"
+  },
+  "status": {
+    "draft": "Draft",
+    "pending_review": "Pending Review",
+    "issued": "Issued",
+    "rejected": "Rejected",
+    "cancelled": "Cancelled"
+  },
+  "errors": {
+    "sod": "You are the creator of this record — the approver must be a different person (Segregation of Duties)",
+    "statusConflict": "This record has already been processed — please reload the page to see the latest status",
+    "validation": "Invalid data",
+    "network": "Save failed — please check your connection and try again",
+    "requiredField": "Please enter {fieldName}",
+    "nationalId": "National ID / Tax ID must be 13 digits",
+    "amountPositive": "Amount must be greater than 0",
+    "invalidEmail": "Invalid email format",
+    "consentRequired": "Please confirm consent before submitting",
+    "fileTypeRejected": "File type not supported — only JPG, PNG, PDF up to 10 MB",
+    "fileTooLarge": "File exceeds 10 MB — please choose a smaller file",
+    "returnRejectWithoutReason": "Please provide a reason before proceeding",
+    "cancelWithoutReason": "Please provide a cancellation reason",
+    "piiNoPermission": "You do not have permission to reveal this information"
+  },
+  "empty": {
+    "noRecords": {
+      "heading": "No donations yet",
+      "body": "Click \"Create Donation\" to record your first entry"
+    },
+    "noSearchResults": {
+      "heading": "No records match your filters",
+      "body": "Try adjusting your filters or clearing the search"
+    },
+    "noQueue": {
+      "heading": "No items pending review",
+      "body": "Records submitted for review will appear here"
+    }
+  },
+  "dialogs": {
+    "rejectPermanent": {
+      "title": "Confirm Permanent Rejection",
+      "body": "This record will be permanently rejected and cannot be resubmitted for approval.",
+      "reasonLabel": "Reason for rejection *",
+      "confirm": "Reject Permanently"
+    },
+    "voidReceipt": {
+      "title": "Confirm Receipt Cancellation",
+      "body": "Receipt {receiptFormatted} will be cancelled. The number will remain in the system for audit purposes.",
+      "reasonLabel": "Reason for cancellation *",
+      "confirm": "Confirm Cancellation"
+    },
+    "voidWithEDonation": {
+      "title": "Confirm Cancellation — This receipt has been keyed into e-Donation",
+      "alert": "This receipt has been entered into the Revenue Department's e-Donation system. Please confirm that you have corrected or revoked the entry on the RD side before cancelling in this system.",
+      "rdConfirmLabel": "Confirm what action was taken on the RD side *",
+      "confirm": "Confirm RD action completed and cancel receipt"
+    },
+    "voidAndReissue": {
+      "title": "Confirm Void and Reissue",
+      "body": "Receipt {receiptFormatted} will be cancelled and a new record will be created for a replacement. The replacement must go through normal approval and will receive a new receipt number.",
+      "reasonLabel": "Reason and information to correct *",
+      "confirm": "Confirm"
+    },
+    "returnForEdit": {
+      "title": "Return Record for Edit",
+      "body": "The Maker will be notified to edit and resubmit.",
+      "reasonLabel": "Points to correct *",
+      "confirm": "Return for Edit"
+    },
+    "revealPii": {
+      "title": "Reveal National ID / Tax ID",
+      "body": "Viewing this information will be recorded in the audit log with your name and timestamp.",
+      "confirm": "Confirm Reveal"
+    }
+  },
+  "fields": {
+    "donorName": "Donor Name",
+    "nationalId": "National ID / Tax ID",
+    "address": "Donor Address",
+    "email": "Donor Email",
+    "amount": "Donation Amount (THB)",
+    "donatedAt": "Donation Date",
+    "note": "Note",
+    "receiptNumber": "Receipt Number",
+    "createdBy": "Created By",
+    "status": "Status",
+    "managedAt": "Manage"
+  },
+  "placeholders": {
+    "donorNameSearch": "Type name...",
+    "receiptNumberSearch": "Receipt number"
+  },
+  "filter": {
+    "allStatuses": "All Statuses",
+    "donatedFrom": "Donated from",
+    "donatedTo": "to"
+  }
+}
