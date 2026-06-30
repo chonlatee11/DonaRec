@@ -79,7 +79,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] 03-04-PLAN.md — Slip storage slice (TDD): MinIO + magic-byte + size limit + soft-delete-retain
 - [ ] 03-05-PLAN.md — Issuance & review slice (TDD ★): atomic approve tx + SoD + concurrency proof + return/reject
 - [ ] 03-06-PLAN.md — Cancel / Void & Reissue + audited PII reveal + search (TDD)
-- [ ] 03-07-PLAN.md — Frontend list/search + detail/review + SoD blocked state
+- [x] 03-07-PLAN.md — Frontend list/search + detail/review + SoD blocked state
 - [ ] 03-08-PLAN.md — Frontend create/edit form + slip upload + consent + reveal/cancel dialogs
 **UI hint**: yes
 
@@ -143,7 +143,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
-| 3. Donation Lifecycle & Maker-Checker Issuance | 2/8 | In Progress|  |
+| 3. Donation Lifecycle & Maker-Checker Issuance | 3/8 | In Progress|  |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
