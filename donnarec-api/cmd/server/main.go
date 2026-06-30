@@ -20,6 +20,7 @@ import (
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/users"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -107,16 +108,32 @@ func main() {
 	// Donation service: PII encrypt/mask, state machine, consent capture (FR-07/09/11/29).
 	donationSvc := donation.NewDonationService(pool, queries, allocator, auditSvc, keyProvider, logger)
 
+	// Object storage client: MinIO/S3-compatible, used for slip file uploads (Plan 03-04, D-48).
+	storageClient, err := storage.NewStorageClient(
+		cfg.MinIO.Endpoint,
+		cfg.MinIO.AccessKey,
+		cfg.MinIO.SecretKey,
+		cfg.MinIO.Bucket,
+		cfg.MinIO.Secure,
+	)
+	if err != nil {
+		logger.Fatal("storage client init failed", zap.Error(err))
+	}
+
+	// Slip service: upload/view/remove donation slip attachments (Plan 03-04, D-48, D-54).
+	slipSvc := donation.NewSlipService(pool, queries, storageClient, auditSvc, logger)
+
 	// --------------------------------------------------------
 	// Handlers
 	// --------------------------------------------------------
 	userHandler := users.NewUserHandler(userSvc, logger)
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
+	slipHandler := donation.NewSlipHandler(slipSvc, logger)
 
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, userHandler, donationHandler, logger)
+	router := setupRouter(authMW, auditSvc, userHandler, donationHandler, slipHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -161,7 +178,7 @@ func main() {
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
 //  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin)
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, logger *zap.Logger) *gin.Engine {
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -197,7 +214,6 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, user
 	// ---- Maker/Checker/Admin — /api/donations (all staff) ----
 	// Pattern E: RequireRoles after RequireAuth — claims must already exist in context.
 	// Checker/Admin review actions (approve/return/reject/cancel) wired in plans 03-05/03-06.
-	// Slip upload (03-04) and PII reveal (03-05) not registered here — handlers don't exist yet.
 	donationGroup := api.Group("/donations")
 	donationGroup.Use(auth.RequireRoles(auth.RoleMaker, auth.RoleChecker, auth.RoleAdmin))
 	donationGroup.POST("", donationHandler.Create)
@@ -205,6 +221,14 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, user
 	donationGroup.GET("/:id", donationHandler.GetByID)
 	donationGroup.PUT("/:id", donationHandler.Update)
 	donationGroup.POST("/:id/submit", donationHandler.Submit)
+
+	// ---- Slip attachment routes (Plan 03-04, D-48) ----
+	// POST   /:id/slip        — upload a slip file (multipart/form-data, field "file")
+	// GET    /:id/slip        — view slip presigned URL (15-min TTL, T-03-16)
+	// DELETE /:id/slip        — soft-delete the active slip (D-54)
+	donationGroup.POST("/:id/slip", slipHandler.Upload)
+	donationGroup.GET("/:id/slip", slipHandler.View)
+	donationGroup.DELETE("/:id/slip", slipHandler.Remove)
 
 	return router
 }
