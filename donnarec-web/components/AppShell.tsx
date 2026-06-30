@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { LocaleSwitcher } from "./LocaleSwitcher";
+import { Toaster } from "@/components/ui/toaster";
 
 /**
  * AppShell — root layout shell for all back-office pages.
@@ -36,9 +38,9 @@ export async function AppShell({
           </span>
         </div>
 
-        {/* Nav links — populated in 03-07/03-08 */}
+        {/* Nav links */}
         <nav className="flex-1 px-4 py-6 space-y-1" aria-label="Main navigation">
-          <a
+          <Link
             href="/donations"
             className={[
               "flex items-center gap-2 rounded-md px-3 py-2",
@@ -50,8 +52,8 @@ export async function AppShell({
             ].join(" ")}
           >
             {t("donations")}
-          </a>
-          <a
+          </Link>
+          <Link
             href="/queue"
             className={[
               "flex items-center gap-2 rounded-md px-3 py-2",
@@ -62,7 +64,7 @@ export async function AppShell({
             ].join(" ")}
           >
             {t("queue")}
-          </a>
+          </Link>
         </nav>
       </aside>
 
@@ -78,6 +80,8 @@ export async function AppShell({
           {children}
         </main>
       </div>
+      {/* Toaster — required for ReviewActionPanel approve/return/reject success/error feedback */}
+      <Toaster />
     </div>
   );
 }
