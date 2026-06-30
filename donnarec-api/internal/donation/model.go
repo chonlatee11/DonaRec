@@ -63,6 +63,18 @@ type DonationResponse struct {
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 	SubmittedAt        *time.Time `json:"submitted_at,omitempty"`
+	// Review/approval fields — populated after Checker action (plan 03-05).
+	ReviewedBy       *string    `json:"reviewed_by,omitempty"`        // Checker UUID who returned/rejected
+	ReviewedAt       *time.Time `json:"reviewed_at,omitempty"`         // timestamp of review action
+	ReviewReason     *string    `json:"review_reason,omitempty"`       // mandatory reason for return/reject
+	ApprovedAt       *time.Time `json:"approved_at,omitempty"`         // timestamp of approval
+	ReceiptFormatted *string    `json:"receipt_formatted,omitempty"`   // frozen receipt number string (D-42)
+}
+
+// ReviewRequest is the JSON request body for Return and Reject actions (D-45, FR-12).
+// Reason is mandatory — empty or whitespace-only returns ErrMissingReason (422 Unprocessable).
+type ReviewRequest struct {
+	Reason string `json:"reason" validate:"required,min=1,max=2000"`
 }
 
 // ListFilter holds optional search/filter criteria for listing donations (FR-10, D-53).

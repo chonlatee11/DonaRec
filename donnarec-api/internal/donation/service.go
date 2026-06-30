@@ -19,6 +19,7 @@ package donation
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -72,9 +73,11 @@ func NewDonationService(
 
 // canTransition returns true if the given action is permitted from the current donation status.
 //
-// This function is the single source of truth for the D-45 state machine (plan 03-03).
-// Submit and update are the two transitions owned by this plan.
-// Approve/return/reject/cancel arms are wired in plans 03-05/03-06.
+// This function is the single source of truth for the D-45 state machine (plan 03-03/03-05/03-06).
+// All arms must be kept in sync with the DB CHECK constraints and the state diagram in CLAUDE.md.
+//
+//	draft ──submit──► pending_review ──approve──► issued ──cancel──► cancelled
+//	             ◄──return──┘         ──reject──► rejected (terminal)
 func canTransition(from db.DonationStatus, action string) bool {
 	switch action {
 	case "submit":
@@ -83,6 +86,12 @@ func canTransition(from db.DonationStatus, action string) bool {
 	case "update":
 		// Only draft can be edited (FR-09).
 		return from == db.DonationStatusDraft
+	case "approve", "return", "reject":
+		// Checker actions: only pending_review is actionable (D-45).
+		return from == db.DonationStatusPendingReview
+	case "cancel":
+		// Only issued records can be cancelled (FR-19, D-47 — wired in plan 03-06).
+		return from == db.DonationStatusIssued
 	default:
 		return false
 	}
@@ -504,6 +513,302 @@ func (s *DonationService) List(ctx context.Context, filter ListFilter, claims au
 	return result, rows.Err()
 }
 
+// Approve is the load-bearing issuance transaction (FR-14, D-52, plan 03-05).
+//
+// Inside ONE db.WithTx closure the method:
+//  1. Locks the donation row FOR UPDATE (D-52) to serialize concurrent approvals.
+//  2. Checks status == pending_review — ErrInvalidTransition otherwise.
+//  3. Enforces SoD: approverID != donation.CreatedBy — ErrSoDViolation otherwise.
+//  4. Calls s.allocator.Allocate(ctx, tx, ...) — THE ONLY call site (D-35/D-33).
+//  5. Calls qtx.IssueDonation — stamps status=issued + receipt fields.
+//  6. Calls s.auditSvc.AppendAuditEntryTx — audit in-tx, NOT best-effort (NFR-05/Pitfall 4).
+//  7. Calls qtx.EnqueueOutboxJob — outbox INSERT atomically linked (Phase 4 consumes).
+//
+// Any error causes WithTx to roll back ALL seven effects.
+// PDF render and email send are NOT performed here — only the outbox job is enqueued.
+func (s *DonationService) Approve(ctx context.Context, id string, claims auth.KeycloakClaims) (*DonationResponse, error) {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	var approverUUID pgtype.UUID
+	if err := approverUUID.Scan(claims.Subject); err != nil {
+		return nil, fmt.Errorf("invalid approver UUID in claims: %w", err)
+	}
+
+	approvedAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+
+	var issuedRow db.Donation
+	err := dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		// Step 1: Lock the donation row FOR UPDATE — serializes concurrent approvals (D-52).
+		// LockDonationForUpdate returns ErrNoRows if the donation does not exist.
+		locked, lockErr := qtx.LockDonationForUpdate(ctx, pgUUID)
+		if lockErr != nil {
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock donation: %w", lockErr)
+		}
+
+		// Step 2: Status precondition — only pending_review may be approved (D-45).
+		// Primary guard; IssueDonation SQL also has WHERE status='pending_review' as backstop.
+		if !canTransition(locked.Status, "approve") {
+			return ErrInvalidTransition
+		}
+
+		// Step 3: Segregation of Duties — approver must not be the record's creator (FR-14).
+		// Both the UUID bytes and the Valid flag are compared so a NULL created_by never
+		// accidentally passes the check.
+		if locked.CreatedBy == approverUUID {
+			return ErrSoDViolation
+		}
+
+		// Step 4: Allocate gap-less receipt number within this transaction.
+		// IMPORTANT: pass the closure's tx, NOT the pool (D-33/D-35).
+		// This is the SOLE call site of Allocate in the entire codebase (D-35).
+		receipt, allocErr := s.allocator.Allocate(ctx, tx, approvedAt.Time)
+		if allocErr != nil {
+			return fmt.Errorf("allocate receipt number: %w", allocErr)
+		}
+
+		// Step 5: Stamp status=issued + receipt fields on the donation row.
+		// receipt.ID  = receipt_numbers ledger PK → donations.receipt_number_id FK (D-38).
+		// receipt.Formatted = frozen formatted string — never recomputed after this (D-42).
+		receiptID := receipt.ID
+		formatted := receipt.Formatted
+		if issueErr := qtx.IssueDonation(ctx, db.IssueDonationParams{
+			ApprovedBy:       approverUUID,
+			ApprovedAt:       approvedAt,
+			ReceiptNumberID:  &receiptID,
+			ReceiptFormatted: &formatted,
+			ID:               pgUUID,
+		}); issueErr != nil {
+			return fmt.Errorf("issue donation: %w", issueErr)
+		}
+
+		// Step 6: Append audit entry inside this transaction (NFR-05).
+		// Must NOT be best-effort (Pitfall 4): failure here rolls back the entire issuance.
+		// AppendAuditEntryTx acquires pg_advisory_xact_lock internally — no extra locking needed.
+		afterJSON, _ := json.Marshal(map[string]any{
+			"receipt_formatted": receipt.Formatted,
+			"status":            "issued",
+		})
+		if auditErr := s.auditSvc.AppendAuditEntryTx(ctx, tx, audit.AuditEntry{
+			ActorID:    claims.Subject,
+			ActorEmail: claims.ActorIdentity(),
+			Action:     "donation.approve",
+			Resource:   "/api/donations/" + id + "/approve",
+			AfterJSON:  afterJSON,
+		}); auditErr != nil {
+			return fmt.Errorf("audit approve: %w", auditErr)
+		}
+
+		// Step 7: Enqueue outbox job — atomically linked with the issuance (Phase 4 consumes).
+		// Do NOT render PDF or send email here; that would hold the row lock too long (NFR-07).
+		payload, _ := json.Marshal(map[string]string{"donation_id": id})
+		if outboxErr := qtx.EnqueueOutboxJob(ctx, db.EnqueueOutboxJobParams{
+			JobType: "issue_receipt",
+			Payload: payload,
+		}); outboxErr != nil {
+			return fmt.Errorf("enqueue outbox: %w", outboxErr)
+		}
+
+		// Fetch the updated row inside the transaction so the response reflects committed state.
+		var getErr error
+		issuedRow, getErr = qtx.GetDonationByID(ctx, pgUUID)
+		return getErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt only to produce the masked value for the response (T-03-09).
+	plaintext, decErr := crypto.DecryptField(ctx, s.keyProvider, issuedRow.DonorTaxIDEnc, issuedRow.DonorTaxIDDek)
+	if decErr != nil {
+		return nil, fmt.Errorf("decrypt donor tax ID: %w", decErr)
+	}
+
+	// Pattern C: log operation + IDs only — no PII in logs (T-03-10).
+	s.logger.Info("donation approved",
+		zap.String("donation_id", id),
+		zap.String("approved_by", claims.Subject),
+	)
+
+	return donationRowToResponse(issuedRow, pii.MaskNationalID(string(plaintext))), nil
+}
+
+// Return transitions a pending_review donation back to draft so the Maker can correct it (D-45, FR-12).
+//
+// reason is mandatory — returns ErrMissingReason before any DB call if empty/whitespace.
+// Uses LockDonationForUpdate + status precondition to serialize concurrent reviewer attempts.
+// AppendAuditEntryTx records the action in the same transaction (NFR-05).
+func (s *DonationService) Return(ctx context.Context, id string, reason string, claims auth.KeycloakClaims) (*DonationResponse, error) {
+	// Mandatory reason check — early exit before any DB call.
+	if strings.TrimSpace(reason) == "" {
+		return nil, ErrMissingReason
+	}
+
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	var reviewerUUID pgtype.UUID
+	if err := reviewerUUID.Scan(claims.Subject); err != nil {
+		return nil, fmt.Errorf("invalid reviewer UUID in claims: %w", err)
+	}
+
+	reviewedAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+
+	var returnedRow db.Donation
+	err := dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		locked, lockErr := qtx.LockDonationForUpdate(ctx, pgUUID)
+		if lockErr != nil {
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock donation: %w", lockErr)
+		}
+
+		// Only pending_review can be returned to draft (D-45).
+		if !canTransition(locked.Status, "return") {
+			return ErrInvalidTransition
+		}
+
+		if err := qtx.ReturnDonation(ctx, db.ReturnDonationParams{
+			ReviewedBy:   reviewerUUID,
+			ReviewedAt:   reviewedAt,
+			ReviewReason: &reason,
+			ID:           pgUUID,
+		}); err != nil {
+			return fmt.Errorf("return donation: %w", err)
+		}
+
+		afterJSON, _ := json.Marshal(map[string]any{
+			"status":        "draft",
+			"review_reason": reason,
+		})
+		if auditErr := s.auditSvc.AppendAuditEntryTx(ctx, tx, audit.AuditEntry{
+			ActorID:    claims.Subject,
+			ActorEmail: claims.ActorIdentity(),
+			Action:     "donation.return",
+			Resource:   "/api/donations/" + id + "/return",
+			AfterJSON:  afterJSON,
+		}); auditErr != nil {
+			return fmt.Errorf("audit return: %w", auditErr)
+		}
+
+		var getErr error
+		returnedRow, getErr = qtx.GetDonationByID(ctx, pgUUID)
+		return getErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	plaintext, decErr := crypto.DecryptField(ctx, s.keyProvider, returnedRow.DonorTaxIDEnc, returnedRow.DonorTaxIDDek)
+	if decErr != nil {
+		return nil, fmt.Errorf("decrypt donor tax ID: %w", decErr)
+	}
+
+	// Pattern C: no PII in logs.
+	s.logger.Info("donation returned to draft",
+		zap.String("donation_id", id),
+		zap.String("reviewed_by", claims.Subject),
+	)
+
+	return donationRowToResponse(returnedRow, pii.MaskNationalID(string(plaintext))), nil
+}
+
+// Reject permanently rejects a pending_review donation (D-45, FR-12).
+// 'rejected' is a terminal state — no further transitions are allowed.
+//
+// reason is mandatory — returns ErrMissingReason before any DB call if empty/whitespace.
+func (s *DonationService) Reject(ctx context.Context, id string, reason string, claims auth.KeycloakClaims) (*DonationResponse, error) {
+	// Mandatory reason check — early exit before any DB call.
+	if strings.TrimSpace(reason) == "" {
+		return nil, ErrMissingReason
+	}
+
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	var reviewerUUID pgtype.UUID
+	if err := reviewerUUID.Scan(claims.Subject); err != nil {
+		return nil, fmt.Errorf("invalid reviewer UUID in claims: %w", err)
+	}
+
+	reviewedAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+
+	var rejectedRow db.Donation
+	err := dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		locked, lockErr := qtx.LockDonationForUpdate(ctx, pgUUID)
+		if lockErr != nil {
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock donation: %w", lockErr)
+		}
+
+		// Only pending_review can be rejected (D-45, terminal state).
+		if !canTransition(locked.Status, "reject") {
+			return ErrInvalidTransition
+		}
+
+		if err := qtx.RejectDonation(ctx, db.RejectDonationParams{
+			ReviewedBy:   reviewerUUID,
+			ReviewedAt:   reviewedAt,
+			ReviewReason: &reason,
+			ID:           pgUUID,
+		}); err != nil {
+			return fmt.Errorf("reject donation: %w", err)
+		}
+
+		afterJSON, _ := json.Marshal(map[string]any{
+			"status":        "rejected",
+			"review_reason": reason,
+		})
+		if auditErr := s.auditSvc.AppendAuditEntryTx(ctx, tx, audit.AuditEntry{
+			ActorID:    claims.Subject,
+			ActorEmail: claims.ActorIdentity(),
+			Action:     "donation.reject",
+			Resource:   "/api/donations/" + id + "/reject",
+			AfterJSON:  afterJSON,
+		}); auditErr != nil {
+			return fmt.Errorf("audit reject: %w", auditErr)
+		}
+
+		var getErr error
+		rejectedRow, getErr = qtx.GetDonationByID(ctx, pgUUID)
+		return getErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	plaintext, decErr := crypto.DecryptField(ctx, s.keyProvider, rejectedRow.DonorTaxIDEnc, rejectedRow.DonorTaxIDDek)
+	if decErr != nil {
+		return nil, fmt.Errorf("decrypt donor tax ID: %w", decErr)
+	}
+
+	// Pattern C: no PII in logs.
+	s.logger.Info("donation rejected",
+		zap.String("donation_id", id),
+		zap.String("reviewed_by", claims.Subject),
+	)
+
+	return donationRowToResponse(rejectedRow, pii.MaskNationalID(string(plaintext))), nil
+}
+
 // --- Private helpers ---
 
 // donationRowToResponse converts a full db.Donation row to a DonationResponse.
@@ -522,6 +827,8 @@ func donationRowToResponse(row db.Donation, maskedTaxID string) *DonationRespons
 		ConsentGiven:       row.ConsentGiven,
 		ConsentTextVersion: row.ConsentTextVersion,
 		ConsentPurpose:     row.ConsentPurpose,
+		ReviewReason:       row.ReviewReason,
+		ReceiptFormatted:   row.ReceiptFormatted,
 		CreatedBy:          row.CreatedBy.String(),
 		CreatedAt:          row.CreatedAt.Time,
 		UpdatedAt:          row.UpdatedAt.Time,
@@ -533,6 +840,19 @@ func donationRowToResponse(row db.Donation, maskedTaxID string) *DonationRespons
 	if row.SubmittedAt.Valid {
 		t := row.SubmittedAt.Time
 		resp.SubmittedAt = &t
+	}
+	// Checker/approval fields — populated after review actions (plan 03-05).
+	if row.ApprovedAt.Valid {
+		t := row.ApprovedAt.Time
+		resp.ApprovedAt = &t
+	}
+	if row.ReviewedBy.Valid {
+		s := row.ReviewedBy.String()
+		resp.ReviewedBy = &s
+	}
+	if row.ReviewedAt.Valid {
+		t := row.ReviewedAt.Time
+		resp.ReviewedAt = &t
 	}
 	return resp
 }
