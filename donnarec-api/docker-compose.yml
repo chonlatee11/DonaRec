@@ -3,6 +3,7 @@
 # Services:
 #   postgres  — PostgreSQL 17 (shared for both app and Keycloak databases)
 #   keycloak  — Self-hosted Keycloak 26.6.3 (OIDC identity provider)
+#   minio     — MinIO object storage for donation slip files (Plan 03-04, D-48)
 #   migrate   — golang-migrate init-service (runs DB migrations before api starts)
 #   api       — donnarec-api Go backend
 #
@@ -18,6 +19,7 @@
 # After startup:
 #   API:         http://localhost:8000/healthz
 #   Keycloak:    http://localhost:8080 (admin console)
+#   MinIO UI:    http://localhost:9001  (admin console — MINIO_ACCESS_KEY / MINIO_SECRET_KEY)
 
 x-common-env: &postgres-common
   POSTGRES_USER: ${DB_USER:-donnarec}
@@ -99,6 +101,38 @@ services:
     restart: unless-stopped
 
   # ----------------------------------------------------------------
+  # MinIO — S3-compatible object storage for donation slip files
+  #
+  # Used by donnarec-api for slip attachment storage (Plan 03-04, D-48).
+  # Phase 6 (public Flow B slip uploads) reuses this same MinIO instance.
+  #
+  # Dev credentials are set via MINIO_ACCESS_KEY / MINIO_SECRET_KEY in .env
+  # (defaults to minioadmin / minioadmin — change in any non-local environment).
+  #
+  # Ports:
+  #   9000 — S3 API endpoint (used by donnarec-api MINIO_ENDPOINT=minio:9000)
+  #   9001 — MinIO web console (http://localhost:9001 for manual bucket management)
+  # ----------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------
   # migrate — golang-migrate init-service (GAP 1)
   #
   # Runs all pending DB migrations before the api service starts.
@@ -145,12 +179,20 @@ services:
       RETENTION_DONATION_DAYS: ${RETENTION_DONATION_DAYS:-1825}
       RETENTION_AUDIT_DAYS: ${RETENTION_AUDIT_DAYS:-3650}
       RETENTION_DEFAULT_LEGAL_BASIS: ${RETENTION_DEFAULT_LEGAL_BASIS:-tax_obligation}
+      # MinIO object storage (Plan 03-04, D-48) — api reaches MinIO via internal Docker network
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-donnarec-slips}
+      MINIO_SECURE: ${MINIO_SECURE:-false}
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
       keycloak:
+        condition: service_healthy
+      minio:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
@@ -164,4 +206,6 @@ services:
 
 volumes:
   postgres_data:
+    driver: local
+  minio_data:
     driver: local
