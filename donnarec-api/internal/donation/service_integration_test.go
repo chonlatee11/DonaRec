@@ -18,7 +18,24 @@
 // Additional scaffold tests cover FR-07, FR-09, FR-10, FR-19, D-50.
 package donation_test
 
-import "testing"
+import (
+	"bytes"
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/donnarec/donnarec-api/internal/auth"
+	"github.com/donnarec/donnarec-api/internal/crypto"
+	db "github.com/donnarec/donnarec-api/internal/db/generated"
+	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/testutil"
+)
+
+// integTestKEK is a 32-byte hex key for integration test use only.
+const integTestKEK = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
 
 // TestIssuanceTransaction_RollbackOnError verifies INV-1: when any step of the
 // issuance transaction fails (allocate, update status, audit, enqueue outbox),
@@ -114,9 +131,57 @@ func TestCancelRetainsReceiptNumber(t *testing.T) {
 // Requires Docker testcontainers. Skip with -short.
 func TestPII_TaxIDStoredEncrypted(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Wave 0 scaffold — implemented in plan 03-03 (PII encrypt on create)")
+		t.Skip("skipping integration test in short mode: requires Docker")
 	}
-	t.Skip("Wave 0 scaffold — implemented in plan 03-03 (PII encrypt on create)")
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	svc := donation.NewDonationService(pool, queries, nil, nil, kp, zap.NewNop())
+
+	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email:           "pii-enc-test@example.com",
+		DisplayName:     "PII Enc Test Maker",
+		KeycloakSubject: "pii-enc-test-keycloak-subject",
+	})
+	require.NoError(t, err)
+
+	const plainTaxID = "1234567890123"
+
+	claims := auth.KeycloakClaims{
+		Subject:     userRow.ID.String(),
+		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
+	}
+
+	resp, err := svc.Create(ctx, donation.CreateDonationRequest{
+		DonorName:  "นาย ทดสอบ PII",
+		DonorTaxID: plainTaxID,
+		Amount:     2500.00,
+		DonatedAt:  "2024-03-01",
+	}, claims)
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.ID, "donation ID must be set")
+
+	// Raw DB read — bypasses service to verify what was actually stored.
+	var encBytes, dekBytes []byte
+	err = pool.QueryRow(ctx,
+		`SELECT donor_tax_id_enc, donor_tax_id_dek FROM donations WHERE id = $1`,
+		resp.ID,
+	).Scan(&encBytes, &dekBytes)
+	require.NoError(t, err)
+
+	// INV-7a: ciphertext must be non-empty and must NOT equal the plaintext bytes.
+	assert.NotEmpty(t, encBytes, "donor_tax_id_enc must not be empty")
+	assert.False(t, bytes.Equal(encBytes, []byte(plainTaxID)),
+		"donor_tax_id_enc must not equal the plaintext tax ID (PDPA: plaintext must never be stored)")
+
+	// The wrapped DEK must also be stored alongside the ciphertext.
+	assert.NotEmpty(t, dekBytes, "donor_tax_id_dek must not be empty")
 }
 
 // TestPII_RevealRequiresCheckerOrAdmin verifies INV-7b (D-46, NFR-02):
@@ -135,12 +200,57 @@ func TestPII_RevealRequiresCheckerOrAdmin(t *testing.T) {
 // the default GetDonation response always returns a masked tax ID placeholder,
 // never the plaintext or raw ciphertext bytes, regardless of caller role.
 //
+// For a 13-digit Thai national ID "1234567890123", pii.MaskNationalID returns
+// "x-xxxx-xxxxx-x0123" (last 4 revealed: "0123").
+//
 // Requires Docker testcontainers. Skip with -short.
 func TestPII_MaskDefault(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Wave 0 scaffold — implemented in plan 03-03 (PII mask in response)")
+		t.Skip("skipping integration test in short mode: requires Docker")
 	}
-	t.Skip("Wave 0 scaffold — implemented in plan 03-03 (PII mask in response)")
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	svc := donation.NewDonationService(pool, queries, nil, nil, kp, zap.NewNop())
+
+	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email:           "pii-mask-test@example.com",
+		DisplayName:     "PII Mask Test Maker",
+		KeycloakSubject: "pii-mask-test-keycloak-subject",
+	})
+	require.NoError(t, err)
+
+	const plainTaxID = "1234567890123"
+	// pii.MaskNationalID("1234567890123") → "x-xxxx-xxxxx-x" + "0123"
+	const expectedMask = "x-xxxx-xxxxx-x0123"
+
+	claims := auth.KeycloakClaims{
+		Subject:     userRow.ID.String(),
+		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
+	}
+
+	created, err := svc.Create(ctx, donation.CreateDonationRequest{
+		DonorName:  "นาย ทดสอบ Mask",
+		DonorTaxID: plainTaxID,
+		Amount:     1500.00,
+		DonatedAt:  "2024-04-01",
+	}, claims)
+	require.NoError(t, err)
+
+	// GetByID must return masked value, not plaintext.
+	got, err := svc.GetByID(ctx, created.ID, claims)
+	require.NoError(t, err)
+
+	assert.Equal(t, expectedMask, got.DonorTaxIDMasked,
+		"GetByID must return masked tax ID (last-4 reveal) — never plaintext (T-03-09)")
+	assert.NotEqual(t, plainTaxID, got.DonorTaxIDMasked,
+		"DonorTaxIDMasked must not equal the plaintext tax ID")
 }
 
 // TestVoidAndReissue verifies D-50 void & reissue flow:
@@ -174,19 +284,128 @@ func TestSearchDonations(t *testing.T) {
 // Requires Docker testcontainers. Skip with -short.
 func TestCreateDonation(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Wave 0 scaffold — implemented in plan 03-03 (CreateDonation service)")
+		t.Skip("skipping integration test in short mode: requires Docker")
 	}
-	t.Skip("Wave 0 scaffold — implemented in plan 03-03 (CreateDonation service)")
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	svc := donation.NewDonationService(pool, queries, nil, nil, kp, zap.NewNop())
+
+	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email:           "create-test@example.com",
+		DisplayName:     "Create Test Maker",
+		KeycloakSubject: "create-test-keycloak-subject",
+	})
+	require.NoError(t, err)
+
+	claims := auth.KeycloakClaims{
+		Subject:     userRow.ID.String(),
+		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
+	}
+
+	req := donation.CreateDonationRequest{
+		DonorName:          "นาย ทดสอบ สร้าง",
+		DonorTaxID:         "9876543210987",
+		DonorAddress:       "55 ถนนพระราม4 กรุงเทพฯ",
+		DonorEmail:         "donor@example.com",
+		Amount:             10000.50,
+		DonatedAt:          "2024-05-10",
+		Notes:              "ทดสอบการสร้างรายการบริจาค",
+		ConsentGiven:       true,
+		ConsentTextVersion: "v1.0",
+		ConsentPurpose:     "tax_reduction_100percent",
+	}
+
+	resp, err := svc.Create(ctx, req, claims)
+	require.NoError(t, err, "Create must succeed with valid request")
+	require.NotNil(t, resp, "response must not be nil")
+
+	// FR-07: record is returned in 'draft' status with a generated UUID.
+	assert.NotEmpty(t, resp.ID, "donation ID must be a non-empty UUID")
+	assert.Equal(t, "draft", resp.Status, "new donation must start in draft status")
+	assert.Equal(t, req.DonorName, resp.DonorName, "donor name must be set")
+	assert.NotEmpty(t, resp.DonorTaxIDMasked, "masked tax ID must be set")
+	assert.Equal(t, req.DonorAddress, resp.DonorAddress, "donor address must be set")
+	assert.Equal(t, userRow.ID.String(), resp.CreatedBy, "created_by must be set to the maker's user ID")
+
+	// Verify the record exists in the database.
+	var count int
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM donations WHERE id = $1", resp.ID).Scan(&count)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count, "exactly one donation row must exist after Create")
 }
 
 // TestEditDraft verifies FR-09 edit-before-submit behaviour:
 // a Maker can update donor fields on their own draft donation; the update is
-// rejected with ErrDraftOnly once the donation has been submitted (status != draft).
+// rejected with ErrInvalidTransition once the donation has been submitted (status != draft).
 //
 // Requires Docker testcontainers. Skip with -short.
 func TestEditDraft(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Wave 0 scaffold — implemented in plan 03-03 (UpdateDraft service method)")
+		t.Skip("skipping integration test in short mode: requires Docker")
 	}
-	t.Skip("Wave 0 scaffold — implemented in plan 03-03 (UpdateDraft service method)")
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	svc := donation.NewDonationService(pool, queries, nil, nil, kp, zap.NewNop())
+
+	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email:           "edit-draft-test@example.com",
+		DisplayName:     "Edit Draft Test Maker",
+		KeycloakSubject: "edit-draft-test-keycloak-subject",
+	})
+	require.NoError(t, err)
+
+	claims := auth.KeycloakClaims{
+		Subject:     userRow.ID.String(),
+		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
+	}
+
+	// Create a draft first.
+	draft, err := svc.Create(ctx, donation.CreateDonationRequest{
+		DonorName:  "นาย ทดสอบ แก้ไข",
+		DonorTaxID: "1112223334445",
+		Amount:     8000.00,
+		DonatedAt:  "2024-02-14",
+	}, claims)
+	require.NoError(t, err)
+	assert.Equal(t, "draft", draft.Status)
+
+	// Update the draft — must succeed.
+	updated, err := svc.UpdateDraft(ctx, draft.ID, donation.UpdateDraftRequest{
+		DonorName:  "นาย ทดสอบ แก้ไขแล้ว",
+		DonorTaxID: "1112223334445",
+		Amount:     9000.00,
+		DonatedAt:  "2024-02-14",
+	}, claims)
+	require.NoError(t, err, "UpdateDraft on a draft record must succeed")
+	assert.Equal(t, "นาย ทดสอบ แก้ไขแล้ว", updated.DonorName,
+		"UpdateDraft must persist the updated donor name")
+
+	// Submit the draft.
+	_, err = svc.Submit(ctx, draft.ID, claims)
+	require.NoError(t, err, "Submit must succeed on a draft")
+
+	// UpdateDraft on a non-draft (pending_review) must fail.
+	_, err = svc.UpdateDraft(ctx, draft.ID, donation.UpdateDraftRequest{
+		DonorName:  "Should Not Update",
+		DonorTaxID: "1112223334445",
+		Amount:     9000.00,
+		DonatedAt:  "2024-02-14",
+	}, claims)
+	require.Error(t, err, "UpdateDraft after Submit must fail")
+	assert.ErrorIs(t, err, donation.ErrInvalidTransition,
+		"UpdateDraft on pending_review must return ErrInvalidTransition (FR-09)")
 }

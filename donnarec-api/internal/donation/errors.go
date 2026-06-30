@@ -10,6 +10,12 @@ import "errors"
 // before the service implementation is complete (plans 03-03, 03-05, 03-06).
 
 var (
+	// ErrMissingTaxID is returned when DonorTaxID is empty in CreateDonationRequest
+	// or UpdateDraftRequest. The donor national/tax ID is mandatory at the API boundary
+	// (D-44): a donation cannot be created or issued without it.
+	// HTTP mapping: 422 Unprocessable Entity.
+	ErrMissingTaxID = errors.New("donation: donor tax/national ID is required (D-44)")
+
 	// ErrInvalidTransition is returned when an action is attempted on a donation
 	// whose current status does not allow it (e.g. approving a 'draft' record).
 	// HTTP mapping: 409 Conflict.
