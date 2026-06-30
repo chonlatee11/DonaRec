@@ -230,6 +230,19 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, user
 	donationGroup.GET("/:id/slip", slipHandler.View)
 	donationGroup.DELETE("/:id/slip", slipHandler.Remove)
 
+	// ---- Checker/Admin review actions (Plan 03-05, D-45) ----
+	// POST /:id/approve — issue receipt via atomic 7-step tx (INV-1, FR-08)
+	// POST /:id/return  — return to draft with mandatory reason (FR-12)
+	// POST /:id/reject  — permanently reject with mandatory reason (FR-12)
+	//
+	// Scoped to Checker + Admin only (defense-in-depth over service-layer SoD guard).
+	// Inherits parent donationGroup middleware (RequireAuth + Maker/Checker/Admin).
+	checkerGroup := donationGroup.Group("")
+	checkerGroup.Use(auth.RequireRoles(auth.RoleChecker, auth.RoleAdmin))
+	checkerGroup.POST("/:id/approve", donationHandler.Approve)
+	checkerGroup.POST("/:id/return", donationHandler.ReturnToDraft)
+	checkerGroup.POST("/:id/reject", donationHandler.Reject)
+
 	return router
 }
 

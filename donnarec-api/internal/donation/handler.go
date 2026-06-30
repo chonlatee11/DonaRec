@@ -242,6 +242,181 @@ func (h *DonationHandler) Submit(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": resp})
 }
 
+// Approve issues a receipt for a pending_review donation (FR-08, D-45).
+// POST /api/donations/:id/approve
+//
+// Only Checker and Admin may approve (enforced by route group middleware + SoD guard).
+// Returns 200 with the issued DonationResponse on success.
+// ErrSoDViolation  → 403 (approver == creator)
+// ErrInvalidTransition → 409 (status not pending_review)
+// ErrNotFound      → 404
+func (h *DonationHandler) Approve(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	id := c.Param("id")
+
+	resp, err := h.svc.Approve(c.Request.Context(), id, claims)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrSoDViolation):
+			c.JSON(http.StatusForbidden, gin.H{"error": "sod_violation"})
+		case errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		default:
+			// Pattern C: log donation_id only — no PII
+			h.logger.Error("failed to approve donation",
+				zap.String("operation", "ApproveDonation"),
+				zap.String("donation_id", id),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "approve_donation_failed"})
+		}
+		return
+	}
+
+	c.Set("audit_after", resp)
+	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// ReturnToDraft returns a pending_review donation to draft with a mandatory reason (FR-12, D-45).
+// POST /api/donations/:id/return
+//
+// Only Checker and Admin may return (enforced by route group middleware).
+// ErrMissingReason → 422 (reason empty/whitespace)
+// ErrInvalidTransition → 409 (status not pending_review)
+// ErrNotFound → 404
+func (h *DonationHandler) ReturnToDraft(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	id := c.Param("id")
+
+	var req ReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request_body"})
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   "validation_failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	resp, err := h.svc.Return(c.Request.Context(), id, req.Reason, claims)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrMissingReason):
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "missing_reason"})
+		case errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		default:
+			// Pattern C: log donation_id only — no PII
+			h.logger.Error("failed to return donation",
+				zap.String("operation", "ReturnDonation"),
+				zap.String("donation_id", id),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "return_donation_failed"})
+		}
+		return
+	}
+
+	c.Set("audit_after", resp)
+	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// Reject permanently rejects a pending_review donation with a mandatory reason (FR-12, D-45).
+// POST /api/donations/:id/reject
+//
+// Rejected is a terminal state — no further transitions are possible.
+// Only Checker and Admin may reject (enforced by route group middleware).
+// ErrMissingReason → 422 (reason empty/whitespace)
+// ErrInvalidTransition → 409 (status not pending_review)
+// ErrNotFound → 404
+func (h *DonationHandler) Reject(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	id := c.Param("id")
+
+	var req ReviewRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request_body"})
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   "validation_failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	resp, err := h.svc.Reject(c.Request.Context(), id, req.Reason, claims)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrMissingReason):
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "missing_reason"})
+		case errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		default:
+			// Pattern C: log donation_id only — no PII
+			h.logger.Error("failed to reject donation",
+				zap.String("operation", "RejectDonation"),
+				zap.String("donation_id", id),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "reject_donation_failed"})
+		}
+		return
+	}
+
+	c.Set("audit_after", resp)
+	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
 // List returns a paginated, PII-masked list of donations ordered by created_at DESC.
 // GET /api/donations
 //
