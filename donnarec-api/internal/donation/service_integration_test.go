@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -263,6 +264,61 @@ func TestVoidAndReissue(t *testing.T) {
 		t.Skip("Wave 0 scaffold — implemented in plan 03-06 (void & reissue links)")
 	}
 	t.Skip("Wave 0 scaffold — implemented in plan 03-06 (void & reissue links)")
+}
+
+// TestSubmitMovesToPendingReview verifies FR-11 / D-45:
+// Submit transitions a draft donation to pending_review and sets submitted_at.
+//
+// Requires Docker testcontainers. Skip with -short.
+func TestSubmitMovesToPendingReview(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode: requires Docker")
+	}
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	svc := donation.NewDonationService(pool, queries, nil, nil, kp, zap.NewNop())
+
+	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email:           "submit-test@example.com",
+		DisplayName:     "Submit Test Maker",
+		KeycloakSubject: "submit-test-keycloak-subject",
+	})
+	require.NoError(t, err)
+
+	claims := auth.KeycloakClaims{
+		Subject:     userRow.ID.String(),
+		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
+	}
+
+	// Create a draft donation.
+	before := time.Now().UTC().Add(-time.Second)
+	draft, err := svc.Create(ctx, donation.CreateDonationRequest{
+		DonorName:  "นาย ทดสอบ Submit",
+		DonorTaxID: "1111222233334",
+		Amount:     7500.00,
+		DonatedAt:  "2024-07-01",
+	}, claims)
+	require.NoError(t, err)
+	assert.Equal(t, "draft", draft.Status, "new donation must be in draft status")
+
+	// Submit moves draft → pending_review.
+	submitted, err := svc.Submit(ctx, draft.ID, claims)
+	require.NoError(t, err, "Submit must succeed on a draft")
+	require.NotNil(t, submitted)
+
+	assert.Equal(t, "pending_review", submitted.Status,
+		"Submit must transition status to pending_review (D-45, FR-11)")
+	require.NotNil(t, submitted.SubmittedAt,
+		"submitted_at must be set after Submit")
+	assert.True(t, submitted.SubmittedAt.After(before),
+		"submitted_at must be a recent timestamp (got %v)", submitted.SubmittedAt)
 }
 
 // TestSearchDonations verifies FR-10 / D-53 search behaviour:
