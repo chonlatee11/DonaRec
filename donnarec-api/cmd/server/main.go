@@ -16,7 +16,10 @@ import (
 	"github.com/donnarec/donnarec-api/internal/audit"
 	"github.com/donnarec/donnarec-api/internal/auth"
 	"github.com/donnarec/donnarec-api/internal/config"
+	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
+	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/receiptno"
 	"github.com/donnarec/donnarec-api/internal/users"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -92,15 +95,28 @@ func main() {
 
 	userSvc := users.NewUserService(pool, queries, logger)
 
+	// Envelope key provider: reads DONAREC_KEK from env (D-26, NFR-02).
+	keyProvider, err := crypto.NewEnvKeyProvider()
+	if err != nil {
+		logger.Fatal("crypto key provider init failed", zap.Error(err))
+	}
+
+	// Receipt number allocator: gap-less counter via SELECT … FOR UPDATE (D-33, NFR-04).
+	allocator := receiptno.NewAllocator(queries)
+
+	// Donation service: PII encrypt/mask, state machine, consent capture (FR-07/09/11/29).
+	donationSvc := donation.NewDonationService(pool, queries, allocator, auditSvc, keyProvider, logger)
+
 	// --------------------------------------------------------
 	// Handlers
 	// --------------------------------------------------------
 	userHandler := users.NewUserHandler(userSvc, logger)
+	donationHandler := donation.NewDonationHandler(donationSvc, logger)
 
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, userHandler, logger)
+	router := setupRouter(authMW, auditSvc, userHandler, donationHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -145,7 +161,7 @@ func main() {
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
 //  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin)
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, userHandler *users.UserHandler, logger *zap.Logger) *gin.Engine {
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -177,6 +193,18 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, user
 
 	// POST /api/admin/users — create user (Admin-only, D-01)
 	adminGroup.POST("/users", userHandler.CreateUser)
+
+	// ---- Maker/Checker/Admin — /api/donations (all staff) ----
+	// Pattern E: RequireRoles after RequireAuth — claims must already exist in context.
+	// Checker/Admin review actions (approve/return/reject/cancel) wired in plans 03-05/03-06.
+	// Slip upload (03-04) and PII reveal (03-05) not registered here — handlers don't exist yet.
+	donationGroup := api.Group("/donations")
+	donationGroup.Use(auth.RequireRoles(auth.RoleMaker, auth.RoleChecker, auth.RoleAdmin))
+	donationGroup.POST("", donationHandler.Create)
+	donationGroup.GET("", donationHandler.List)
+	donationGroup.GET("/:id", donationHandler.GetByID)
+	donationGroup.PUT("/:id", donationHandler.Update)
+	donationGroup.POST("/:id/submit", donationHandler.Submit)
 
 	return router
 }
