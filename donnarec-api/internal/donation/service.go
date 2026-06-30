@@ -239,25 +239,269 @@ func (s *DonationService) GetByID(ctx context.Context, id string, claims auth.Ke
 	return donationRowToResponse(row, maskedTaxID), nil
 }
 
-// UpdateDraft updates Maker-editable fields on a draft donation.
-// Returns ErrInvalidTransition if the donation is not in draft status (FR-09).
-// Implemented in Task 2 GREEN (03-03).
+// UpdateDraft updates Maker-editable fields on a draft donation (FR-09).
+//
+// Uses LockDonationForUpdate within a transaction to atomically check the current
+// status and apply the update. Returns ErrInvalidTransition if the donation is not
+// in 'draft' status (state machine guard — D-45, T-03-13).
+// Re-encrypts the tax ID whenever it is provided (T-03-08: always fresh EncryptField).
 func (s *DonationService) UpdateDraft(ctx context.Context, id string, req UpdateDraftRequest, claims auth.KeycloakClaims) (*DonationResponse, error) {
-	return nil, fmt.Errorf("UpdateDraft: not implemented — Task 2 GREEN (03-03)")
+	if req.DonorTaxID == "" {
+		return nil, ErrMissingTaxID
+	}
+
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	donatedAtTime, err := time.ParseInLocation("2006-01-02", req.DonatedAt, time.UTC)
+	if err != nil {
+		return nil, fmt.Errorf("invalid donated_at %q: %w", req.DonatedAt, err)
+	}
+
+	// T-03-08: always re-encrypt — plaintext never persisted.
+	encBytes, dekBytes, err := crypto.EncryptField(ctx, s.keyProvider, []byte(req.DonorTaxID))
+	if err != nil {
+		return nil, fmt.Errorf("encrypt donor tax ID: %w", err)
+	}
+
+	var amount pgtype.Numeric
+	if err := amount.Scan(strconv.FormatFloat(req.Amount, 'f', 2, 64)); err != nil {
+		return nil, fmt.Errorf("invalid amount: %w", err)
+	}
+
+	donatedAt := pgtype.Date{Time: donatedAtTime, Valid: true}
+	retainUntil := pgtype.Date{Time: donatedAtTime.AddDate(10, 0, 0), Valid: true}
+
+	var consentAt pgtype.Timestamptz
+	if req.ConsentGiven {
+		consentAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	}
+
+	var donorEmail *string
+	if req.DonorEmail != "" {
+		v := req.DonorEmail
+		donorEmail = &v
+	}
+	var notes *string
+	if req.Notes != "" {
+		v := req.Notes
+		notes = &v
+	}
+	var consentTextVersion *string
+	if req.ConsentTextVersion != "" {
+		v := req.ConsentTextVersion
+		consentTextVersion = &v
+	}
+	var consentPurpose *string
+	if req.ConsentPurpose != "" {
+		v := req.ConsentPurpose
+		consentPurpose = &v
+	}
+
+	var updatedRow db.Donation
+	err = dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		// Acquire row lock; check current status inside the same transaction.
+		locked, lockErr := qtx.LockDonationForUpdate(ctx, pgUUID)
+		if lockErr != nil {
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock donation: %w", lockErr)
+		}
+		// D-45 / T-03-13: only draft records can be edited.
+		if !canTransition(locked.Status, "update") {
+			return ErrInvalidTransition
+		}
+
+		if updateErr := qtx.UpdateDraftDonation(ctx, db.UpdateDraftDonationParams{
+			DonorName:          req.DonorName,
+			DonorAddress:       req.DonorAddress,
+			DonorEmail:         donorEmail,
+			DonorTaxIDEnc:      encBytes,
+			DonorTaxIDDek:      dekBytes,
+			Amount:             amount,
+			DonatedAt:          donatedAt,
+			Notes:              notes,
+			ConsentGiven:       req.ConsentGiven,
+			ConsentAt:          consentAt,
+			ConsentTextVersion: consentTextVersion,
+			ConsentPurpose:     consentPurpose,
+			RetainUntil:        retainUntil,
+			LegalBasis:         "consent",
+			ID:                 pgUUID,
+		}); updateErr != nil {
+			return fmt.Errorf("update draft: %w", updateErr)
+		}
+
+		var getErr error
+		updatedRow, getErr = qtx.GetDonationByID(ctx, pgUUID)
+		return getErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Pattern C: no PII in logs.
+	s.logger.Info("donation draft updated",
+		zap.String("donation_id", id),
+		zap.String("created_by", updatedRow.CreatedBy.String()),
+	)
+
+	return donationRowToResponse(updatedRow, pii.MaskNationalID(req.DonorTaxID)), nil
 }
 
-// Submit transitions a draft donation to pending_review status.
-// Returns ErrInvalidTransition if the donation is not in draft status (FR-11, D-45).
-// Implemented in Task 2 GREEN (03-03).
+// Submit transitions a draft donation to pending_review status (FR-11, D-45).
+//
+// Uses LockDonationForUpdate within a transaction to atomically check the current
+// status and apply the transition. Returns ErrInvalidTransition if not in 'draft'.
+// submitted_at is set by the SubmitDonation query (DEFAULT now()).
 func (s *DonationService) Submit(ctx context.Context, id string, claims auth.KeycloakClaims) (*DonationResponse, error) {
-	return nil, fmt.Errorf("Submit: not implemented — Task 2 GREEN (03-03)")
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	var submittedRow db.Donation
+	err := dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		// Acquire row lock to serialize concurrent submit attempts.
+		locked, lockErr := qtx.LockDonationForUpdate(ctx, pgUUID)
+		if lockErr != nil {
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock donation: %w", lockErr)
+		}
+		// D-45: only draft can be submitted.
+		if !canTransition(locked.Status, "submit") {
+			return ErrInvalidTransition
+		}
+
+		if submitErr := qtx.SubmitDonation(ctx, pgUUID); submitErr != nil {
+			return fmt.Errorf("submit donation: %w", submitErr)
+		}
+
+		var getErr error
+		submittedRow, getErr = qtx.GetDonationByID(ctx, pgUUID)
+		return getErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Pattern C: log submitted_by (actor) + donation_id only — no donor details.
+	s.logger.Info("donation submitted",
+		zap.String("donation_id", id),
+		zap.String("submitted_by", claims.Subject),
+	)
+
+	// Decrypt to build the masked value for the response (T-03-09).
+	plaintext, decErr := crypto.DecryptField(ctx, s.keyProvider, submittedRow.DonorTaxIDEnc, submittedRow.DonorTaxIDDek)
+	if decErr != nil {
+		return nil, fmt.Errorf("decrypt donor tax ID: %w", decErr)
+	}
+
+	return donationRowToResponse(submittedRow, pii.MaskNationalID(string(plaintext))), nil
 }
 
-// List returns a paginated list of donations with masked PII.
-// Full filter wiring (donor name, date range, status, receipt) implemented in plan 03-06.
-// Implemented in Task 2 GREEN (03-03).
+// List returns a paginated, masked list of donations ordered by created_at DESC.
+//
+// Basic implementation for plan 03-03: returns unfiltered results with PII masked.
+// Full filter wiring (donor name ILIKE, date range, status, receipt number) is
+// implemented in plan 03-06 using the SearchDonations sqlc query.
 func (s *DonationService) List(ctx context.Context, filter ListFilter, claims auth.KeycloakClaims) ([]DonationResponse, error) {
-	return nil, fmt.Errorf("List: not implemented — Task 2 GREEN (03-03)")
+	limit := filter.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Raw query: includes PII columns for decrypt+mask per row (03-06 will use SearchDonations).
+	rows, queryErr := s.pool.Query(ctx, `
+		SELECT id, status, donor_name, donor_address, donor_email,
+		       donor_tax_id_enc, donor_tax_id_dek, amount, donated_at,
+		       notes, consent_given, consent_at, consent_text_version, consent_purpose,
+		       created_by, created_at, updated_at, submitted_at
+		FROM donations
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2`, limit, offset)
+	if queryErr != nil {
+		return nil, fmt.Errorf("list donations: %w", queryErr)
+	}
+	defer rows.Close()
+
+	var result []DonationResponse
+	for rows.Next() {
+		var (
+			id                 pgtype.UUID
+			status             db.DonationStatus
+			donorName          string
+			donorAddress       string
+			donorEmail         *string
+			encBytes, dekBytes []byte
+			amount             pgtype.Numeric
+			donatedAt          pgtype.Date
+			notes              *string
+			consentGiven       bool
+			consentAt          pgtype.Timestamptz
+			consentTextVersion *string
+			consentPurpose     *string
+			createdBy          pgtype.UUID
+			createdAt          pgtype.Timestamptz
+			updatedAt          pgtype.Timestamptz
+			submittedAt        pgtype.Timestamptz
+		)
+		if scanErr := rows.Scan(
+			&id, &status, &donorName, &donorAddress, &donorEmail,
+			&encBytes, &dekBytes, &amount, &donatedAt, &notes,
+			&consentGiven, &consentAt, &consentTextVersion, &consentPurpose,
+			&createdBy, &createdAt, &updatedAt, &submittedAt,
+		); scanErr != nil {
+			return nil, fmt.Errorf("scan donation row: %w", scanErr)
+		}
+
+		// T-03-09: decrypt only to produce the mask — never return plaintext.
+		plaintext, decErr := crypto.DecryptField(ctx, s.keyProvider, encBytes, dekBytes)
+		if decErr != nil {
+			return nil, fmt.Errorf("decrypt donor tax ID: %w", decErr)
+		}
+
+		resp := DonationResponse{
+			ID:                 id.String(),
+			Status:             string(status),
+			DonorName:          donorName,
+			DonorTaxIDMasked:   pii.MaskNationalID(string(plaintext)),
+			DonorAddress:       donorAddress,
+			DonorEmail:         donorEmail,
+			Amount:             numericStr(amount),
+			DonatedAt:          dateStr(donatedAt),
+			Notes:              notes,
+			ConsentGiven:       consentGiven,
+			ConsentTextVersion: consentTextVersion,
+			ConsentPurpose:     consentPurpose,
+			CreatedBy:          createdBy.String(),
+			CreatedAt:          createdAt.Time,
+			UpdatedAt:          updatedAt.Time,
+		}
+		if consentAt.Valid {
+			t := consentAt.Time
+			resp.ConsentAt = &t
+		}
+		if submittedAt.Valid {
+			t := submittedAt.Time
+			resp.SubmittedAt = &t
+		}
+		result = append(result, resp)
+	}
+	return result, rows.Err()
 }
 
 // --- Private helpers ---
