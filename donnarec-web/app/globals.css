@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* UI-SPEC: background = slate-50 #F8FAFC */
+    --background: 210 40% 98%;
+    /* UI-SPEC: text primary = slate-900 #0F172A */
+    --foreground: 222.2 47.4% 11.2%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 47.4% 11.2%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 47.4% 11.2%;
+
+    /* UI-SPEC: accent/primary = blue-600 #2563EB */
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 0 0% 100%;
+
+    /* UI-SPEC: sidebar/nav = slate-100 #F1F5F9 */
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    /* UI-SPEC: text secondary = slate-600 #475569 */
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    /* UI-SPEC: destructive = red-600 #DC2626 */
+    --destructive: 0 72.2% 50.6%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* UI-SPEC: border = slate-200 #E2E8F0 */
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+
+    /* UI-SPEC: focus ring = blue-600 2px */
+    --ring: 221.2 83.2% 53.3%;
+
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    /* UI-SPEC Typography: Sarabun (Thai) + Inter (Latin) stack */
+    font-family: var(--font-sarabun), var(--font-inter), system-ui, sans-serif;
+  }
+
+  /* UI-SPEC Typography scale — exactly 4 sizes, 2 weights */
+  /* caption/label: 14px 400 lh 1.4 */
+  .text-caption {
+    font-size: 0.875rem;
+    font-weight: 400;
+    line-height: 1.4;
+  }
+
+  /* body: 16px 400 lh 1.5 — default body style */
+  .text-body {
+    font-size: 1rem;
+    font-weight: 400;
+    line-height: 1.5;
+  }
+
+  /* subheading: 20px 600 lh 1.3 */
+  .text-subheading {
+    font-size: 1.25rem;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  /* page heading: 28px 600 lh 1.2 */
+  .text-page-heading {
+    font-size: 1.75rem;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+}
