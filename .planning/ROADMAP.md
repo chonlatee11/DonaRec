@@ -73,8 +73,8 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Cancelling an issued receipt sets status to "ยกเลิก" and retains its number (no gap, never deleted), with the action audited.
   5. Donor details (name, tax/national ID, address, email) are stored with the ID encrypted at rest and masked everywhere except authorized, audited reveals; staff can search/filter records by name, date range, status, and receipt number.
 **Plans**: 8 plans
-- [ ] 03-01-PLAN.md — Data layer: migrations 000005 (donations) + 000007 (outbox) + sqlc queries + Wave 0 test scaffolds
-- [ ] 03-02-PLAN.md — Frontend bootstrap: Next.js 15 + shadcn + next-intl + Keycloak bearer + app shell
+- [x] 03-01-PLAN.md — Data layer: migrations 000005 (donations) + 000007 (outbox) + sqlc queries + Wave 0 test scaffolds
+- [x] 03-02-PLAN.md — Frontend bootstrap: Next.js 15 + shadcn + next-intl + Keycloak bearer + app shell
 - [ ] 03-03-PLAN.md — Maker draft slice (TDD): create/edit/submit + PII encrypt/mask + consent + state machine
 - [ ] 03-04-PLAN.md — Slip storage slice (TDD): MinIO + magic-byte + size limit + soft-delete-retain
 - [ ] 03-05-PLAN.md — Issuance & review slice (TDD ★): atomic approve tx + SoD + concurrency proof + return/reject
@@ -143,7 +143,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
-| 3. Donation Lifecycle & Maker-Checker Issuance | 0/8 | Not started | - |
+| 3. Donation Lifecycle & Maker-Checker Issuance | 2/8 | In Progress|  |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
