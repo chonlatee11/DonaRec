@@ -1110,9 +1110,17 @@ func TestVoidAndReissue(t *testing.T) {
 		KeycloakSubject: "checker-reissue-kc",
 	})
 	require.NoError(t, err)
+	// checker2: approves the replacement draft.
+	// Needed because Reissue sets created_by=checker1, so checker1 cannot also Approve (SoD).
+	checker2Row, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "checker2-reissue@example.com", DisplayName: "Checker2 Reissue",
+		KeycloakSubject: "checker2-reissue-kc",
+	})
+	require.NoError(t, err)
 
 	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
 	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	checker2Claims := auth.KeycloakClaims{Subject: checker2Row.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
 	// Issue the original donation (gets receipt number 1).
 	original := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
@@ -1180,9 +1188,9 @@ func TestVoidAndReissue(t *testing.T) {
 	require.NoError(t, err, "Submit on replacement draft must succeed")
 	require.Equal(t, "pending_review", submittedRep.Status)
 
-	// Approve the replacement (Checker who is not the creator of the new draft).
-	// Note: makerClaims created the replacement (via Reissue), so checker approves.
-	issuedRep, err := svc.Approve(ctx, replacement.ID, checkerClaims)
+	// Approve the replacement via a DIFFERENT checker (SoD: created_by=checker1, approver=checker2).
+	// Reissue sets created_by=checkerClaims.Subject, so checkerClaims cannot also Approve.
+	issuedRep, err := svc.Approve(ctx, replacement.ID, checker2Claims)
 	require.NoError(t, err, "Approve on submitted replacement must succeed")
 	require.NotNil(t, issuedRep)
 	assert.Equal(t, "issued", issuedRep.Status,
