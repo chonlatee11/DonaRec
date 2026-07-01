@@ -393,14 +393,18 @@ LIMIT  $7
 OFFSET $6
 `
 
+// SearchDonationsParams holds optional filter parameters for SearchDonations.
+// Pointer fields are nil to skip that filter (passed as NULL to the IS NULL guard in SQL).
+// pgtype.Date with Valid=false is sent as NULL — skips the date filter.
+// Tax ID is intentionally absent (D-53, T-03-29: no enumeration by national ID).
 type SearchDonationsParams struct {
-	DonorName string         `db:"donor_name" json:"donor_name"`
-	Status    DonationStatus `db:"status" json:"status"`
-	FromDate  pgtype.Date    `db:"from_date" json:"from_date"`
-	ToDate    pgtype.Date    `db:"to_date" json:"to_date"`
-	ReceiptNo string         `db:"receipt_no" json:"receipt_no"`
-	OffsetN   int32          `db:"offset_n" json:"offset_n"`
-	LimitN    int32          `db:"limit_n" json:"limit_n"`
+	DonorName *string         `db:"donor_name" json:"donor_name"` // nil = skip ILIKE filter
+	Status    *DonationStatus `db:"status" json:"status"`         // nil = skip status filter
+	FromDate  pgtype.Date     `db:"from_date" json:"from_date"`   // Valid=false = skip
+	ToDate    pgtype.Date     `db:"to_date" json:"to_date"`       // Valid=false = skip
+	ReceiptNo *string         `db:"receipt_no" json:"receipt_no"` // nil = skip receipt filter
+	OffsetN   int32           `db:"offset_n" json:"offset_n"`
+	LimitN    int32           `db:"limit_n" json:"limit_n"`
 }
 
 type SearchDonationsRow struct {
@@ -426,11 +430,11 @@ type SearchDonationsRow struct {
 // Pagination: caller passes @limit_n rows starting at @offset_n.
 func (q *Queries) SearchDonations(ctx context.Context, arg SearchDonationsParams) ([]SearchDonationsRow, error) {
 	rows, err := q.db.Query(ctx, searchDonations,
-		arg.DonorName,
-		arg.Status,
-		arg.FromDate,
-		arg.ToDate,
-		arg.ReceiptNo,
+		arg.DonorName,  // *string — nil sends NULL, skipping the ILIKE filter
+		arg.Status,     // *DonationStatus — nil sends NULL, skipping the enum filter
+		arg.FromDate,   // pgtype.Date — Valid=false sends NULL, skipping the from-date filter
+		arg.ToDate,     // pgtype.Date — Valid=false sends NULL, skipping the to-date filter
+		arg.ReceiptNo,  // *string — nil sends NULL, skipping the receipt number filter
 		arg.OffsetN,
 		arg.LimitN,
 	)
@@ -481,6 +485,27 @@ type SetReplacedByParams struct {
 // Only updates the replaced_by pointer — no status change here.
 func (q *Queries) SetReplacedBy(ctx context.Context, arg SetReplacedByParams) error {
 	_, err := q.db.Exec(ctx, setReplacedBy, arg.ReplacedBy, arg.ID)
+	return err
+}
+
+const setReplaces = `-- name: SetReplaces :exec
+UPDATE donations
+SET
+    replaces   = $1,
+    updated_at = now()
+WHERE id = $2
+`
+
+type SetReplacesParams struct {
+	Replaces pgtype.UUID `db:"replaces" json:"replaces"`
+	ID       pgtype.UUID `db:"id" json:"id"`
+}
+
+// Link a replacement draft to the original cancelled record (D-50 Void & Reissue).
+// Called inside the same Reissue transaction as SetReplacedBy to set both ends of the link.
+// Only updates the replaces pointer on the new draft — no status change here.
+func (q *Queries) SetReplaces(ctx context.Context, arg SetReplacesParams) error {
+	_, err := q.db.Exec(ctx, setReplaces, arg.Replaces, arg.ID)
 	return err
 }
 

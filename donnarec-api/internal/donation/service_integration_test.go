@@ -762,19 +762,125 @@ func TestRejectTerminal(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Remaining Wave 0 scaffolds — implemented in later plans
+// Remaining Wave 0 scaffolds — implemented in plan 03-06
 // ---------------------------------------------------------------------------
+
+// createAndIssue is a test helper that creates, submits, and approves a donation
+// so it reaches 'issued' status with a receipt number. Returns the issued DonationResponse.
+func createAndIssue(
+	t *testing.T,
+	ctx context.Context,
+	svc *donation.DonationService,
+	makerClaims, checkerClaims auth.KeycloakClaims,
+	donorName, taxID, date string,
+	amount float64,
+) *donation.DonationResponse {
+	t.Helper()
+	submitted := createAndSubmit(t, ctx, svc, makerClaims, donorName, taxID, date, amount)
+	issued, err := svc.Approve(ctx, submitted.ID, checkerClaims)
+	require.NoError(t, err, "Approve must succeed")
+	require.Equal(t, "issued", issued.Status, "donation must be issued after Approve")
+	require.NotNil(t, issued.ReceiptFormatted, "receipt_formatted must be set after issuance")
+	return issued
+}
 
 // TestCancelRetainsReceiptNumber verifies INV-5 (FR-19, D-47):
 // after an issued donation is cancelled, receipt_number_id and receipt_formatted
 // remain set on the donation row (no gap in the receipt sequence).
+// Issuing a subsequent donation yields the consecutive next number.
 //
 // Requires Docker testcontainers. Skip with -short.
 func TestCancelRetainsReceiptNumber(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Wave 0 scaffold — implemented in plan 03-06 (cancel retains receipt)")
+		t.Skip("skipping integration test in short mode: requires Docker")
 	}
-	t.Skip("Wave 0 scaffold — implemented in plan 03-06 (cancel retains receipt)")
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	alloc := receiptno.NewAllocator(queries)
+	auditSvc := audit.NewAuditService(pool, queries, zap.NewNop())
+	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
+
+	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "maker-cancel@example.com", DisplayName: "Maker Cancel",
+		KeycloakSubject: "maker-cancel-kc",
+	})
+	require.NoError(t, err)
+	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "checker-cancel@example.com", DisplayName: "Checker Cancel",
+		KeycloakSubject: "checker-cancel-kc",
+	})
+	require.NoError(t, err)
+
+	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+
+	// Issue donation A — gets receipt number N (first in the fiscal year).
+	donationA := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+		"นาย ทดสอบ ยกเลิก A", "1234567890123", "2026-07-01", 5000.00)
+	require.Equal(t, "issued", donationA.Status)
+	require.NotNil(t, donationA.ReceiptFormatted, "donation A must have a receipt number")
+	receiptA := *donationA.ReceiptFormatted
+
+	// Cancel donation A (Checker cancels with reason).
+	cancelledA, err := svc.Cancel(ctx, donationA.ID, donation.CancelDonationRequest{
+		Reason: "ยกเลิกเนื่องจากข้อมูลผิดพลาด",
+	}, checkerClaims)
+	require.NoError(t, err, "Cancel must succeed on an issued donation")
+	require.NotNil(t, cancelledA)
+
+	// --- INV-5: Cancel retains receipt_number_id and receipt_formatted (FR-19, D-47) ---
+	assert.Equal(t, "cancelled", cancelledA.Status,
+		"cancelled donation must have status=cancelled")
+	require.NotNil(t, cancelledA.ReceiptFormatted,
+		"receipt_formatted must be set on a cancelled donation (no gap — FR-19)")
+	assert.Equal(t, receiptA, *cancelledA.ReceiptFormatted,
+		"receipt_formatted must NOT change after cancellation — number is retained (D-47)")
+
+	// Verify receipt_number_id retained in raw DB (load-bearing invariant).
+	var receiptNumberID *int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT receipt_number_id FROM donations WHERE id = $1`, donationA.ID).Scan(&receiptNumberID))
+	require.NotNil(t, receiptNumberID,
+		"receipt_number_id must be non-NULL on cancelled row (FR-19: number never deleted)")
+
+	// Verify audit row for donation.cancel exists.
+	var auditCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'donation.cancel'`).Scan(&auditCount))
+	assert.Equal(t, 1, auditCount, "exactly 1 audit row for donation.cancel must exist")
+
+	// Issue donation B — must get the consecutive next receipt number (no gap).
+	donationB := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+		"นาย ทดสอบ ยกเลิก B", "9876543210987", "2026-07-01", 3000.00)
+	require.NotNil(t, donationB.ReceiptFormatted,
+		"donation B must have a receipt number")
+
+	// Both A and B receipt numbers must be in receipt_numbers ledger (2 total, no gaps).
+	var ledgerCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM receipt_numbers`).Scan(&ledgerCount))
+	assert.Equal(t, 2, ledgerCount,
+		"exactly 2 receipt_numbers rows must exist (A issued, A cancelled but kept, B issued)")
+
+	// Consecutive: B's running_no = A's running_no + 1.
+	var runNoA, runNoB int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT rn.running_no FROM receipt_numbers rn
+		 JOIN donations d ON d.receipt_number_id = rn.id
+		 WHERE d.id = $1`, donationA.ID).Scan(&runNoA))
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT rn.running_no FROM receipt_numbers rn
+		 JOIN donations d ON d.receipt_number_id = rn.id
+		 WHERE d.id = $1`, donationB.ID).Scan(&runNoB))
+	assert.Equal(t, runNoA+1, runNoB,
+		"B's running_no must be A's running_no + 1 (gap-less after cancel, INV-5)")
 }
 
 // TestPII_TaxIDStoredEncrypted verifies INV-7a (NFR-02, PDPA):
@@ -839,15 +945,79 @@ func TestPII_TaxIDStoredEncrypted(t *testing.T) {
 }
 
 // TestPII_RevealRequiresCheckerOrAdmin verifies INV-7b (D-46, NFR-02):
-// GET /api/donations/:id/pii returns the plaintext tax ID only when called with
-// Checker or Admin claims. Maker claims receive ErrForbidden.
+// RevealPII returns the plaintext tax ID only when called with Checker or Admin claims.
+// Maker claims receive ErrForbidden. Every reveal writes a pii.reveal audit row (D-13).
 //
 // Requires Docker testcontainers. Skip with -short.
 func TestPII_RevealRequiresCheckerOrAdmin(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Wave 0 scaffold — implemented in plan 03-05 (PII reveal gate)")
+		t.Skip("skipping integration test in short mode: requires Docker")
 	}
-	t.Skip("Wave 0 scaffold — implemented in plan 03-05 (PII reveal gate)")
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	alloc := receiptno.NewAllocator(queries)
+	auditSvc := audit.NewAuditService(pool, queries, zap.NewNop())
+	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
+
+	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "maker-pii@example.com", DisplayName: "Maker PII",
+		KeycloakSubject: "maker-pii-kc",
+	})
+	require.NoError(t, err)
+	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "checker-pii@example.com", DisplayName: "Checker PII",
+		KeycloakSubject: "checker-pii-kc",
+	})
+	require.NoError(t, err)
+
+	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+
+	const plainTaxID = "1234567890123"
+
+	// Create a draft donation.
+	d, err := svc.Create(ctx, donation.CreateDonationRequest{
+		DonorName:  "นาย ทดสอบ PII Reveal",
+		DonorTaxID: plainTaxID,
+		Amount:     7500.00,
+		DonatedAt:  "2026-07-01",
+	}, makerClaims)
+	require.NoError(t, err)
+
+	// --- Maker → ErrForbidden (D-46) ---
+	_, err = svc.RevealPII(ctx, d.ID, makerClaims)
+	require.Error(t, err, "RevealPII by Maker must return an error (D-46)")
+	assert.ErrorIs(t, err, donation.ErrForbidden,
+		"RevealPII by Maker must return ErrForbidden — only Checker/Admin may reveal (D-46)")
+
+	// Assert: no audit row yet (reveal was forbidden — no audit for a denied request).
+	var auditCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'pii.reveal'`).Scan(&auditCount))
+	assert.Equal(t, 0, auditCount,
+		"no pii.reveal audit row must exist after a forbidden reveal attempt (D-13)")
+
+	// --- Checker → plaintext returned + audit row written (D-46, D-13) ---
+	resp, err := svc.RevealPII(ctx, d.ID, checkerClaims)
+	require.NoError(t, err, "RevealPII by Checker must succeed (D-46)")
+	require.NotNil(t, resp)
+	assert.Equal(t, plainTaxID, resp.DonorTaxIDPlaintext,
+		"RevealPII must return the plaintext tax ID to authorized caller (D-46)")
+	assert.Equal(t, d.ID, resp.DonationID,
+		"RevealPII must include the donation ID in the response")
+
+	// Audit row MUST exist (D-13: audit before returning plaintext).
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'pii.reveal'`).Scan(&auditCount))
+	assert.Equal(t, 1, auditCount,
+		"exactly 1 pii.reveal audit row must exist after Checker reveal (D-13)")
 }
 
 // TestPII_MaskDefault verifies INV-7c (NFR-02):
@@ -907,16 +1077,129 @@ func TestPII_MaskDefault(t *testing.T) {
 		"DonorTaxIDMasked must not equal the plaintext tax ID")
 }
 
-// TestVoidAndReissue verifies D-50 void & reissue flow:
-// after cancelling an issued donation and creating a replacement, the
-// replaces/replaced_by self-FK links are set correctly on both records.
+// TestVoidAndReissue verifies D-50 void & reissue flow (FR-19):
+// Reissue cancels the original (sets replaced_by), creates a corrected draft (sets replaces),
+// the original retains its receipt number (no gap), and the replacement earns a fresh
+// consecutive number only via the normal Submit → Approve path (no bypass of SoD).
 //
 // Requires Docker testcontainers. Skip with -short.
 func TestVoidAndReissue(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Wave 0 scaffold — implemented in plan 03-06 (void & reissue links)")
+		t.Skip("skipping integration test in short mode: requires Docker")
 	}
-	t.Skip("Wave 0 scaffold — implemented in plan 03-06 (void & reissue links)")
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	alloc := receiptno.NewAllocator(queries)
+	auditSvc := audit.NewAuditService(pool, queries, zap.NewNop())
+	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
+
+	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "maker-reissue@example.com", DisplayName: "Maker Reissue",
+		KeycloakSubject: "maker-reissue-kc",
+	})
+	require.NoError(t, err)
+	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "checker-reissue@example.com", DisplayName: "Checker Reissue",
+		KeycloakSubject: "checker-reissue-kc",
+	})
+	require.NoError(t, err)
+
+	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+
+	// Issue the original donation (gets receipt number 1).
+	original := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+		"นาย ทดสอบ Reissue Original", "1234567890123", "2026-07-01", 10000.00)
+	require.Equal(t, "issued", original.Status)
+	require.NotNil(t, original.ReceiptFormatted)
+	origReceipt := *original.ReceiptFormatted
+
+	// Perform Void & Reissue (Checker cancels + creates corrected draft).
+	replacement, err := svc.Reissue(ctx, original.ID, donation.ReissueDonationRequest{
+		Reason:     "ยกเลิกเพื่อแก้ไขข้อมูลผู้บริจาค",
+		DonorName:  "นาย ทดสอบ Reissue แก้ไข",
+		DonorTaxID: "9876543210987",
+		Amount:     10000.00,
+		DonatedAt:  "2026-07-01",
+	}, checkerClaims)
+	require.NoError(t, err, "Reissue must succeed on an issued donation")
+	require.NotNil(t, replacement)
+
+	// --- Replacement draft is at status='draft' (no bypass of maker-checker, D-50) ---
+	assert.Equal(t, "draft", replacement.Status,
+		"replacement donation must be created at draft status — no bypass of SoD (D-50)")
+	assert.Nil(t, replacement.ReceiptFormatted,
+		"replacement draft must NOT have a receipt number — earned only via Approve (D-50)")
+
+	// --- replaces link: new.replaces = original.ID ---
+	require.NotNil(t, replacement.Replaces,
+		"replacement.Replaces must be set to original ID (D-50)")
+	assert.Equal(t, original.ID, *replacement.Replaces,
+		"replacement.Replaces must point to the original donation ID")
+
+	// --- replaced_by link on original: original.replaced_by = replacement.ID ---
+	var origReplacedBy *string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT replaced_by::text FROM donations WHERE id = $1`, original.ID).Scan(&origReplacedBy))
+	require.NotNil(t, origReplacedBy, "original.replaced_by must be set to replacement ID (D-50)")
+	assert.Equal(t, replacement.ID, *origReplacedBy,
+		"original.replaced_by must point to the replacement donation ID")
+
+	// --- Original retains its receipt number (no gap) ---
+	var origStatus string
+	var origReceiptFormatted *string
+	var origReceiptNumberID *int64
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status, receipt_formatted, receipt_number_id FROM donations WHERE id = $1`,
+		original.ID).Scan(&origStatus, &origReceiptFormatted, &origReceiptNumberID))
+	assert.Equal(t, "cancelled", origStatus,
+		"original must be cancelled after Reissue")
+	require.NotNil(t, origReceiptFormatted,
+		"original.receipt_formatted must be retained after Reissue (no gap — FR-19)")
+	assert.Equal(t, origReceipt, *origReceiptFormatted,
+		"original.receipt_formatted must not change after Reissue")
+	require.NotNil(t, origReceiptNumberID,
+		"original.receipt_number_id must be retained after Reissue (no gap)")
+
+	// Audit row for donation.reissue must exist.
+	var auditCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM audit_log WHERE action = 'donation.reissue'`).Scan(&auditCount))
+	assert.Equal(t, 1, auditCount, "exactly 1 audit row for donation.reissue must exist")
+
+	// --- Replacement earns a fresh consecutive number via normal Submit → Approve (D-50) ---
+	// Submit the replacement draft (a different maker, or same maker is fine since it's a NEW record).
+	submittedRep, err := svc.Submit(ctx, replacement.ID, makerClaims)
+	require.NoError(t, err, "Submit on replacement draft must succeed")
+	require.Equal(t, "pending_review", submittedRep.Status)
+
+	// Approve the replacement (Checker who is not the creator of the new draft).
+	// Note: makerClaims created the replacement (via Reissue), so checker approves.
+	issuedRep, err := svc.Approve(ctx, replacement.ID, checkerClaims)
+	require.NoError(t, err, "Approve on submitted replacement must succeed")
+	require.NotNil(t, issuedRep)
+	assert.Equal(t, "issued", issuedRep.Status,
+		"replacement must reach issued status via normal Approve")
+	require.NotNil(t, issuedRep.ReceiptFormatted,
+		"replacement must earn a fresh receipt number via normal approval (D-50)")
+
+	// The replacement's receipt number must be fresh (different from original).
+	assert.NotEqual(t, origReceipt, *issuedRep.ReceiptFormatted,
+		"replacement must earn a DIFFERENT receipt number (fresh, not reuse of original)")
+
+	// Exactly 2 receipt_numbers rows: original + replacement (both in ledger, no gaps).
+	var ledgerCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM receipt_numbers`).Scan(&ledgerCount))
+	assert.Equal(t, 2, ledgerCount,
+		"exactly 2 receipt_numbers rows must exist (original + replacement)")
 }
 
 // TestSubmitMovesToPendingReview verifies FR-11 / D-45:
@@ -976,14 +1259,178 @@ func TestSubmitMovesToPendingReview(t *testing.T) {
 
 // TestSearchDonations verifies FR-10 / D-53 search behaviour:
 // donations can be filtered by donor name (ILIKE), date range, status, and receipt number;
-// each filter is independent and can be nil (no restriction).
+// each filter is independent and can be nil (no restriction applied to that dimension).
+// Tax ID is NOT a searchable field (D-53, T-03-29).
 //
 // Requires Docker testcontainers. Skip with -short.
 func TestSearchDonations(t *testing.T) {
 	if testing.Short() {
-		t.Skip("Wave 0 scaffold — implemented in plan 03-07 (list/search API)")
+		t.Skip("skipping integration test in short mode: requires Docker")
 	}
-	t.Skip("Wave 0 scaffold — implemented in plan 03-07 (list/search API)")
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	alloc := receiptno.NewAllocator(queries)
+	auditSvc := audit.NewAuditService(pool, queries, zap.NewNop())
+	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
+
+	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "maker-search@example.com", DisplayName: "Maker Search",
+		KeycloakSubject: "maker-search-kc",
+	})
+	require.NoError(t, err)
+	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "checker-search@example.com", DisplayName: "Checker Search",
+		KeycloakSubject: "checker-search-kc",
+	})
+	require.NoError(t, err)
+
+	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+
+	// Create test donations:
+	//   - "สมชาย" status=draft, donated 2026-01-10
+	//   - "สมหญิง" status=pending_review, donated 2026-02-15
+	//   - "ประยุทธ" status=issued (has receipt), donated 2026-03-20
+
+	dA, err := svc.Create(ctx, donation.CreateDonationRequest{
+		DonorName: "สมชาย สุขใจ", DonorTaxID: "1111111111111", Amount: 1000.00, DonatedAt: "2026-01-10",
+	}, makerClaims)
+	require.NoError(t, err, "Create donation A must succeed")
+
+	dBSubmit := createAndSubmit(t, ctx, svc, makerClaims, "สมหญิง ดีใจ", "2222222222222", "2026-02-15", 2000.00)
+
+	dC := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+		"ประยุทธ เก่งมาก", "3333333333333", "2026-03-20", 3000.00)
+	receiptC := *dC.ReceiptFormatted
+
+	// --- No filters: returns all 3 donations ---
+	all, err := svc.Search(ctx, donation.ListFilter{Limit: 20, Offset: 0}, checkerClaims)
+	require.NoError(t, err, "Search with no filters must succeed")
+	assert.GreaterOrEqual(t, len(all), 3,
+		"no-filter search must return at least the 3 donations we created")
+
+	// --- Filter by donor_name ILIKE "สมชาย" → only donation A ---
+	name := "สมชาย"
+	byName, err := svc.Search(ctx, donation.ListFilter{DonorName: &name, Limit: 20}, checkerClaims)
+	require.NoError(t, err, "Search by donor_name must succeed")
+	require.Len(t, byName, 1, "exactly 1 donation must match 'สมชาย' ILIKE filter")
+	assert.Equal(t, dA.ID, byName[0].ID, "donor_name filter must return donation A")
+
+	// --- Filter by status=draft → only donation A (sมชาย is still draft) ---
+	statusDraft := "draft"
+	byStatus, err := svc.Search(ctx, donation.ListFilter{Status: &statusDraft, Limit: 20}, checkerClaims)
+	require.NoError(t, err, "Search by status must succeed")
+	ids := make([]string, len(byStatus))
+	for i, r := range byStatus {
+		ids[i] = r.ID
+	}
+	assert.Contains(t, ids, dA.ID, "status=draft filter must include donation A")
+	for _, r := range byStatus {
+		assert.Equal(t, "draft", r.Status, "all results of status=draft filter must have status=draft")
+	}
+
+	// --- Filter by from_date / to_date ---
+	// from=2026-02-01, to=2026-02-28 → only "สมหญิง" (donated 2026-02-15)
+	from := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)
+	byDate, err := svc.Search(ctx, donation.ListFilter{FromDate: &from, ToDate: &to, Limit: 20}, checkerClaims)
+	require.NoError(t, err, "Search by date range must succeed")
+	require.Len(t, byDate, 1, "exactly 1 donation must fall in 2026-02 range")
+	assert.Equal(t, dBSubmit.ID, byDate[0].ID, "date-range filter must return donation B (สมหญิง)")
+
+	// --- Filter by receipt_no → only issued donation C ---
+	byReceipt, err := svc.Search(ctx, donation.ListFilter{ReceiptNo: &receiptC, Limit: 20}, checkerClaims)
+	require.NoError(t, err, "Search by receipt_no must succeed")
+	require.Len(t, byReceipt, 1, "exactly 1 donation must match the receipt number filter")
+	assert.Equal(t, dC.ID, byReceipt[0].ID, "receipt_no filter must return donation C")
+}
+
+// TestEDonationKeyedGuard_Integration verifies the edonation_keyed=true guard (D-51):
+// when a donation has edonation_keyed=true, cancellation requires a non-empty
+// rd_confirmation_reason; with it, cancellation succeeds and the reason is in audit.
+//
+// Requires Docker testcontainers. Skip with -short.
+func TestEDonationKeyedGuard_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode: requires Docker")
+	}
+
+	pool := testutil.SetupTestPostgres(t)
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", integTestKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	queries := db.New(pool)
+	alloc := receiptno.NewAllocator(queries)
+	auditSvc := audit.NewAuditService(pool, queries, zap.NewNop())
+	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
+
+	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "maker-edon@example.com", DisplayName: "Maker EDon",
+		KeycloakSubject: "maker-edon-kc",
+	})
+	require.NoError(t, err)
+	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email: "checker-edon@example.com", DisplayName: "Checker EDon",
+		KeycloakSubject: "checker-edon-kc",
+	})
+	require.NoError(t, err)
+
+	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+
+	// Issue a donation.
+	d := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+		"นาย ทดสอบ eDonation Keyed", "5555666677778", "2026-07-01", 20000.00)
+	require.Equal(t, "issued", d.Status)
+
+	// Set edonation_keyed=true via raw SQL (simulating that it was keyed into RD system).
+	_, err = pool.Exec(ctx, `UPDATE donations SET edonation_keyed = true WHERE id = $1`, d.ID)
+	require.NoError(t, err, "raw UPDATE of edonation_keyed must succeed")
+
+	// Attempt cancel WITHOUT rd_confirmation_reason → ErrEDonationKeyedCancel (D-51).
+	_, err = svc.Cancel(ctx, d.ID, donation.CancelDonationRequest{
+		Reason:               "ยกเลิก",
+		RDConfirmationReason: "", // missing!
+	}, checkerClaims)
+	require.Error(t, err, "Cancel with edonation_keyed=true and no rd_confirmation_reason must error")
+	assert.ErrorIs(t, err, donation.ErrEDonationKeyedCancel,
+		"Must return ErrEDonationKeyedCancel when edonation_keyed=true and rd_confirmation_reason is empty (D-51)")
+
+	// Status must still be 'issued' (the cancel was rejected).
+	var status string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status FROM donations WHERE id = $1`, d.ID).Scan(&status))
+	assert.Equal(t, "issued", status, "status must remain issued after rejected cancel attempt")
+
+	// Cancel WITH rd_confirmation_reason → succeeds (D-51).
+	const rdReason = "ยืนยันการแก้ไขข้อมูลกับ e-Donation รอบที่ 3"
+	cancelled, err := svc.Cancel(ctx, d.ID, donation.CancelDonationRequest{
+		Reason:               "ยกเลิกหลังยืนยัน RD",
+		RDConfirmationReason: rdReason,
+	}, checkerClaims)
+	require.NoError(t, err, "Cancel with edonation_keyed=true and rd_confirmation_reason must succeed (D-51)")
+	assert.Equal(t, "cancelled", cancelled.Status, "status must be cancelled after successful cancel")
+
+	// Audit row must exist and contain the rd_confirmation_reason.
+	var auditAfterJSON []byte
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT after_json FROM audit_log WHERE action = 'donation.cancel' ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&auditAfterJSON))
+	require.NotNil(t, auditAfterJSON, "audit after_json must be set for donation.cancel")
+	assert.Contains(t, string(auditAfterJSON), "rd_confirmation_reason",
+		"audit after_json must contain rd_confirmation_reason when edonation_keyed (D-51)")
+	assert.Contains(t, string(auditAfterJSON), rdReason,
+		"audit after_json must contain the actual rd_confirmation_reason value")
 }
 
 // TestCreateDonation verifies FR-07 / D-43 end-to-end donation creation:

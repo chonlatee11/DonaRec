@@ -64,11 +64,18 @@ type DonationResponse struct {
 	UpdatedAt          time.Time  `json:"updated_at"`
 	SubmittedAt        *time.Time `json:"submitted_at,omitempty"`
 	// Review/approval fields — populated after Checker action (plan 03-05).
-	ReviewedBy       *string    `json:"reviewed_by,omitempty"`        // Checker UUID who returned/rejected
-	ReviewedAt       *time.Time `json:"reviewed_at,omitempty"`         // timestamp of review action
-	ReviewReason     *string    `json:"review_reason,omitempty"`       // mandatory reason for return/reject
-	ApprovedAt       *time.Time `json:"approved_at,omitempty"`         // timestamp of approval
-	ReceiptFormatted *string    `json:"receipt_formatted,omitempty"`   // frozen receipt number string (D-42)
+	ReviewedBy       *string    `json:"reviewed_by,omitempty"`       // Checker UUID who returned/rejected
+	ReviewedAt       *time.Time `json:"reviewed_at,omitempty"`       // timestamp of review action
+	ReviewReason     *string    `json:"review_reason,omitempty"`     // mandatory reason for return/reject
+	ApprovedAt       *time.Time `json:"approved_at,omitempty"`       // timestamp of approval
+	ReceiptFormatted *string    `json:"receipt_formatted,omitempty"` // frozen receipt number string (D-42)
+	// Cancellation fields — populated after Cancel action (plan 03-06, FR-19, D-47).
+	CancelledBy *string    `json:"cancelled_by,omitempty"` // Checker/Admin UUID who cancelled
+	CancelledAt *time.Time `json:"cancelled_at,omitempty"` // timestamp of cancellation
+	CancelReason *string   `json:"cancel_reason,omitempty"` // mandatory reason for cancel
+	// Void & Reissue links — D-50 self-FK on donations table.
+	Replaces   *string `json:"replaces,omitempty"`    // UUID of the original record this one replaced
+	ReplacedBy *string `json:"replaced_by,omitempty"` // UUID of the replacement record
 }
 
 // ReviewRequest is the JSON request body for Return and Reject actions (D-45, FR-12).
@@ -79,6 +86,7 @@ type ReviewRequest struct {
 
 // ListFilter holds optional search/filter criteria for listing donations (FR-10, D-53).
 // All fields are optional — nil/zero means no restriction applied to that dimension.
+// Tax ID is intentionally excluded as a filter parameter (D-53, T-03-29).
 type ListFilter struct {
 	DonorName *string
 	Status    *string
@@ -87,4 +95,41 @@ type ListFilter struct {
 	ReceiptNo *string
 	Offset    int32
 	Limit     int32
+}
+
+// CancelDonationRequest is the JSON request body for Cancel (void) of an issued receipt (D-47, FR-19).
+// Reason is mandatory — empty or whitespace-only returns ErrMissingReason (422).
+// RDConfirmationReason is required when edonation_keyed=true (D-51, T-03-25).
+type CancelDonationRequest struct {
+	Reason               string `json:"reason"                 validate:"required,min=1,max=2000"`
+	RDConfirmationReason string `json:"rd_confirmation_reason"`
+}
+
+// ReissueDonationRequest is the request body for Void & Reissue (D-50).
+// Contains the cancellation authorization fields (reason + optional rd_confirmation_reason)
+// plus corrected donor fields for the replacement draft (same shape as CreateDonationRequest).
+// The replacement draft earns a fresh number only via the normal Submit → Approve path (D-50).
+type ReissueDonationRequest struct {
+	// Cancellation authorization (mirrors CancelDonationRequest)
+	Reason               string `json:"reason"                 validate:"required,min=1,max=2000"`
+	RDConfirmationReason string `json:"rd_confirmation_reason"`
+	// Corrected donor data for the new draft (mirrors CreateDonationRequest)
+	DonorName          string  `json:"donor_name"           validate:"required,min=1,max=255"`
+	DonorTaxID         string  `json:"donor_tax_id"         validate:"required,len=13,numeric"`
+	DonorAddress       string  `json:"donor_address"        validate:"max=1000"`
+	DonorEmail         string  `json:"donor_email"          validate:"omitempty,email,max=255"`
+	Amount             float64 `json:"amount"               validate:"required,gt=0"`
+	DonatedAt          string  `json:"donated_at"           validate:"required"`
+	Notes              string  `json:"notes"                validate:"max=2000"`
+	ConsentGiven       bool    `json:"consent_given"`
+	ConsentTextVersion string  `json:"consent_text_version"`
+	ConsentPurpose     string  `json:"consent_purpose"`
+}
+
+// PIIRevealResponse is returned by GET /api/donations/:id/pii (D-46, T-03-26).
+// Full plaintext donor tax/national ID is exposed only to Checker and Admin roles.
+// Every reveal is audited (action="pii.reveal") before the plaintext is returned (D-13).
+type PIIRevealResponse struct {
+	DonationID          string `json:"donation_id"`
+	DonorTaxIDPlaintext string `json:"donor_tax_id"` // plaintext — only in this endpoint
 }

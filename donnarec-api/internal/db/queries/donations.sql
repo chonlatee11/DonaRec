@@ -206,6 +206,16 @@ SET
     updated_at  = now()
 WHERE id = @id;
 
+-- name: SetReplaces :exec
+-- Link a replacement draft to the original cancelled record (D-50 Void & Reissue).
+-- Called inside the same Reissue transaction as SetReplacedBy to set both ends of the link.
+-- Only updates the replaces pointer on the new draft — no status change here.
+UPDATE donations
+SET
+    replaces   = @replaces,
+    updated_at = now()
+WHERE id = @id;
+
 -- name: SearchDonations :many
 -- Search donations by name / date range / status / receipt number (FR-10, D-53).
 -- All filter params are optional (nullable @param::TYPE IS NULL pattern):

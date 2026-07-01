@@ -325,17 +325,107 @@ func TestMandatoryReason(t *testing.T) {
 		"Reject with whitespace-only reason must return ErrMissingReason")
 }
 
-// TestEDonationKeyedGuard verifies that cancellation of a donation with
-// edonation_keyed=true requires an rd_confirmation_reason in the request body (D-51).
+// TestCancelRequiresReason verifies that Cancel returns ErrMissingReason when the
+// request reason is empty or whitespace-only (D-47, FR-19).
 //
-// When edonation_keyed=true and rd_confirmation_reason is empty, the service
-// must return ErrEDonationKeyedCancel (mapped to 422 by the handler).
+// The reason check fires before any DB call (Checker claims, nil pool is fine).
+// Per-commit quick-check: no Docker required, completes in milliseconds.
+func TestCancelRequiresReason(t *testing.T) {
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", testKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	// nil pool — reason check must fire before any DB access.
+	svc := NewDonationService(nil, nil, nil, nil, kp, zap.NewNop())
+
+	checkerClaims := auth.KeycloakClaims{
+		Subject:     "00000000-0000-0000-0000-000000000099",
+		RealmAccess: auth.RealmRoles{Roles: []string{"checker"}},
+	}
+	donationID := "00000000-0000-0000-0000-000000000001"
+
+	// Empty reason → ErrMissingReason.
+	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: ""}, checkerClaims)
+	require.Error(t, err, "Cancel with empty reason must return an error")
+	assert.ErrorIs(t, err, ErrMissingReason,
+		"Cancel with empty reason must return ErrMissingReason (D-47)")
+
+	// Whitespace-only reason → ErrMissingReason.
+	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: "   \t\n"}, checkerClaims)
+	require.Error(t, err, "Cancel with whitespace-only reason must return an error")
+	assert.ErrorIs(t, err, ErrMissingReason,
+		"Cancel with whitespace-only reason must return ErrMissingReason (D-47)")
+}
+
+// TestCancelAuthCheckerAdminOnly verifies that Cancel returns ErrForbidden when
+// called with Maker claims (D-47: Void & cancel is restricted to Checker + Admin).
 //
-// Implemented by plan 03-06 (cancel service method with edonation_keyed guard).
+// The role check fires before any DB call (nil pool is fine).
+// Per-commit quick-check: no Docker required, completes in milliseconds.
+func TestCancelAuthCheckerAdminOnly(t *testing.T) {
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", testKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	// nil pool — role check must fire before any DB access.
+	svc := NewDonationService(nil, nil, nil, nil, kp, zap.NewNop())
+
+	makerClaims := auth.KeycloakClaims{
+		Subject:     "00000000-0000-0000-0000-000000000001",
+		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
+	}
+	donationID := "00000000-0000-0000-0000-000000000001"
+
+	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: "ยกเลิก"}, makerClaims)
+	require.Error(t, err, "Cancel by Maker must return an error (D-47)")
+	assert.ErrorIs(t, err, ErrForbidden,
+		"Cancel by Maker must return ErrForbidden — only Checker/Admin may cancel (D-47)")
+}
+
+// TestEDonationKeyedGuard (unit: role/reason pre-checks only — edonation_keyed=true behaviour
+// is tested in service_integration_test.go → TestEDonationKeyedGuard_Integration which
+// requires Docker+testcontainers to set edonation_keyed=true on a real DB row).
+//
+// This unit slice covers the pre-DB checks: role gate fires before e-Donation guard.
 func TestEDonationKeyedGuard(t *testing.T) {
-	// [Rule 1 fix]: changed from t.Fatal → t.Skip to match the Wave 0 scaffold pattern
-	// used in service_integration_test.go. t.Fatal causes ALL tests in the package to
-	// appear to fail even when run with -short, breaking per-commit quick-checks for
-	// plans 03-05 and earlier. Skipped until plan 03-06 implements Cancel.
-	t.Skip("Wave 0 scaffold — implemented in plan 03-06 (cancel service edonation_keyed guard)")
+	ctx := context.Background()
+
+	t.Setenv("DONAREC_KEK", testKEK)
+	kp, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err)
+
+	// nil pool — pre-DB checks only.
+	svc := NewDonationService(nil, nil, nil, nil, kp, zap.NewNop())
+
+	// Maker cannot cancel even with rd_confirmation_reason set — role check fires first.
+	makerClaims := auth.KeycloakClaims{
+		Subject:     "00000000-0000-0000-0000-000000000001",
+		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
+	}
+	donationID := "00000000-0000-0000-0000-000000000001"
+
+	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{
+		Reason:               "ยกเลิกและแจ้ง RD",
+		RDConfirmationReason: "แก้ไขข้อมูล e-Donation รอบ 2",
+	}, makerClaims)
+	require.Error(t, err, "Maker with rd_confirmation_reason must still be ErrForbidden")
+	assert.ErrorIs(t, err, ErrForbidden,
+		"Role check fires before edonation_keyed guard — Maker always gets ErrForbidden (D-47)")
+
+	// Checker with empty reason — reason check fires before hitting DB (no edonation_keyed check).
+	checkerClaims := auth.KeycloakClaims{
+		Subject:     "00000000-0000-0000-0000-000000000099",
+		RealmAccess: auth.RealmRoles{Roles: []string{"checker"}},
+	}
+	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{
+		Reason:               "",
+		RDConfirmationReason: "confirmed",
+	}, checkerClaims)
+	require.Error(t, err, "Empty reason must fail even with rd_confirmation_reason set")
+	assert.ErrorIs(t, err, ErrMissingReason,
+		"Reason check fires before edonation_keyed DB read — ErrMissingReason expected")
 }
