@@ -3,13 +3,21 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getTranslations, getLocale } from "next-intl/server";
 import { ExternalLink, ArrowLeft } from "lucide-react";
-import { getDonation, approve, returnForEdit, reject } from "@/lib/donations";
+import {
+  getDonation,
+  approve,
+  returnForEdit,
+  reject,
+  revealPII,
+  cancelDonation,
+  reissueDonation,
+} from "@/lib/donations";
 import { DonnaRecApiError } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { MaskedIdField } from "@/components/MaskedIdField";
 import { ReviewActionPanel } from "@/components/ReviewActionPanel";
 import { Separator } from "@/components/ui/separator";
-import type { DonationDetail } from "@/lib/donations";
+import type { DonationDetail, CancelDonationRequest } from "@/lib/donations";
 
 interface DonationDetailPageProps {
   params: Promise<{ id: string }>;
@@ -21,8 +29,9 @@ interface DonationDetailPageProps {
  *
  * T-03-31: SoD/RBAC is enforced server-side (03-05).
  *   viewer_is_creator + status flags from Go API drive all UI branching.
- * T-03-32: national ID masked by default; reveal audited via /pii (03-08).
+ * T-03-32: national ID masked by default; reveal audited via /pii (03-06/03-08).
  * T-03-33: 409 status_conflict surfaced as toast via ReviewActionPanel → lib/api.ts.
+ * T-03-36: cancel with edonation_keyed — CancelDialog forces rd_confirmation_reason.
  */
 export default async function DonationDetailPage({
   params,
@@ -40,13 +49,10 @@ export default async function DonationDetailPage({
     if (err instanceof DonnaRecApiError && err.error.status === 404) {
       notFound();
     }
-    // Re-throw other errors (will be caught by Next.js error boundary)
     throw err;
   }
 
   // ── Inline server actions ──────────────────────────────────────────────────
-  // T-03-31: server enforces SoD and RBAC; returning typed error lets
-  //          ReviewActionPanel map to copywriting error messages.
 
   async function handleApprove(): Promise<{ error: string } | null> {
     "use server";
@@ -85,6 +91,67 @@ export default async function DonationDetailPage({
     } catch (err) {
       const e = err as { error?: { message?: string }; message?: string };
       return { error: e?.error?.message ?? e?.message ?? "เกิดข้อผิดพลาด" };
+    }
+  }
+
+  /**
+   * Audited PII reveal — server action passed to MaskedIdField.
+   * Server writes audit log BEFORE returning plaintext (D-46 / T-03-34).
+   * T-03-34: reveal is session-only client state; server audits every call.
+   */
+  async function handleRevealPII(): Promise<
+    { national_id: string } | { error: string }
+  > {
+    "use server";
+    try {
+      const result = await revealPII(id);
+      return { national_id: result.national_id };
+    } catch (err) {
+      const e = err as { error?: { message?: string; type?: string }; message?: string };
+      return {
+        error:
+          e?.error?.message ?? e?.message ?? "ไม่มีสิทธิ์เปิดเผยข้อมูลนี้",
+      };
+    }
+  }
+
+  /**
+   * Cancel (void) an issued receipt.
+   * T-03-36: rd_confirmation_reason required when edonation_keyed=true.
+   * Server returns 409 ErrEDonationKeyedConfirmation if missing.
+   */
+  async function handleCancel(
+    body: CancelDonationRequest
+  ): Promise<{ error?: string } | null> {
+    "use server";
+    try {
+      await cancelDonation(id, body);
+      revalidatePath(`/donations/${id}`);
+      revalidatePath("/donations");
+      return null;
+    } catch (err) {
+      const e = err as { error?: { message?: string }; message?: string };
+      return { error: e?.error?.message ?? e?.message ?? "ยกเลิกไม่สำเร็จ" };
+    }
+  }
+
+  /**
+   * Void & Reissue — cancel original + create replacement draft (D-50).
+   * New draft earns receipt number only via normal Submit → Approve path.
+   */
+  async function handleReissue(
+    body: CancelDonationRequest
+  ): Promise<{ error?: string; newId?: string } | null> {
+    "use server";
+    try {
+      const result = await reissueDonation(id, body);
+      revalidatePath(`/donations/${id}`);
+      revalidatePath(`/donations/${result.id}`);
+      revalidatePath("/donations");
+      return { newId: result.id };
+    } catch (err) {
+      const e = err as { error?: { message?: string }; message?: string };
+      return { error: e?.error?.message ?? e?.message ?? "สร้างรายการใหม่ไม่สำเร็จ" };
     }
   }
 
@@ -198,17 +265,22 @@ export default async function DonationDetailPage({
                 </dd>
               </div>
 
-              {/* เลขประจำตัว — masked by default */}
+              {/* เลขประจำตัว — masked by default; reveal wired to Screen 4 */}
               <div className="grid grid-cols-[180px_1fr] gap-2">
                 <dt className="text-[14px] text-slate-600">
                   {t("fields.nationalId")}
                 </dt>
                 <dd>
-                  {/* T-03-32: plaintext only via audited reveal (03-08 full flow) */}
+                  {/*
+                   * T-03-34: plaintext only via audited reveal server action.
+                   * Session-only: reload re-masks. Server audits every reveal.
+                   */}
                   <MaskedIdField
                     maskedValue={donation.national_id_masked}
                     canReveal={donation.can_reveal_pii}
-                    /* onReveal wired in 03-08 */
+                    onRevealAction={
+                      donation.can_reveal_pii ? handleRevealPII : undefined
+                    }
                   />
                 </dd>
               </div>
@@ -272,7 +344,9 @@ export default async function DonationDetailPage({
 
             {/* Slip section */}
             <div className="flex flex-col gap-1">
-              <p className="text-[14px] font-medium text-slate-700">สลิปการโอนเงิน</p>
+              <p className="text-[14px] font-medium text-slate-700">
+                สลิปการโอนเงิน
+              </p>
               {donation.slip_url ? (
                 <a
                   href={donation.slip_url}
@@ -292,7 +366,9 @@ export default async function DonationDetailPage({
 
             {/* Consent row */}
             <div className="mt-3 flex flex-col gap-1">
-              <p className="text-[14px] font-medium text-slate-700">ความยินยอม PDPA</p>
+              <p className="text-[14px] font-medium text-slate-700">
+                ความยินยอม PDPA
+              </p>
               {donation.consent_at ? (
                 <p className="text-[14px] text-slate-900">
                   {t("detail.consentGiven", {
@@ -337,7 +413,7 @@ export default async function DonationDetailPage({
               </>
             )}
 
-            {/* Review history accordion — collapsed by default (native <details>) */}
+            {/* Review history accordion — collapsed by default */}
             {donation.review_history.length > 0 && (
               <>
                 <Separator className="my-4" />
@@ -376,11 +452,6 @@ export default async function DonationDetailPage({
         {/* ── Right panel — การดำเนินการ ─────────────────────────────────── */}
         <div className="flex flex-col gap-4 lg:w-2/5 lg:sticky lg:top-6">
           <div className="rounded-lg border border-slate-200 bg-white p-6">
-            {/*
-             * ReviewActionPanel (Client Component):
-             * Receives server actions from this Server Component.
-             * Manages dialog state, toast notifications, and router.refresh().
-             */}
             <ReviewActionPanel
               donation={{
                 id: donation.id,
@@ -389,10 +460,15 @@ export default async function DonationDetailPage({
                 can_approve: donation.can_approve,
                 can_return: donation.can_return,
                 can_reject: donation.can_reject,
+                can_reveal_pii: donation.can_reveal_pii,
+                edonation_keyed: donation.edonation_keyed,
+                receipt_formatted: donation.receipt_formatted,
               }}
               onApprove={handleApprove}
               onReturn={handleReturn}
               onReject={handleReject}
+              onCancel={handleCancel}
+              onReissue={handleReissue}
             />
           </div>
         </div>
