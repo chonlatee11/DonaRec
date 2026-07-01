@@ -163,5 +163,76 @@ export async function apiFetch<T>(
     throw new DonnaRecApiError(apiError);
   }
 
+  // 204 No Content — return undefined (e.g. DELETE slip, soft-delete endpoints)
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+// ---------------------------------------------------------------------------
+// Multipart fetch wrapper (for file uploads — does NOT set Content-Type)
+// ---------------------------------------------------------------------------
+
+/**
+ * Authenticated multipart/form-data fetch wrapper.
+ *
+ * Used for file-upload endpoints (e.g. POST /api/donations/:id/slip).
+ * Does NOT set Content-Type so the browser/Node adds the multipart boundary.
+ * T-03-35: server magic-byte validation (03-04) is the authority; client
+ * size pre-check is UX-only.
+ */
+export async function apiFetchFormData<T>(
+  path: string,
+  formData: FormData,
+  method: "POST" | "PUT" = "POST"
+): Promise<T> {
+  const token = await getAccessToken();
+
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+  // Deliberately no Content-Type — let FormData set multipart/form-data + boundary
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      method,
+      headers,
+      body: formData,
+    });
+  } catch (err) {
+    throw new DonnaRecApiError({
+      type: "network",
+      status: 0,
+      message:
+        "บันทึกไม่สำเร็จ — กรุณาตรวจสอบการเชื่อมต่อและลองอีกครั้ง",
+      details: err,
+    });
+  }
+
+  if (!res.ok) {
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await res.json()) as Record<string, unknown>;
+    } catch {
+      // non-JSON error body
+    }
+
+    const status = res.status;
+    const msg = (body.message as string) ?? "เกิดข้อผิดพลาด";
+
+    const apiError: ApiError =
+      status === 413
+        ? { type: "validation", status, message: msg, details: body }
+        : status === 415 || status === 422
+        ? { type: "validation", status, message: msg, details: body }
+        : status === 403
+        ? { type: "forbidden", status, message: msg, details: body }
+        : { type: "network", status, message: msg, details: body };
+
+    throw new DonnaRecApiError(apiError);
+  }
+
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }

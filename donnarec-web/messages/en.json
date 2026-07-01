@@ -148,5 +148,39 @@
     "allStatuses": "All Statuses",
     "donatedFrom": "Donated from",
     "donatedTo": "to"
+  },
+  "form": {
+    "newTitle": "Create Donation",
+    "editTitle": "Edit Donation",
+    "section1": "Donor Information",
+    "section2": "Donation Details",
+    "section3": "Payment Slip",
+    "section4": "PDPA Consent",
+    "returnedAlert": "Record returned for edit — {reason}",
+    "emailHelper": "Used to send the receipt by email (optional)",
+    "nationalIdEditHelper": "Leave blank to keep existing value",
+    "nationalIdEditPlaceholder": "Enter new ID to change",
+    "selectDate": "Select date",
+    "savedSuccess": "Draft saved successfully",
+    "submitSuccess": "Submitted for review successfully",
+    "unsavedChanges": "You have unsaved changes — leave this page?",
+    "backToList": "Back to list"
+  },
+  "slip": {
+    "zoneLabel": "Attach Payment Slip (optional)",
+    "dragOrClick": "Drag and drop a file, or",
+    "browse": "Browse",
+    "formatHint": "JPG, PNG, PDF up to 10 MB",
+    "view": "View Slip",
+    "remove": "Remove",
+    "change": "Change Slip",
+    "uploading": "Uploading..."
+  },
+  "consent": {
+    "label": "I confirm that the donor has been informed of and consented to the hospital collecting, using, and disclosing their personal data for the purpose of issuing the donation receipt and tax filing, in accordance with the Privacy Policy version {version}"
+  },
+  "pii": {
+    "revealTooltip": "Revealed data will be hidden when you reload the page",
+    "revealAuditNote": "This reveal has been recorded in the audit log"
   }
 }

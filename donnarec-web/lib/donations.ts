@@ -1,4 +1,4 @@
-import { apiFetch } from "@/lib/api";
+import { apiFetch, apiFetchFormData } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Status type (keep in sync with StatusBadge DonationStatus)
@@ -153,4 +153,162 @@ export async function reject(id: string, reason: string): Promise<void> {
  */
 export async function revealPII(id: string): Promise<{ national_id: string }> {
   return apiFetch<{ national_id: string }>(`/api/donations/${id}/pii`);
+}
+
+// ---------------------------------------------------------------------------
+// Request types (03-08 additions)
+// ---------------------------------------------------------------------------
+
+/** Body for POST /api/donations (create draft) */
+export interface CreateDonationRequest {
+  donor_name: string;
+  /** Plaintext 13-digit national/tax ID — encrypted by Go service before DB write */
+  national_id: string;
+  address: string;
+  email?: string;
+  amount: number;
+  /** ISO date YYYY-MM-DD */
+  donated_at: string;
+  note?: string;
+  consent_given: boolean;
+  /** e.g. "1.0" — shown in ConsentBlock per D-49 */
+  consent_text_version?: string;
+}
+
+/** Body for PUT /api/donations/:id (update draft) — all fields optional */
+export interface UpdateDraftRequest {
+  donor_name?: string;
+  /** If provided, re-encrypted by Go service. If absent, existing value preserved. */
+  national_id?: string;
+  address?: string;
+  email?: string;
+  amount?: number;
+  donated_at?: string;
+  note?: string;
+  consent_given?: boolean;
+  consent_text_version?: string;
+}
+
+export interface SlipViewResponse {
+  url: string;
+  /** 900 = 15-minute presigned TTL (T-03-16) */
+  expires_in_seconds: number;
+}
+
+/** Body for POST /api/donations/:id/cancel and POST /:id/reissue */
+export interface CancelDonationRequest {
+  reason: string;
+  /** Required only when edonation_keyed=true (D-51 / ErrEDonationKeyedCancel) */
+  rd_confirmation_reason?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Mutation functions (server-side — require getServerSession via apiFetch)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/donations — create a new draft.
+ * Maker role required. national_id encrypted server-side (T-03-08 / D-44).
+ */
+export async function createDonation(
+  body: CreateDonationRequest
+): Promise<DonationDetail> {
+  return apiFetch<DonationDetail>("/api/donations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * PUT /api/donations/:id — update an existing draft.
+ * Only allowed in draft status (ErrInvalidTransition→409 otherwise).
+ * national_id re-encrypted if provided; existing value kept if absent.
+ */
+export async function updateDraft(
+  id: string,
+  body: UpdateDraftRequest
+): Promise<DonationDetail> {
+  return apiFetch<DonationDetail>(`/api/donations/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * POST /api/donations/:id/submit — transition draft → pending_review.
+ * Row-level lock ensures gap-less counter safety (D-45).
+ */
+export async function submitDonation(id: string): Promise<DonationDetail> {
+  return apiFetch<DonationDetail>(`/api/donations/${id}/submit`, {
+    method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Slip functions
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/donations/:id/slip (multipart/form-data, field "file").
+ * Server performs magic-byte validation (T-03-14/T-03-15).
+ * 413 → file too large; 415/422 → unsupported type.
+ */
+export async function uploadSlip(
+  id: string,
+  formData: FormData
+): Promise<void> {
+  return apiFetchFormData<void>(`/api/donations/${id}/slip`, formData);
+}
+
+/**
+ * GET /api/donations/:id/slip — returns a 15-min presigned URL (T-03-16).
+ * 404 if no active slip (D-48 — cash donations may have none).
+ */
+export async function viewSlip(id: string): Promise<SlipViewResponse> {
+  return apiFetch<SlipViewResponse>(`/api/donations/${id}/slip`);
+}
+
+/**
+ * DELETE /api/donations/:id/slip — soft-delete (D-54).
+ * The file is NEVER hard-deleted; DB record retains the object key.
+ * Returns 204 No Content on success.
+ */
+export async function removeSlip(id: string): Promise<void> {
+  return apiFetch<void>(`/api/donations/${id}/slip`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Cancel / Reissue functions (Checker + Admin — 03-06 backend)
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/donations/:id/cancel — void a receipt (Checker + Admin only).
+ * Receipt number is RETAINED for audit trail (no gap created).
+ * If edonation_keyed=true, rd_confirmation_reason is mandatory (D-51).
+ * ErrEDonationKeyedCancel → 409 when rd_confirmation_reason is missing.
+ */
+export async function cancelDonation(
+  id: string,
+  body: CancelDonationRequest
+): Promise<DonationDetail> {
+  return apiFetch<DonationDetail>(`/api/donations/${id}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * POST /api/donations/:id/reissue — void + create replacement draft (D-50).
+ * New draft requires normal Submit → Approve flow; gets a NEW receipt number.
+ * If edonation_keyed=true, rd_confirmation_reason is mandatory (D-51).
+ * Returns 201 with the new replacement donation.
+ */
+export async function reissueDonation(
+  id: string,
+  body: CancelDonationRequest
+): Promise<DonationDetail> {
+  return apiFetch<DonationDetail>(`/api/donations/${id}/reissue`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
