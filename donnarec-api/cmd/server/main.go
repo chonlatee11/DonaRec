@@ -230,18 +230,27 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, user
 	donationGroup.GET("/:id/slip", slipHandler.View)
 	donationGroup.DELETE("/:id/slip", slipHandler.Remove)
 
-	// ---- Checker/Admin review actions (Plan 03-05, D-45) ----
-	// POST /:id/approve — issue receipt via atomic 7-step tx (INV-1, FR-08)
-	// POST /:id/return  — return to draft with mandatory reason (FR-12)
-	// POST /:id/reject  — permanently reject with mandatory reason (FR-12)
+	// GET /:id/pii — full PII reveal (D-46); route open to all staff but service gates to Checker/Admin.
+	// The role check inside RevealPII returns ErrForbidden (403) for Makers.
+	// Placed here (not checkerGroup) so a Maker receives 403, not 401/404 (better UX + testability).
+	donationGroup.GET("/:id/pii", donationHandler.RevealPII)
+
+	// ---- Checker/Admin review actions (Plans 03-05 + 03-06, D-45, D-47) ----
+	// POST /:id/approve  — issue receipt via atomic 7-step tx (INV-1, FR-08)
+	// POST /:id/return   — return to draft with mandatory reason (FR-12)
+	// POST /:id/reject   — permanently reject with mandatory reason (FR-12)
+	// POST /:id/cancel   — void an issued receipt; retains number (FR-19, D-47, plan 03-06)
+	// POST /:id/reissue  — void & reissue; creates corrected draft linked via replaces (D-50, plan 03-06)
 	//
-	// Scoped to Checker + Admin only (defense-in-depth over service-layer SoD guard).
+	// Scoped to Checker + Admin only (defense-in-depth over service-layer SoD and role guards).
 	// Inherits parent donationGroup middleware (RequireAuth + Maker/Checker/Admin).
 	checkerGroup := donationGroup.Group("")
 	checkerGroup.Use(auth.RequireRoles(auth.RoleChecker, auth.RoleAdmin))
 	checkerGroup.POST("/:id/approve", donationHandler.Approve)
 	checkerGroup.POST("/:id/return", donationHandler.ReturnToDraft)
 	checkerGroup.POST("/:id/reject", donationHandler.Reject)
+	checkerGroup.POST("/:id/cancel", donationHandler.Cancel)
+	checkerGroup.POST("/:id/reissue", donationHandler.Reissue)
 
 	return router
 }

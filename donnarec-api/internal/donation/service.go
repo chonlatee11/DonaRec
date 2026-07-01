@@ -809,6 +809,461 @@ func (s *DonationService) Reject(ctx context.Context, id string, reason string, 
 	return donationRowToResponse(rejectedRow, pii.MaskNationalID(string(plaintext))), nil
 }
 
+// Cancel voids an issued receipt: issued → cancelled (FR-19, D-47, plan 03-06).
+//
+// Authorization (D-47): Checker and Admin only — Maker is forbidden.
+// Reason is mandatory (ErrMissingReason if empty/whitespace).
+// If edonation_keyed=true on the record, RDConfirmationReason must be non-empty (D-51, T-03-25).
+// The receipt_number_id and receipt_formatted are NEVER nulled out — the number is retained
+// to avoid gaps in the sequential series (FR-19, load-bearing invariant Cancel#1).
+//
+// All effects (status update + audit) are committed atomically inside WithTx.
+// Pattern C: only donation_id + cancelled_by logged — no PII in logs.
+func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonationRequest, claims auth.KeycloakClaims) (*DonationResponse, error) {
+	// D-47: Checker/Admin only — Maker cannot cancel.
+	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
+		return nil, ErrForbidden
+	}
+
+	// Mandatory reason check — early exit before any DB call.
+	if strings.TrimSpace(req.Reason) == "" {
+		return nil, ErrMissingReason
+	}
+
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	var cancellerUUID pgtype.UUID
+	if err := cancellerUUID.Scan(claims.Subject); err != nil {
+		return nil, fmt.Errorf("invalid canceller UUID: %w", err)
+	}
+
+	cancelledAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+
+	var cancelledRow db.Donation
+	err := dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		// Lock the row to serialize concurrent cancel attempts.
+		locked, lockErr := qtx.LockDonationForUpdate(ctx, pgUUID)
+		if lockErr != nil {
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock donation: %w", lockErr)
+		}
+
+		// D-45: only issued records can be cancelled (FR-19).
+		if !canTransition(locked.Status, "cancel") {
+			return ErrInvalidTransition
+		}
+
+		// D-51: if already keyed into e-Donation, require an explicit RD reconciliation reason.
+		// This prevents accidental gaps in the RD-system records without a documented explanation.
+		if locked.EdonationKeyed && strings.TrimSpace(req.RDConfirmationReason) == "" {
+			return ErrEDonationKeyedCancel
+		}
+
+		reason := req.Reason
+		if err := qtx.CancelDonation(ctx, db.CancelDonationParams{
+			CancelledBy:  cancellerUUID,
+			CancelledAt:  cancelledAt,
+			CancelReason: &reason,
+			ID:           pgUUID,
+		}); err != nil {
+			return fmt.Errorf("cancel donation: %w", err)
+		}
+
+		// Audit inside tx — failure rolls back cancel (NFR-05, Pitfall 4).
+		afterMap := map[string]any{
+			"status":        "cancelled",
+			"cancel_reason": reason,
+		}
+		if req.RDConfirmationReason != "" {
+			afterMap["rd_confirmation_reason"] = req.RDConfirmationReason
+		}
+		afterJSON, _ := json.Marshal(afterMap)
+		if auditErr := s.auditSvc.AppendAuditEntryTx(ctx, tx, audit.AuditEntry{
+			ActorID:    claims.Subject,
+			ActorEmail: claims.ActorIdentity(),
+			Action:     "donation.cancel",
+			Resource:   "/api/donations/" + id + "/cancel",
+			AfterJSON:  afterJSON,
+		}); auditErr != nil {
+			return fmt.Errorf("audit cancel: %w", auditErr)
+		}
+
+		var getErr error
+		cancelledRow, getErr = qtx.GetDonationByID(ctx, pgUUID)
+		return getErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Decrypt only to produce the masked value for the response (T-03-09).
+	plaintext, decErr := crypto.DecryptField(ctx, s.keyProvider, cancelledRow.DonorTaxIDEnc, cancelledRow.DonorTaxIDDek)
+	if decErr != nil {
+		return nil, fmt.Errorf("decrypt donor tax ID: %w", decErr)
+	}
+
+	// Pattern C: log donation_id + cancelled_by only — no PII.
+	s.logger.Info("donation cancelled",
+		zap.String("donation_id", id),
+		zap.String("cancelled_by", claims.Subject),
+	)
+
+	return donationRowToResponse(cancelledRow, pii.MaskNationalID(string(plaintext))), nil
+}
+
+// Reissue performs Void & Reissue (D-50): cancels an issued receipt and creates a corrected draft.
+//
+// Inside ONE WithTx closure:
+//  1. Performs Cancel guards (Checker/Admin, reason, e-Donation keyed confirmation).
+//  2. CancelDonation on the original (sets status=cancelled, retains receipt_number_id — no gap).
+//  3. Creates a NEW donation at status='draft' with corrected data (re-encrypt tax ID).
+//  4. Sets original.replaced_by = newID (SetReplacedBy).
+//  5. Sets new.replaces = originalID (SetReplaces).
+//  6. Appends audit entry "donation.reissue".
+//
+// CRITICAL (D-50): the new draft does NOT get a receipt number here.
+// It must go through the normal Submit → Approve path (plan 03-05) to earn a fresh number.
+// This preserves Maker-Checker SoD and gap-less numbering — no bypass is allowed.
+func (s *DonationService) Reissue(ctx context.Context, originalID string, req ReissueDonationRequest, claims auth.KeycloakClaims) (*DonationResponse, error) {
+	// D-47: Checker/Admin only.
+	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
+		return nil, ErrForbidden
+	}
+
+	// Mandatory reason check.
+	if strings.TrimSpace(req.Reason) == "" {
+		return nil, ErrMissingReason
+	}
+
+	if req.DonorTaxID == "" {
+		return nil, ErrMissingTaxID
+	}
+
+	var origUUID pgtype.UUID
+	if err := origUUID.Scan(originalID); err != nil {
+		return nil, fmt.Errorf("invalid original donation ID: %w", err)
+	}
+
+	var actorUUID pgtype.UUID
+	if err := actorUUID.Scan(claims.Subject); err != nil {
+		return nil, fmt.Errorf("invalid actor UUID: %w", err)
+	}
+
+	cancelledAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+
+	// Encrypt the corrected tax ID before the transaction begins.
+	encBytes, dekBytes, encErr := crypto.EncryptField(ctx, s.keyProvider, []byte(req.DonorTaxID))
+	if encErr != nil {
+		return nil, fmt.Errorf("encrypt donor tax ID: %w", encErr)
+	}
+
+	donatedAtTime, err := time.ParseInLocation("2006-01-02", req.DonatedAt, time.UTC)
+	if err != nil {
+		return nil, fmt.Errorf("invalid donated_at %q: %w", req.DonatedAt, err)
+	}
+
+	var amount pgtype.Numeric
+	if err := amount.Scan(strconv.FormatFloat(req.Amount, 'f', 2, 64)); err != nil {
+		return nil, fmt.Errorf("invalid amount: %w", err)
+	}
+	donatedAt := pgtype.Date{Time: donatedAtTime, Valid: true}
+	retainUntil := pgtype.Date{Time: donatedAtTime.AddDate(10, 0, 0), Valid: true}
+
+	var consentAt pgtype.Timestamptz
+	if req.ConsentGiven {
+		consentAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	}
+
+	var donorEmail *string
+	if req.DonorEmail != "" {
+		v := req.DonorEmail
+		donorEmail = &v
+	}
+	var notes *string
+	if req.Notes != "" {
+		v := req.Notes
+		notes = &v
+	}
+	var consentTextVersion *string
+	if req.ConsentTextVersion != "" {
+		v := req.ConsentTextVersion
+		consentTextVersion = &v
+	}
+	var consentPurpose *string
+	if req.ConsentPurpose != "" {
+		v := req.ConsentPurpose
+		consentPurpose = &v
+	}
+
+	var newRow db.CreateDonationRow
+	err = dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		// Step 1: Lock and validate the original record.
+		locked, lockErr := qtx.LockDonationForUpdate(ctx, origUUID)
+		if lockErr != nil {
+			if errors.Is(lockErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock original donation: %w", lockErr)
+		}
+
+		// Only issued records can be voided-and-reissued.
+		if !canTransition(locked.Status, "cancel") {
+			return ErrInvalidTransition
+		}
+
+		// D-51: e-Donation keyed confirmation required if flagged.
+		if locked.EdonationKeyed && strings.TrimSpace(req.RDConfirmationReason) == "" {
+			return ErrEDonationKeyedCancel
+		}
+
+		// Step 2: Cancel the original (keeps receipt_number_id — no gap).
+		reason := req.Reason
+		if err := qtx.CancelDonation(ctx, db.CancelDonationParams{
+			CancelledBy:  actorUUID,
+			CancelledAt:  cancelledAt,
+			CancelReason: &reason,
+			ID:           origUUID,
+		}); err != nil {
+			return fmt.Errorf("cancel original donation: %w", err)
+		}
+
+		// Step 3: Create replacement draft at status='draft' with corrected data.
+		var txErr error
+		newRow, txErr = qtx.CreateDonation(ctx, db.CreateDonationParams{
+			CreatedBy:          actorUUID,
+			DonorName:          req.DonorName,
+			DonorAddress:       req.DonorAddress,
+			DonorEmail:         donorEmail,
+			DonorTaxIDEnc:      encBytes,
+			DonorTaxIDDek:      dekBytes,
+			Amount:             amount,
+			DonatedAt:          donatedAt,
+			Notes:              notes,
+			ConsentGiven:       req.ConsentGiven,
+			ConsentAt:          consentAt,
+			ConsentTextVersion: consentTextVersion,
+			ConsentPurpose:     consentPurpose,
+			RetainUntil:        retainUntil,
+			LegalBasis:         "consent",
+		})
+		if txErr != nil {
+			return fmt.Errorf("create replacement draft: %w", txErr)
+		}
+
+		// Step 4: Set original.replaced_by = newID.
+		if err := qtx.SetReplacedBy(ctx, db.SetReplacedByParams{
+			ReplacedBy: newRow.ID,
+			ID:         origUUID,
+		}); err != nil {
+			return fmt.Errorf("set replaced_by on original: %w", err)
+		}
+
+		// Step 5: Set new.replaces = originalID.
+		if err := qtx.SetReplaces(ctx, db.SetReplacesParams{
+			Replaces: origUUID,
+			ID:       newRow.ID,
+		}); err != nil {
+			return fmt.Errorf("set replaces on new draft: %w", err)
+		}
+
+		// Step 6: Audit the reissue action.
+		afterMap := map[string]any{
+			"action":           "donation.reissue",
+			"original_id":     originalID,
+			"replacement_id":  newRow.ID.String(),
+			"cancel_reason":   reason,
+		}
+		if req.RDConfirmationReason != "" {
+			afterMap["rd_confirmation_reason"] = req.RDConfirmationReason
+		}
+		afterJSON, _ := json.Marshal(afterMap)
+		if auditErr := s.auditSvc.AppendAuditEntryTx(ctx, tx, audit.AuditEntry{
+			ActorID:    claims.Subject,
+			ActorEmail: claims.ActorIdentity(),
+			Action:     "donation.reissue",
+			Resource:   "/api/donations/" + originalID + "/reissue",
+			AfterJSON:  afterJSON,
+		}); auditErr != nil {
+			return fmt.Errorf("audit reissue: %w", auditErr)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Pattern C: log IDs only — no PII.
+	s.logger.Info("donation reissued",
+		zap.String("original_id", originalID),
+		zap.String("replacement_id", newRow.ID.String()),
+		zap.String("reissued_by", claims.Subject),
+	)
+
+	replacesStr := originalID
+	return &DonationResponse{
+		ID:        newRow.ID.String(),
+		Status:    string(newRow.Status),
+		CreatedBy: newRow.CreatedBy.String(),
+		CreatedAt: newRow.CreatedAt.Time,
+		UpdatedAt: newRow.UpdatedAt.Time,
+		Replaces:  &replacesStr,
+		// Tax ID masked for the response — plaintext never returned from service
+		DonorTaxIDMasked: pii.MaskNationalID(req.DonorTaxID),
+		DonorName:        req.DonorName,
+		DonorAddress:     req.DonorAddress,
+		DonorEmail:       donorEmail,
+		Amount:           strconv.FormatFloat(req.Amount, 'f', 2, 64),
+		DonatedAt:        req.DonatedAt,
+		Notes:            notes,
+	}, nil
+}
+
+// RevealPII decrypts and returns the full plaintext donor tax/national ID (D-46, T-03-26).
+//
+// Authorization gate: Checker and Admin only (CanRevealFull). Maker → ErrForbidden (403).
+// Every authorized reveal MUST be audited (action="pii.reveal") BEFORE returning plaintext (D-13).
+// The audit write is inside WithTx so a failure rolls back — plaintext is never returned
+// without a committed audit entry (NFR-05).
+//
+// Pattern C: donor_id is logged, plaintext tax ID is NOT logged (T-03-10).
+func (s *DonationService) RevealPII(ctx context.Context, id string, claims auth.KeycloakClaims) (*PIIRevealResponse, error) {
+	// D-46: Checker/Admin gate — reject before any DB call.
+	if !pii.CanRevealFull(claims) {
+		return nil, ErrForbidden
+	}
+
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return nil, fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	var plaintext []byte
+	err := dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		row, rowErr := qtx.GetDonationByID(ctx, pgUUID)
+		if rowErr != nil {
+			if errors.Is(rowErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get donation: %w", rowErr)
+		}
+
+		var decErr error
+		plaintext, decErr = crypto.DecryptField(ctx, s.keyProvider, row.DonorTaxIDEnc, row.DonorTaxIDDek)
+		if decErr != nil {
+			return fmt.Errorf("decrypt donor tax ID: %w", decErr)
+		}
+
+		// D-13: audit BEFORE returning plaintext — failure rolls back (audit integrity).
+		afterJSON, _ := json.Marshal(map[string]any{
+			"action":      "pii.reveal",
+			"donation_id": id,
+		})
+		if auditErr := s.auditSvc.AppendAuditEntryTx(ctx, tx, audit.AuditEntry{
+			ActorID:    claims.Subject,
+			ActorEmail: claims.ActorIdentity(),
+			Action:     "pii.reveal",
+			Resource:   "/api/donations/" + id + "/pii",
+			AfterJSON:  afterJSON,
+		}); auditErr != nil {
+			return fmt.Errorf("audit pii reveal: %w", auditErr)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	// Pattern C: log donation_id + actor only — never log plaintext tax ID.
+	s.logger.Info("pii revealed",
+		zap.String("donation_id", id),
+		zap.String("revealed_by", claims.Subject),
+	)
+
+	return &PIIRevealResponse{
+		DonationID:          id,
+		DonorTaxIDPlaintext: string(plaintext),
+	}, nil
+}
+
+// Search returns a paginated, PII-free list of donations filtered by optional criteria (FR-10, D-53).
+//
+// Supported filters: donor_name (ILIKE), status, from_date, to_date, receipt_no.
+// Tax ID is intentionally excluded as a filter parameter (D-53, T-03-29).
+// Results use SearchDonations which excludes PII ciphertext columns (least-privilege).
+// DonorTaxIDMasked in each result uses the standard placeholder since DEK is not loaded.
+func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims auth.KeycloakClaims) ([]DonationResponse, error) {
+	limit := filter.Limit
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Build nullable search params — nil means "skip this filter" (D-53, Pattern F).
+	params := db.SearchDonationsParams{
+		LimitN:  limit,
+		OffsetN: offset,
+	}
+
+	if filter.DonorName != nil {
+		params.DonorName = filter.DonorName
+	}
+	if filter.Status != nil {
+		s := db.DonationStatus(*filter.Status)
+		params.Status = &s
+	}
+	if filter.FromDate != nil {
+		params.FromDate = pgtype.Date{Time: *filter.FromDate, Valid: true}
+	}
+	if filter.ToDate != nil {
+		params.ToDate = pgtype.Date{Time: *filter.ToDate, Valid: true}
+	}
+	if filter.ReceiptNo != nil {
+		params.ReceiptNo = filter.ReceiptNo
+	}
+
+	rows, queryErr := s.queries.SearchDonations(ctx, params)
+	if queryErr != nil {
+		return nil, fmt.Errorf("search donations: %w", queryErr)
+	}
+
+	result := make([]DonationResponse, 0, len(rows))
+	for _, row := range rows {
+		resp := DonationResponse{
+			ID:               row.ID.String(),
+			Status:           string(row.Status),
+			DonorName:        row.DonorName,
+			DonorTaxIDMasked: pii.MaskNationalID(""), // no PII in search results (D-53)
+			Amount:           numericStr(row.Amount),
+			DonatedAt:        dateStr(row.DonatedAt),
+			ReceiptFormatted: row.ReceiptFormatted,
+			CreatedBy:        row.CreatedBy.String(),
+			CreatedAt:        row.CreatedAt.Time,
+		}
+		if row.ApprovedAt.Valid {
+			t := row.ApprovedAt.Time
+			resp.ApprovedAt = &t
+		}
+		result = append(result, resp)
+	}
+	return result, nil
+}
+
 // --- Private helpers ---
 
 // donationRowToResponse converts a full db.Donation row to a DonationResponse.
@@ -853,6 +1308,25 @@ func donationRowToResponse(row db.Donation, maskedTaxID string) *DonationRespons
 	if row.ReviewedAt.Valid {
 		t := row.ReviewedAt.Time
 		resp.ReviewedAt = &t
+	}
+	// Cancellation fields — populated after Cancel action (plan 03-06, FR-19, D-47).
+	if row.CancelledBy.Valid {
+		s := row.CancelledBy.String()
+		resp.CancelledBy = &s
+	}
+	if row.CancelledAt.Valid {
+		t := row.CancelledAt.Time
+		resp.CancelledAt = &t
+	}
+	resp.CancelReason = row.CancelReason
+	// Void & Reissue self-FK links (D-50).
+	if row.Replaces.Valid {
+		s := row.Replaces.String()
+		resp.Replaces = &s
+	}
+	if row.ReplacedBy.Valid {
+		s := row.ReplacedBy.String()
+		resp.ReplacedBy = &s
 	}
 	return resp
 }

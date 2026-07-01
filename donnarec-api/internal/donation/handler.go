@@ -19,7 +19,9 @@ package donation
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/donnarec/donnarec-api/internal/auth"
 	"github.com/gin-gonic/gin"
@@ -417,11 +419,19 @@ func (h *DonationHandler) Reject(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": resp})
 }
 
-// List returns a paginated, PII-masked list of donations ordered by created_at DESC.
-// GET /api/donations
+// List returns a paginated, PII-masked list of donations with optional search filters (FR-10, D-53).
+// GET /api/donations[?name=...&status=...&from=...&to=...&receipt_no=...&page=...]
 //
-// Basic implementation for plan 03-03; full filter wiring (date range, status, receipt no)
-// is added in plan 03-06 using the SearchDonations sqlc query.
+// Supported query params (all optional):
+//
+//	name       — donor name ILIKE filter
+//	status     — donation status filter (draft/pending_review/issued/cancelled/rejected)
+//	from       — from date (YYYY-MM-DD), inclusive
+//	to         — to date (YYYY-MM-DD), inclusive
+//	receipt_no — exact receipt formatted string
+//	page       — 1-based page number (default 1, page size 20)
+//
+// Tax ID is NOT accepted as a filter (D-53, T-03-29).
 func (h *DonationHandler) List(c *gin.Context) {
 	// Pattern A: auth claims extraction
 	raw, exists := c.Get("claims")
@@ -435,17 +445,42 @@ func (h *DonationHandler) List(c *gin.Context) {
 		return
 	}
 
-	// Basic defaults — full filter param parsing wired in 03-06.
+	// Parse optional search filter query params (D-53).
 	filter := ListFilter{
-		Limit:  50,
+		Limit:  20, // default page size per UI-SPEC
 		Offset: 0,
 	}
 
-	resp, err := h.svc.List(c.Request.Context(), filter, claims)
+	if name := c.Query("name"); name != "" {
+		filter.DonorName = &name
+	}
+	if status := c.Query("status"); status != "" {
+		filter.Status = &status
+	}
+	if from := c.Query("from"); from != "" {
+		if t, parseErr := parseDate(from); parseErr == nil {
+			filter.FromDate = &t
+		}
+	}
+	if to := c.Query("to"); to != "" {
+		if t, parseErr := parseDate(to); parseErr == nil {
+			filter.ToDate = &t
+		}
+	}
+	if receiptNo := c.Query("receipt_no"); receiptNo != "" {
+		filter.ReceiptNo = &receiptNo
+	}
+	if pageStr := c.Query("page"); pageStr != "" {
+		if page := parsePositiveInt32(pageStr); page > 0 {
+			filter.Offset = (page - 1) * filter.Limit
+		}
+	}
+
+	resp, err := h.svc.Search(c.Request.Context(), filter, claims)
 	if err != nil {
 		// Pattern C: log operation only — no PII
-		h.logger.Error("failed to list donations",
-			zap.String("operation", "ListDonations"),
+		h.logger.Error("failed to search donations",
+			zap.String("operation", "SearchDonations"),
 			zap.Error(err),
 		)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "list_donations_failed"})
@@ -454,4 +489,194 @@ func (h *DonationHandler) List(c *gin.Context) {
 
 	c.Set("audit_after", resp)
 	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// Cancel voids an issued receipt (FR-19, D-47).
+// POST /api/donations/:id/cancel
+//
+// Checker and Admin only (enforced by route group + service layer).
+// Reason is mandatory (ErrMissingReason → 422).
+// RDConfirmationReason is required when edonation_keyed=true (ErrEDonationKeyedCancel → 409).
+// The receipt number is retained on the cancelled record (no gap — load-bearing invariant).
+func (h *DonationHandler) Cancel(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	id := c.Param("id")
+
+	var req CancelDonationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request_body"})
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   "validation_failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	resp, err := h.svc.Cancel(c.Request.Context(), id, req, claims)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrMissingReason):
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "reason_required"})
+		case errors.Is(err, ErrEDonationKeyedCancel):
+			c.JSON(http.StatusConflict, gin.H{"error": "edonation_keyed_confirmation_required"})
+		case errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
+		case errors.Is(err, ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		default:
+			// Pattern C: log donation_id only — no PII
+			h.logger.Error("failed to cancel donation",
+				zap.String("operation", "CancelDonation"),
+				zap.String("donation_id", id),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "cancel_donation_failed"})
+		}
+		return
+	}
+
+	c.Set("audit_after", resp)
+	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// Reissue performs Void & Reissue (D-50): cancels an issued receipt and creates a corrected draft.
+// POST /api/donations/:id/reissue
+//
+// Checker and Admin only (enforced by route group + service layer).
+// The replacement draft earns a fresh receipt number only via the normal Submit → Approve path.
+// Reason is mandatory; RDConfirmationReason required when edonation_keyed=true.
+func (h *DonationHandler) Reissue(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	id := c.Param("id")
+
+	var req ReissueDonationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request_body"})
+		return
+	}
+	if err := h.validate.Struct(req); err != nil {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   "validation_failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	resp, err := h.svc.Reissue(c.Request.Context(), id, req, claims)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrMissingReason):
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "reason_required"})
+		case errors.Is(err, ErrEDonationKeyedCancel):
+			c.JSON(http.StatusConflict, gin.H{"error": "edonation_keyed_confirmation_required"})
+		case errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
+		case errors.Is(err, ErrMissingTaxID):
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "missing_tax_id"})
+		case errors.Is(err, ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		default:
+			// Pattern C: log donation_id only — no PII
+			h.logger.Error("failed to reissue donation",
+				zap.String("operation", "ReissueDonation"),
+				zap.String("original_id", id),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "reissue_donation_failed"})
+		}
+		return
+	}
+
+	c.Set("audit_after", resp)
+	c.JSON(http.StatusCreated, gin.H{"data": resp})
+}
+
+// RevealPII returns the full plaintext donor tax/national ID (D-46, T-03-26).
+// GET /api/donations/:id/pii
+//
+// Checker and Admin only — the service performs the role check (ErrForbidden → 403).
+// Every authorized reveal is audited (action="pii.reveal") atomically in the service.
+// Pattern C: donation_id is logged; plaintext is NOT logged (T-03-10).
+func (h *DonationHandler) RevealPII(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	id := c.Param("id")
+
+	resp, err := h.svc.RevealPII(c.Request.Context(), id, claims)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		default:
+			// Pattern C: log donation_id only — NEVER log plaintext tax ID (T-03-10)
+			h.logger.Error("failed to reveal PII",
+				zap.String("operation", "RevealPII"),
+				zap.String("donation_id", id),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "reveal_pii_failed"})
+		}
+		return
+	}
+
+	// audit_after: AuditMiddleware captures the response for the immutable trail (Pattern D).
+	c.Set("audit_after", resp)
+	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// --- Handler helper functions ---
+
+// parseDate parses a "YYYY-MM-DD" string into a time.Time (UTC midnight).
+func parseDate(s string) (time.Time, error) {
+	return time.ParseInLocation("2006-01-02", s, time.UTC)
+}
+
+// parsePositiveInt32 parses a decimal string to int32. Returns 0 on error or non-positive input.
+func parsePositiveInt32(s string) int32 {
+	var v int
+	if _, err := fmt.Sscanf(s, "%d", &v); err != nil || v <= 0 {
+		return 0
+	}
+	return int32(v)
 }
