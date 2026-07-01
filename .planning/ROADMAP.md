@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation (DB, Auth/RBAC, Audit, Retention model)** - Security, role separation, and an immutable audit trail that everything else depends on (completed 2026-06-24)
 - [x] **Phase 2: Gap-less Receipt Numbering Core (★)** - Concurrency-proven, per-fiscal-year, gap-less number allocator built before any issuance flow (completed 2026-06-25)
-- [ ] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt
+- [x] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt (completed 2026-07-01)
 - [ ] **Phase 4: Receipt PDF + Email Delivery (Outbox Worker)** - Async Thai/EN tax-compliant PDF and email pipeline with retry, decoupled from the issuance transaction
 - [ ] **Phase 5: e-Donation Export, Reports & Admin Settings** - Access-controlled e-Donation export, donation reports, no-deploy config, and verified backup/restore
 - [ ] **Phase 6: Public Donation Web Form (Flow B)** - Public bilingual donation form with slip upload, consent, bot protection, and pending-review queue feeding the existing pipeline
@@ -80,7 +80,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 03-05-PLAN.md — Issuance & review slice (TDD ★): atomic approve tx + SoD + concurrency proof + return/reject
 - [x] 03-06-PLAN.md — Cancel / Void & Reissue + audited PII reveal + search (TDD)
 - [x] 03-07-PLAN.md — Frontend list/search + detail/review + SoD blocked state
-- [ ] 03-08-PLAN.md — Frontend create/edit form + slip upload + consent + reveal/cancel dialogs
+- [x] 03-08-PLAN.md — Frontend create/edit form + slip upload + consent + reveal/cancel dialogs
 **UI hint**: yes
 
 > Note: the issue transaction enqueues an outbox job here, but the worker that consumes it (PDF + email) is built in Phase 4. Consent capture for Flow A donors is recorded here against the Phase 1 retention model (NFR-03).
@@ -143,7 +143,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
-| 3. Donation Lifecycle & Maker-Checker Issuance | 7/8 | In Progress|  |
+| 3. Donation Lifecycle & Maker-Checker Issuance | 8/8 | Complete   | 2026-07-01 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
