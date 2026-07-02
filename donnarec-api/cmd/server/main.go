@@ -233,7 +233,7 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// Pattern E: RequireRoles after RequireAuth — claims must already exist in context.
 	// Checker/Admin review actions (approve/return/reject/cancel) wired in plans 03-05/03-06.
 	donationGroup := api.Group("/donations")
-	donationGroup.Use(auth.RequireRoles(auth.RoleMaker, auth.RoleChecker, auth.RoleAdmin))
+	donationGroup.Use(auth.RequireAnyRole(auth.RoleMaker, auth.RoleChecker, auth.RoleAdmin))
 	// Resolve Keycloak sub -> users.id ONCE for every donation route (bug: created-by-fk-mismatch).
 	// Scoped to donationGroup only (all *_by FK writes live here; slip + checker subgroups inherit).
 	// Deliberately NOT on the admin group — user provisioning (POST /api/admin/users) has no such FK.
@@ -267,7 +267,7 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// Scoped to Checker + Admin only (defense-in-depth over service-layer SoD and role guards).
 	// Inherits parent donationGroup middleware (RequireAuth + Maker/Checker/Admin).
 	checkerGroup := donationGroup.Group("")
-	checkerGroup.Use(auth.RequireRoles(auth.RoleChecker, auth.RoleAdmin))
+	checkerGroup.Use(auth.RequireAnyRole(auth.RoleChecker, auth.RoleAdmin))
 	checkerGroup.POST("/:id/approve", donationHandler.Approve)
 	checkerGroup.POST("/:id/return", donationHandler.ReturnToDraft)
 	checkerGroup.POST("/:id/reject", donationHandler.Reject)

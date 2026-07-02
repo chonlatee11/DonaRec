@@ -60,3 +60,45 @@ func RequireRoles(requiredRoles ...string) gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// RequireAnyRole returns a Gin middleware factory that passes if the authenticated
+// user holds AT LEAST ONE of the specified roles (logical OR).
+//
+// Use this for routes open to several distinct roles — e.g. any staff member
+// (maker OR checker OR admin) may read the donation list, and either a checker OR
+// an admin may review. This is the correct guard for "any of" access; RequireRoles
+// (logical AND) is for the rare "must hold ALL of" case and for single-role guards.
+//
+// Must be placed AFTER RequireAuth() so claims are already populated.
+//
+//	donationGroup.Use(RequireAnyRole(RoleMaker, RoleChecker, RoleAdmin))
+func RequireAnyRole(allowedRoles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		raw, exists := c.Get("claims")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "no_auth_context",
+			})
+			return
+		}
+
+		kc, ok := raw.(KeycloakClaims)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "invalid_claims_type",
+			})
+			return
+		}
+
+		for _, r := range allowedRoles {
+			if kc.HasRole(r) {
+				c.Next()
+				return
+			}
+		}
+
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"error": "insufficient_role",
+		})
+	}
+}
