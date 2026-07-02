@@ -8,13 +8,16 @@
 //
 // Sentinel error → HTTP status mapping (PATTERNS.md §"internal/donation/handler.go"):
 //
-//	ErrInvalidTransition → 409 Conflict
-//	ErrMissingTaxID      → 422 Unprocessable Entity
-//	ErrForbidden         → 403 Forbidden
-//	ErrSoDViolation      → 403 Forbidden
-//	ErrMissingReason     → 422 Unprocessable Entity
-//	ErrNotFound          → 404 Not Found
-//	default              → 500 (log donation_id + operation only — Pattern C)
+//	ErrInvalidTransition   → 409 Conflict
+//	ErrMissingTaxID        → 422 Unprocessable Entity
+//	ErrForbidden           → 403 Forbidden
+//	ErrSoDViolation        → 403 Forbidden
+//	ErrMissingReason       → 422 Unprocessable Entity
+//	ErrNotFound            → 404 Not Found
+//	ErrUserNotProvisioned  → 403 Forbidden (defensive: identity resolution now happens in
+//	                         auth.ResolveAppUser middleware, which 403s before the handler runs;
+//	                         these switch arms remain as defense-in-depth)
+//	default                → 500 (log donation_id + operation only — Pattern C)
 package donation
 
 import (
@@ -26,6 +29,7 @@ import (
 	"github.com/donnarec/donnarec-api/internal/auth"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 )
 
@@ -77,13 +81,28 @@ func (h *DonationHandler) Create(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.svc.Create(c.Request.Context(), req, claims)
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	resp, err := h.svc.Create(c.Request.Context(), req, appUserID, claims)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrMissingTaxID):
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "missing_tax_id"})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrUserNotProvisioned):
+			c.JSON(http.StatusForbidden, gin.H{"error": "user_not_provisioned"})
 		default:
 			// Pattern C: log operation only — no PII fields in error logs (T-03-10)
 			h.logger.Error("failed to create donation",
@@ -267,7 +286,20 @@ func (h *DonationHandler) Approve(c *gin.Context) {
 
 	id := c.Param("id")
 
-	resp, err := h.svc.Approve(c.Request.Context(), id, claims)
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	resp, err := h.svc.Approve(c.Request.Context(), id, appUserID, claims)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrSoDViolation):
@@ -276,6 +308,8 @@ func (h *DonationHandler) Approve(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrUserNotProvisioned):
+			c.JSON(http.StatusForbidden, gin.H{"error": "user_not_provisioned"})
 		case errors.Is(err, ErrNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 		default:
@@ -329,7 +363,20 @@ func (h *DonationHandler) ReturnToDraft(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.svc.Return(c.Request.Context(), id, req.Reason, claims)
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	resp, err := h.svc.Return(c.Request.Context(), id, req.Reason, appUserID, claims)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrMissingReason):
@@ -338,6 +385,8 @@ func (h *DonationHandler) ReturnToDraft(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrUserNotProvisioned):
+			c.JSON(http.StatusForbidden, gin.H{"error": "user_not_provisioned"})
 		case errors.Is(err, ErrNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 		default:
@@ -392,7 +441,20 @@ func (h *DonationHandler) Reject(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.svc.Reject(c.Request.Context(), id, req.Reason, claims)
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	resp, err := h.svc.Reject(c.Request.Context(), id, req.Reason, appUserID, claims)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrMissingReason):
@@ -401,6 +463,8 @@ func (h *DonationHandler) Reject(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
 		case errors.Is(err, ErrForbidden):
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrUserNotProvisioned):
+			c.JSON(http.StatusForbidden, gin.H{"error": "user_not_provisioned"})
 		case errors.Is(err, ErrNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 		default:
@@ -526,7 +590,20 @@ func (h *DonationHandler) Cancel(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.svc.Cancel(c.Request.Context(), id, req, claims)
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	resp, err := h.svc.Cancel(c.Request.Context(), id, req, appUserID, claims)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrForbidden):
@@ -537,6 +614,8 @@ func (h *DonationHandler) Cancel(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "edonation_keyed_confirmation_required"})
 		case errors.Is(err, ErrInvalidTransition):
 			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
+		case errors.Is(err, ErrUserNotProvisioned):
+			c.JSON(http.StatusForbidden, gin.H{"error": "user_not_provisioned"})
 		case errors.Is(err, ErrNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 		default:
@@ -589,7 +668,20 @@ func (h *DonationHandler) Reissue(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.svc.Reissue(c.Request.Context(), id, req, claims)
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	resp, err := h.svc.Reissue(c.Request.Context(), id, req, appUserID, claims)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrForbidden):
@@ -602,6 +694,8 @@ func (h *DonationHandler) Reissue(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
 		case errors.Is(err, ErrMissingTaxID):
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "missing_tax_id"})
+		case errors.Is(err, ErrUserNotProvisioned):
+			c.JSON(http.StatusForbidden, gin.H{"error": "user_not_provisioned"})
 		case errors.Is(err, ErrNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
 		default:

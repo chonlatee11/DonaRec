@@ -50,4 +50,14 @@ var (
 	// RD reconciliation confirmation reason (D-51).
 	// HTTP mapping: 422 Unprocessable Entity.
 	ErrEDonationKeyedCancel = errors.New("donation: rd_confirmation_reason is required when edonation_keyed is true")
+
+	// ErrUserNotProvisioned is returned when a request carries a validly-authenticated
+	// Keycloak token whose "sub" claim does not resolve to any active row in the
+	// application's `users` table. Subject -> users.id resolution now happens in the
+	// auth.ResolveAppUser middleware, which 403s (user_not_provisioned) before the
+	// handler runs; this sentinel + its handler switch arms remain as defense-in-depth
+	// so the FK is never papered over by writing a zero-value UUID (bug:
+	// created-by-fk-mismatch).
+	// HTTP mapping: 403 Forbidden.
+	ErrUserNotProvisioned = errors.New("donation: authenticated identity is not a provisioned application user")
 )

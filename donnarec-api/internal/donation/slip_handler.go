@@ -12,6 +12,8 @@
 //
 //	ErrSlipAlreadyExists     → 409 Conflict
 //	ErrSlipNotFound          → 404 Not Found
+//	ErrUserNotProvisioned    → 403 Forbidden (defensive: identity resolution now happens in
+//	                           auth.ResolveAppUser middleware, which 403s before the handler runs)
 //	storage.ErrFileTooLarge  → 413 Request Entity Too Large
 //	storage.ErrUnsupportedFileType → 415 Unsupported Media Type
 //	default                  → 500 (log donation_id + operation — Pattern C)
@@ -29,6 +31,7 @@ import (
 	"github.com/donnarec/donnarec-api/internal/auth"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.uber.org/zap"
 )
 
@@ -85,13 +88,28 @@ func (h *SlipHandler) Upload(c *gin.Context) {
 	}
 	defer file.Close()
 
-	resp, err := h.svc.UploadSlip(c.Request.Context(), donationID, file, fileHeader.Size, claims)
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	resp, err := h.svc.UploadSlip(c.Request.Context(), donationID, file, fileHeader.Size, appUserID, claims)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrSlipAlreadyExists):
 			c.JSON(http.StatusConflict, gin.H{"error": "slip_already_exists", "detail": "remove the existing slip before uploading a replacement"})
 		case errors.Is(err, ErrNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		case errors.Is(err, ErrUserNotProvisioned):
+			c.JSON(http.StatusForbidden, gin.H{"error": "user_not_provisioned"})
 		case errors.Is(err, storage.ErrFileTooLarge):
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file_too_large", "detail": "maximum slip size is 10 MB"})
 		case errors.Is(err, storage.ErrUnsupportedFileType):
@@ -171,10 +189,25 @@ func (h *SlipHandler) Remove(c *gin.Context) {
 
 	donationID := c.Param("id")
 
-	if err := h.svc.RemoveSlip(c.Request.Context(), donationID, claims); err != nil {
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	if err := h.svc.RemoveSlip(c.Request.Context(), donationID, appUserID, claims); err != nil {
 		switch {
 		case errors.Is(err, ErrSlipNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "slip_not_found", "detail": "no active slip attachment for this donation"})
+		case errors.Is(err, ErrUserNotProvisioned):
+			c.JSON(http.StatusForbidden, gin.H{"error": "user_not_provisioned"})
 		default:
 			// Pattern C: log donation_id + operation only — no PII
 			h.logger.Error("failed to remove slip",

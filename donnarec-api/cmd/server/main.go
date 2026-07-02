@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -23,6 +24,8 @@ import (
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/users"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
@@ -123,6 +126,21 @@ func main() {
 	// Slip service: upload/view/remove donation slip attachments (Plan 03-04, D-48, D-54).
 	slipSvc := donation.NewSlipService(pool, queries, storageClient, auditSvc, logger)
 
+	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
+	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
+	// (not in internal/auth) so the auth package stays DB-agnostic; pgx.ErrNoRows is
+	// translated to auth.ErrSubjectNotProvisioned, which the middleware maps to HTTP 403.
+	appUserResolver := func(ctx context.Context, subject string) (pgtype.UUID, error) {
+		u, err := queries.GetUserByKeycloakSubject(ctx, subject)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, auth.ErrSubjectNotProvisioned
+			}
+			return pgtype.UUID{}, err
+		}
+		return u.ID, nil
+	}
+
 	// --------------------------------------------------------
 	// Handlers
 	// --------------------------------------------------------
@@ -133,7 +151,7 @@ func main() {
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, userHandler, donationHandler, slipHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -178,7 +196,7 @@ func main() {
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
 //  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin)
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, logger *zap.Logger) *gin.Engine {
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -216,6 +234,10 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, user
 	// Checker/Admin review actions (approve/return/reject/cancel) wired in plans 03-05/03-06.
 	donationGroup := api.Group("/donations")
 	donationGroup.Use(auth.RequireRoles(auth.RoleMaker, auth.RoleChecker, auth.RoleAdmin))
+	// Resolve Keycloak sub -> users.id ONCE for every donation route (bug: created-by-fk-mismatch).
+	// Scoped to donationGroup only (all *_by FK writes live here; slip + checker subgroups inherit).
+	// Deliberately NOT on the admin group — user provisioning (POST /api/admin/users) has no such FK.
+	donationGroup.Use(auth.ResolveAppUser(appUserResolver, logger))
 	donationGroup.POST("", donationHandler.Create)
 	donationGroup.GET("", donationHandler.List)
 	donationGroup.GET("/:id", donationHandler.GetByID)

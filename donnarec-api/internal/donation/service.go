@@ -97,13 +97,25 @@ func canTransition(from db.DonationStatus, action string) bool {
 	}
 }
 
+// Identity resolution (bug: created-by-fk-mismatch): the Keycloak "sub" (claims.Subject)
+// is NEVER equal to users.id (an independently DB-generated gen_random_uuid()). Columns
+// that REFERENCES users(id) — donations.{created_by,reviewed_by,approved_by,cancelled_by}
+// and slip_attachments.{uploaded_by,deleted_by} — must therefore be populated with the
+// caller's already-resolved users.id, passed in as the explicit actingUserID parameter.
+// Resolution now happens ONCE in auth.ResolveAppUser middleware (see cmd/server/main.go),
+// not inside each service method.
+//
+// NOTE: audit_log.actor_id is intentionally NOT the resolved users.id — it has no FK to
+// users(id) and stores the raw, immutable Keycloak sub (claims.Subject) so audit history
+// survives user deactivation/deletion. Keep audit ActorID = claims.Subject.
+
 // Create inserts a new donation record in 'draft' status with encrypted PII + consent snapshot.
 //
 // D-44: DonorTaxID is mandatory — ErrMissingTaxID is returned before any DB call if empty.
 // T-03-08: EncryptField is called before any DB write — plaintext never reaches Postgres.
 // D-49: consent fields (consent_given/at/text_version/purpose) are captured per-snapshot.
 // Pattern C: logs only donation_id + created_by UUID — no PII fields ever logged.
-func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
 	// D-44: mandatory tax ID check — fail fast before any DB call.
 	if req.DonorTaxID == "" {
 		return nil, ErrMissingTaxID
@@ -112,11 +124,6 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 	donatedAtTime, err := time.ParseInLocation("2006-01-02", req.DonatedAt, time.UTC)
 	if err != nil {
 		return nil, fmt.Errorf("invalid donated_at %q: %w", req.DonatedAt, err)
-	}
-
-	var createdByUUID pgtype.UUID
-	if err := createdByUUID.Scan(claims.Subject); err != nil {
-		return nil, fmt.Errorf("invalid creator UUID: %w", err)
 	}
 
 	// T-03-08: AES-256-GCM envelope encryption — plaintext never reaches Postgres.
@@ -167,7 +174,7 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 		qtx := s.queries.WithTx(tx)
 		var txErr error
 		row, txErr = qtx.CreateDonation(ctx, db.CreateDonationParams{
-			CreatedBy:          createdByUUID,
+			CreatedBy:          actingUserID,
 			DonorName:          req.DonorName,
 			DonorAddress:       req.DonorAddress,
 			DonorEmail:         donorEmail,
@@ -526,15 +533,10 @@ func (s *DonationService) List(ctx context.Context, filter ListFilter, claims au
 //
 // Any error causes WithTx to roll back ALL seven effects.
 // PDF render and email send are NOT performed here — only the outbox job is enqueued.
-func (s *DonationService) Approve(ctx context.Context, id string, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Approve(ctx context.Context, id string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
 	var pgUUID pgtype.UUID
 	if err := pgUUID.Scan(id); err != nil {
 		return nil, fmt.Errorf("invalid donation ID: %w", err)
-	}
-
-	var approverUUID pgtype.UUID
-	if err := approverUUID.Scan(claims.Subject); err != nil {
-		return nil, fmt.Errorf("invalid approver UUID in claims: %w", err)
 	}
 
 	approvedAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
@@ -562,7 +564,7 @@ func (s *DonationService) Approve(ctx context.Context, id string, claims auth.Ke
 		// Step 3: Segregation of Duties — approver must not be the record's creator (FR-14).
 		// Both the UUID bytes and the Valid flag are compared so a NULL created_by never
 		// accidentally passes the check.
-		if locked.CreatedBy == approverUUID {
+		if locked.CreatedBy == actingUserID {
 			return ErrSoDViolation
 		}
 
@@ -580,7 +582,7 @@ func (s *DonationService) Approve(ctx context.Context, id string, claims auth.Ke
 		receiptID := receipt.ID
 		formatted := receipt.Formatted
 		if issueErr := qtx.IssueDonation(ctx, db.IssueDonationParams{
-			ApprovedBy:       approverUUID,
+			ApprovedBy:       actingUserID,
 			ApprovedAt:       approvedAt,
 			ReceiptNumberID:  &receiptID,
 			ReceiptFormatted: &formatted,
@@ -645,7 +647,7 @@ func (s *DonationService) Approve(ctx context.Context, id string, claims auth.Ke
 // reason is mandatory — returns ErrMissingReason before any DB call if empty/whitespace.
 // Uses LockDonationForUpdate + status precondition to serialize concurrent reviewer attempts.
 // AppendAuditEntryTx records the action in the same transaction (NFR-05).
-func (s *DonationService) Return(ctx context.Context, id string, reason string, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Return(ctx context.Context, id string, reason string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
 	// Mandatory reason check — early exit before any DB call.
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrMissingReason
@@ -654,11 +656,6 @@ func (s *DonationService) Return(ctx context.Context, id string, reason string, 
 	var pgUUID pgtype.UUID
 	if err := pgUUID.Scan(id); err != nil {
 		return nil, fmt.Errorf("invalid donation ID: %w", err)
-	}
-
-	var reviewerUUID pgtype.UUID
-	if err := reviewerUUID.Scan(claims.Subject); err != nil {
-		return nil, fmt.Errorf("invalid reviewer UUID in claims: %w", err)
 	}
 
 	reviewedAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
@@ -681,7 +678,7 @@ func (s *DonationService) Return(ctx context.Context, id string, reason string, 
 		}
 
 		if err := qtx.ReturnDonation(ctx, db.ReturnDonationParams{
-			ReviewedBy:   reviewerUUID,
+			ReviewedBy:   actingUserID,
 			ReviewedAt:   reviewedAt,
 			ReviewReason: &reason,
 			ID:           pgUUID,
@@ -729,7 +726,7 @@ func (s *DonationService) Return(ctx context.Context, id string, reason string, 
 // 'rejected' is a terminal state — no further transitions are allowed.
 //
 // reason is mandatory — returns ErrMissingReason before any DB call if empty/whitespace.
-func (s *DonationService) Reject(ctx context.Context, id string, reason string, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Reject(ctx context.Context, id string, reason string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
 	// Mandatory reason check — early exit before any DB call.
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrMissingReason
@@ -738,11 +735,6 @@ func (s *DonationService) Reject(ctx context.Context, id string, reason string, 
 	var pgUUID pgtype.UUID
 	if err := pgUUID.Scan(id); err != nil {
 		return nil, fmt.Errorf("invalid donation ID: %w", err)
-	}
-
-	var reviewerUUID pgtype.UUID
-	if err := reviewerUUID.Scan(claims.Subject); err != nil {
-		return nil, fmt.Errorf("invalid reviewer UUID in claims: %w", err)
 	}
 
 	reviewedAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
@@ -765,7 +757,7 @@ func (s *DonationService) Reject(ctx context.Context, id string, reason string, 
 		}
 
 		if err := qtx.RejectDonation(ctx, db.RejectDonationParams{
-			ReviewedBy:   reviewerUUID,
+			ReviewedBy:   actingUserID,
 			ReviewedAt:   reviewedAt,
 			ReviewReason: &reason,
 			ID:           pgUUID,
@@ -819,7 +811,7 @@ func (s *DonationService) Reject(ctx context.Context, id string, reason string, 
 //
 // All effects (status update + audit) are committed atomically inside WithTx.
 // Pattern C: only donation_id + cancelled_by logged — no PII in logs.
-func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonationRequest, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
 	// D-47: Checker/Admin only — Maker cannot cancel.
 	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
 		return nil, ErrForbidden
@@ -833,11 +825,6 @@ func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonat
 	var pgUUID pgtype.UUID
 	if err := pgUUID.Scan(id); err != nil {
 		return nil, fmt.Errorf("invalid donation ID: %w", err)
-	}
-
-	var cancellerUUID pgtype.UUID
-	if err := cancellerUUID.Scan(claims.Subject); err != nil {
-		return nil, fmt.Errorf("invalid canceller UUID: %w", err)
 	}
 
 	cancelledAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
@@ -868,7 +855,7 @@ func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonat
 
 		reason := req.Reason
 		if err := qtx.CancelDonation(ctx, db.CancelDonationParams{
-			CancelledBy:  cancellerUUID,
+			CancelledBy:  actingUserID,
 			CancelledAt:  cancelledAt,
 			CancelReason: &reason,
 			ID:           pgUUID,
@@ -931,7 +918,7 @@ func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonat
 // CRITICAL (D-50): the new draft does NOT get a receipt number here.
 // It must go through the normal Submit → Approve path (plan 03-05) to earn a fresh number.
 // This preserves Maker-Checker SoD and gap-less numbering — no bypass is allowed.
-func (s *DonationService) Reissue(ctx context.Context, originalID string, req ReissueDonationRequest, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Reissue(ctx context.Context, originalID string, req ReissueDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
 	// D-47: Checker/Admin only.
 	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
 		return nil, ErrForbidden
@@ -949,11 +936,6 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 	var origUUID pgtype.UUID
 	if err := origUUID.Scan(originalID); err != nil {
 		return nil, fmt.Errorf("invalid original donation ID: %w", err)
-	}
-
-	var actorUUID pgtype.UUID
-	if err := actorUUID.Scan(claims.Subject); err != nil {
-		return nil, fmt.Errorf("invalid actor UUID: %w", err)
 	}
 
 	cancelledAt := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
@@ -1028,7 +1010,7 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 		// Step 2: Cancel the original (keeps receipt_number_id — no gap).
 		reason := req.Reason
 		if err := qtx.CancelDonation(ctx, db.CancelDonationParams{
-			CancelledBy:  actorUUID,
+			CancelledBy:  actingUserID,
 			CancelledAt:  cancelledAt,
 			CancelReason: &reason,
 			ID:           origUUID,
@@ -1039,7 +1021,7 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 		// Step 3: Create replacement draft at status='draft' with corrected data.
 		var txErr error
 		newRow, txErr = qtx.CreateDonation(ctx, db.CreateDonationParams{
-			CreatedBy:          actorUUID,
+			CreatedBy:          actingUserID,
 			DonorName:          req.DonorName,
 			DonorAddress:       req.DonorAddress,
 			DonorEmail:         donorEmail,
@@ -1077,10 +1059,10 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 
 		// Step 6: Audit the reissue action.
 		afterMap := map[string]any{
-			"action":           "donation.reissue",
-			"original_id":     originalID,
-			"replacement_id":  newRow.ID.String(),
-			"cancel_reason":   reason,
+			"action":         "donation.reissue",
+			"original_id":    originalID,
+			"replacement_id": newRow.ID.String(),
+			"cancel_reason":  reason,
 		}
 		if req.RDConfirmationReason != "" {
 			afterMap["rd_confirmation_reason"] = req.RDConfirmationReason

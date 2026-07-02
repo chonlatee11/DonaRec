@@ -4,13 +4,14 @@
 // All tests require a live PostgreSQL container (testcontainers). Skip with -short.
 //
 // Plan 03-05 tests (issuance tx, SoD, concurrency, return/reject):
-//   INV-1: TestIssuanceTransaction_RollbackOnError  — atomicity of 7-step approve tx
-//   INV-2: TestOutboxAtomicity                      — outbox row IFF receipt issued
-//   INV-3: TestSoD_ApproverCannotBeCreator          — code-level SoD guard
-//   INV-3: TestSoD_DBCheckConstraint                — DB CHECK constraint backstop
-//   INV-4: TestConcurrentApproval_ExactlyOneSucceeds — FOR UPDATE serializes N goroutines
-//          TestReturnToDraft                        — pending_review → draft + audit
-//          TestRejectTerminal                       — pending_review → rejected (terminal)
+//
+//	INV-1: TestIssuanceTransaction_RollbackOnError  — atomicity of 7-step approve tx
+//	INV-2: TestOutboxAtomicity                      — outbox row IFF receipt issued
+//	INV-3: TestSoD_ApproverCannotBeCreator          — code-level SoD guard
+//	INV-3: TestSoD_DBCheckConstraint                — DB CHECK constraint backstop
+//	INV-4: TestConcurrentApproval_ExactlyOneSucceeds — FOR UPDATE serializes N goroutines
+//	       TestReturnToDraft                        — pending_review → draft + audit
+//	       TestRejectTerminal                       — pending_review → rejected (terminal)
 //
 // Plan 03-06 tests (cancel, void, reissue) remain as scaffolds (t.Skip).
 // Plan 03-07 tests (search) remain as scaffolds (t.Skip).
@@ -60,6 +61,7 @@ func createAndSubmit(
 	ctx context.Context,
 	svc *donation.DonationService,
 	makerClaims auth.KeycloakClaims,
+	makerID pgtype.UUID,
 	donorName, taxID, date string,
 	amount float64,
 ) *donation.DonationResponse {
@@ -69,7 +71,7 @@ func createAndSubmit(
 		DonorTaxID: taxID,
 		Amount:     amount,
 		DonatedAt:  date,
-	}, makerClaims)
+	}, makerID, makerClaims)
 	require.NoError(t, err, "Create must succeed")
 
 	submitted, err := svc.Submit(ctx, d.ID, makerClaims)
@@ -86,9 +88,10 @@ func createAndSubmit(
 // issuance transaction are rolled back atomically when any step fails (INV-1).
 //
 // Scenarios:
-//   A: rollback after Allocate (before IssueDonation)  → ledger 0 rows, status=pending_review
-//   B: rollback after IssueDonation (before audit)     → status=pending_review, outbox 0 rows
-//   C: happy path (full commit)                         → status=issued, 1 ledger row, 1 outbox
+//
+//	A: rollback after Allocate (before IssueDonation)  → ledger 0 rows, status=pending_review
+//	B: rollback after IssueDonation (before audit)     → status=pending_review, outbox 0 rows
+//	C: happy path (full commit)                         → status=issued, 1 ledger row, 1 outbox
 //
 // Requires Docker testcontainers. Skip with -short.
 func TestIssuanceTransaction_RollbackOnError(t *testing.T) {
@@ -108,23 +111,26 @@ func TestIssuanceTransaction_RollbackOnError(t *testing.T) {
 	auditSvc := audit.NewAuditService(pool, queries, zap.NewNop())
 	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
 
+	// Resolution now happens in auth.ResolveAppUser middleware (created-by-fk-mismatch fix);
+	// calling the service directly, the tests pass the resolved users.id (makerRow.ID /
+	// checkerRow.ID) as actingUserID.
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-rollback@example.com", DisplayName: "Maker Rollback",
-		KeycloakSubject: "maker-rollback-kc",
+		KeycloakSubject: "9ac95dbf-af10-42cb-936e-ab94c8fb1516",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-rollback@example.com", DisplayName: "Checker Rollback",
-		KeycloakSubject: "checker-rollback-kc",
+		KeycloakSubject: "176741a9-865a-4492-89b4-d093c7747787",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "9ac95dbf-af10-42cb-936e-ab94c8fb1516", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "176741a9-865a-4492-89b4-d093c7747787", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
 	// ---- Scenario A: rollback after Allocate, before IssueDonation ----------------
 	t.Run("ScenarioA_RollbackAfterAllocate", func(t *testing.T) {
-		d := createAndSubmit(t, ctx, svc, makerClaims,
+		d := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID,
 			"นาย ทดสอบ Rollback A", "1234567890123", "2026-03-15", 1000.00)
 
 		var pgUUID pgtype.UUID
@@ -160,14 +166,17 @@ func TestIssuanceTransaction_RollbackOnError(t *testing.T) {
 
 	// ---- Scenario B: rollback after IssueDonation, before audit ------------------
 	t.Run("ScenarioB_RollbackAfterIssueDonation", func(t *testing.T) {
-		d := createAndSubmit(t, ctx, svc, makerClaims,
+		d := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID,
 			"นาย ทดสอบ Rollback B", "9876543210987", "2026-03-15", 2000.00)
 
 		var pgUUID pgtype.UUID
 		require.NoError(t, pgUUID.Scan(d.ID))
 
-		var checkerUUID pgtype.UUID
-		require.NoError(t, checkerUUID.Scan(checkerClaims.Subject))
+		// checkerRow.ID (users.id) — not checkerClaims.Subject (raw keycloak_subject
+		// literal, not a UUID) — this test writes directly via qtx.IssueDonation,
+		// bypassing DonationService.Approve entirely (created-by-fk-mismatch: approved_by
+		// REFERENCES users(id), so it must be the resolved users.id).
+		checkerUUID := checkerRow.ID
 
 		rollErr := dbhelpers.WithTx(ctx, pool, func(tx pgx.Tx) error {
 			qtx := queries.WithTx(tx)
@@ -219,10 +228,10 @@ func TestIssuanceTransaction_RollbackOnError(t *testing.T) {
 
 	// ---- Scenario C: happy path — all 7 effects commit together ------------------
 	t.Run("ScenarioC_HappyPath", func(t *testing.T) {
-		d := createAndSubmit(t, ctx, svc, makerClaims,
+		d := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID,
 			"นาย ทดสอบ Happy Path", "1111222233334", "2026-03-15", 5000.00)
 
-		approved, err := svc.Approve(ctx, d.ID, checkerClaims)
+		approved, err := svc.Approve(ctx, d.ID, checkerRow.ID, checkerClaims)
 		require.NoError(t, err, "Approve must succeed on pending_review donation")
 		require.NotNil(t, approved)
 
@@ -286,30 +295,35 @@ func TestOutboxAtomicity(t *testing.T) {
 	auditSvc := audit.NewAuditService(pool, queries, zap.NewNop())
 	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
 
+	// Resolution now happens in auth.ResolveAppUser middleware (created-by-fk-mismatch fix);
+	// calling the service directly, pass the resolved users.id as actingUserID.
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-outbox@example.com", DisplayName: "Maker Outbox",
-		KeycloakSubject: "maker-outbox-kc",
+		KeycloakSubject: "e8da7327-5a73-4708-962b-e66cbf07d0e1",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-outbox@example.com", DisplayName: "Checker Outbox",
-		KeycloakSubject: "checker-outbox-kc",
+		KeycloakSubject: "a8faa76b-9f25-47ab-962f-8a14bb541a89",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "e8da7327-5a73-4708-962b-e66cbf07d0e1", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "a8faa76b-9f25-47ab-962f-8a14bb541a89", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
 	// Part 1: Rollback → no outbox row persisted.
 	t.Run("RollbackNoOutbox", func(t *testing.T) {
-		d := createAndSubmit(t, ctx, svc, makerClaims,
+		d := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID,
 			"นาย ทดสอบ Outbox Rollback", "1234512345123", "2026-04-01", 3000.00)
 
 		var pgUUID pgtype.UUID
 		require.NoError(t, pgUUID.Scan(d.ID))
 
-		var checkerUUID pgtype.UUID
-		require.NoError(t, checkerUUID.Scan(checkerClaims.Subject))
+		// checkerRow.ID (users.id) — not checkerClaims.Subject (raw keycloak_subject
+		// literal, not a UUID) — this test writes directly via qtx.IssueDonation,
+		// bypassing DonationService.Approve entirely (created-by-fk-mismatch: approved_by
+		// REFERENCES users(id), so it must be the resolved users.id).
+		checkerUUID := checkerRow.ID
 
 		rollErr := dbhelpers.WithTx(ctx, pool, func(tx pgx.Tx) error {
 			qtx := queries.WithTx(tx)
@@ -337,10 +351,10 @@ func TestOutboxAtomicity(t *testing.T) {
 
 	// Part 2: Successful Approve → outbox row exists.
 	t.Run("SuccessHasOutbox", func(t *testing.T) {
-		d := createAndSubmit(t, ctx, svc, makerClaims,
+		d := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID,
 			"นาย ทดสอบ Outbox Success", "9999888877776", "2026-04-01", 4000.00)
 
-		_, err := svc.Approve(ctx, d.ID, checkerClaims)
+		_, err := svc.Approve(ctx, d.ID, checkerRow.ID, checkerClaims)
 		require.NoError(t, err, "Approve must succeed")
 
 		var outboxCount int
@@ -378,22 +392,24 @@ func TestSoD_ApproverCannotBeCreator(t *testing.T) {
 	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
 
 	// Single user who is both maker AND checker — SoD violation when they self-approve.
-	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+	// The SAME resolved users.id (dualRow.ID) is passed as actingUserID to both Create and
+	// Approve, so the service's approverID == created_by check fires (created-by-fk-mismatch fix).
+	dualRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "dual-role@example.com", DisplayName: "Dual Role",
-		KeycloakSubject: "dual-role-kc",
+		KeycloakSubject: "e02c7017-5397-420b-9681-31fced49a01c",
 	})
 	require.NoError(t, err)
 
 	dualClaims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "e02c7017-5397-420b-9681-31fced49a01c",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker", "checker"}},
 	}
 
-	d := createAndSubmit(t, ctx, svc, dualClaims,
+	d := createAndSubmit(t, ctx, svc, dualClaims, dualRow.ID,
 		"นาย ทดสอบ SoD Code", "1231231231231", "2026-05-01", 7500.00)
 
 	// Approve with the same user who created — must return ErrSoDViolation.
-	_, approveErr := svc.Approve(ctx, d.ID, dualClaims)
+	_, approveErr := svc.Approve(ctx, d.ID, dualRow.ID, dualClaims)
 	require.Error(t, approveErr, "Approve with creator's own claims must return an error")
 	assert.ErrorIs(t, approveErr, donation.ErrSoDViolation,
 		"Approve by creator must return ErrSoDViolation (INV-3 code guard)")
@@ -439,14 +455,16 @@ func TestSoD_DBCheckConstraint(t *testing.T) {
 	queries := db.New(pool)
 	svc := donation.NewDonationService(pool, queries, nil, nil, kp, zap.NewNop())
 
-	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+	// Resolution now happens in auth.ResolveAppUser middleware (created-by-fk-mismatch fix);
+	// calling the service directly, pass makerRow.ID as actingUserID.
+	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "sod-db-test@example.com", DisplayName: "SoD DB Test",
-		KeycloakSubject: "sod-db-kc",
+		KeycloakSubject: "0b77b14a-2f8d-46f6-8a78-bbc6e990b077",
 	})
 	require.NoError(t, err)
 
 	makerClaims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "0b77b14a-2f8d-46f6-8a78-bbc6e990b077",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
 	}
 
@@ -455,7 +473,7 @@ func TestSoD_DBCheckConstraint(t *testing.T) {
 		DonorTaxID: "1111333355557",
 		Amount:     1500.00,
 		DonatedAt:  "2026-06-01",
-	}, makerClaims)
+	}, makerRow.ID, makerClaims)
 	require.NoError(t, err)
 
 	// Attempt raw UPDATE: approved_by = created_by  →  violates chk_sod_approver.
@@ -506,21 +524,23 @@ func TestConcurrentApproval_ExactlyOneSucceeds(t *testing.T) {
 	auditSvc := audit.NewAuditService(pool, queries, zap.NewNop())
 	svc := donation.NewDonationService(pool, queries, alloc, auditSvc, kp, zap.NewNop())
 
+	// Resolution now happens in auth.ResolveAppUser middleware (created-by-fk-mismatch fix);
+	// calling the service directly, pass the resolved users.id as actingUserID.
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-conc@example.com", DisplayName: "Maker Concurrent",
-		KeycloakSubject: "maker-conc-kc",
+		KeycloakSubject: "0a0ab46c-ee1f-4f33-a0f7-848f0b580609",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-conc@example.com", DisplayName: "Checker Concurrent",
-		KeycloakSubject: "checker-conc-kc",
+		KeycloakSubject: "5ae41b76-6d30-43f5-b0db-45977e255bfd",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "0a0ab46c-ee1f-4f33-a0f7-848f0b580609", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "5ae41b76-6d30-43f5-b0db-45977e255bfd", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
-	d := createAndSubmit(t, ctx, svc, makerClaims,
+	d := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID,
 		"นาย ทดสอบ Concurrent", "5555444433332", "2026-07-01", 12000.00)
 
 	const N = 5
@@ -532,7 +552,7 @@ func TestConcurrentApproval_ExactlyOneSucceeds(t *testing.T) {
 	for i := 0; i < N; i++ {
 		i := i
 		g.Go(func() error {
-			_, approveErr := svc.Approve(gctx, d.ID, checkerClaims)
+			_, approveErr := svc.Approve(gctx, d.ID, checkerRow.ID, checkerClaims)
 			mu.Lock()
 			results[i] = result{err: approveErr}
 			mu.Unlock()
@@ -605,26 +625,26 @@ func TestReturnToDraft(t *testing.T) {
 
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-return@example.com", DisplayName: "Maker Return",
-		KeycloakSubject: "maker-return-kc",
+		KeycloakSubject: "b6cf12ef-e2f9-40e4-9786-a3d5b8cca920",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-return@example.com", DisplayName: "Checker Return",
-		KeycloakSubject: "checker-return-kc",
+		KeycloakSubject: "f867f504-6266-4d86-aeb0-81648c31fb07",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "b6cf12ef-e2f9-40e4-9786-a3d5b8cca920", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "f867f504-6266-4d86-aeb0-81648c31fb07", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
-	d := createAndSubmit(t, ctx, svc, makerClaims,
+	d := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID,
 		"นาย ทดสอบ Return", "3334445556667", "2026-08-01", 2500.00)
 	require.Equal(t, "pending_review", d.Status)
 
 	const returnReason = "ข้อมูลผู้บริจาคไม่ครบถ้วน กรุณาแก้ไข"
 
 	returnedBefore := time.Now().UTC().Add(-time.Second)
-	returned, err := svc.Return(ctx, d.ID, returnReason, checkerClaims)
+	returned, err := svc.Return(ctx, d.ID, returnReason, checkerRow.ID, checkerClaims)
 	require.NoError(t, err, "Return must succeed on pending_review donation")
 	require.NotNil(t, returned)
 
@@ -663,7 +683,7 @@ func TestReturnToDraft(t *testing.T) {
 	assert.Equal(t, 1, auditCount, "exactly 1 audit row for donation.return must exist")
 
 	// Assert: draft can be returned-for-edit; returning a second time from draft → ErrInvalidTransition.
-	_, err = svc.Return(ctx, d.ID, "second return attempt", checkerClaims)
+	_, err = svc.Return(ctx, d.ID, "second return attempt", checkerRow.ID, checkerClaims)
 	require.Error(t, err, "Return on a draft record must fail")
 	assert.ErrorIs(t, err, donation.ErrInvalidTransition,
 		"Return on draft must return ErrInvalidTransition (only pending_review is returneable)")
@@ -697,24 +717,24 @@ func TestRejectTerminal(t *testing.T) {
 
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-reject@example.com", DisplayName: "Maker Reject",
-		KeycloakSubject: "maker-reject-kc",
+		KeycloakSubject: "35a7170d-8a9e-4f95-861f-f30596cae59a",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-reject@example.com", DisplayName: "Checker Reject",
-		KeycloakSubject: "checker-reject-kc",
+		KeycloakSubject: "d00798ce-a214-47fe-b456-4ef7d01d9ab7",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "35a7170d-8a9e-4f95-861f-f30596cae59a", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "d00798ce-a214-47fe-b456-4ef7d01d9ab7", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
-	d := createAndSubmit(t, ctx, svc, makerClaims,
+	d := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID,
 		"นาย ทดสอบ Reject Terminal", "7778889990001", "2026-09-01", 8000.00)
 
 	const rejectReason = "หลักฐานการบริจาคปลอมแปลง — ปฏิเสธถาวร"
 
-	rejected, err := svc.Reject(ctx, d.ID, rejectReason, checkerClaims)
+	rejected, err := svc.Reject(ctx, d.ID, rejectReason, checkerRow.ID, checkerClaims)
 	require.NoError(t, err, "Reject must succeed on pending_review donation")
 	require.NotNil(t, rejected)
 
@@ -736,13 +756,13 @@ func TestRejectTerminal(t *testing.T) {
 
 	// Assert terminal: no further transitions allowed on rejected record.
 	// Approve → ErrInvalidTransition.
-	_, err = svc.Approve(ctx, d.ID, checkerClaims)
+	_, err = svc.Approve(ctx, d.ID, checkerRow.ID, checkerClaims)
 	require.Error(t, err, "Approve on rejected record must fail")
 	assert.ErrorIs(t, err, donation.ErrInvalidTransition,
 		"Approve on rejected must return ErrInvalidTransition (terminal state)")
 
 	// Return → ErrInvalidTransition.
-	_, err = svc.Return(ctx, d.ID, "irrelevant", checkerClaims)
+	_, err = svc.Return(ctx, d.ID, "irrelevant", checkerRow.ID, checkerClaims)
 	require.Error(t, err, "Return on rejected record must fail")
 	assert.ErrorIs(t, err, donation.ErrInvalidTransition,
 		"Return on rejected must return ErrInvalidTransition (terminal state)")
@@ -772,12 +792,13 @@ func createAndIssue(
 	ctx context.Context,
 	svc *donation.DonationService,
 	makerClaims, checkerClaims auth.KeycloakClaims,
+	makerID, checkerID pgtype.UUID,
 	donorName, taxID, date string,
 	amount float64,
 ) *donation.DonationResponse {
 	t.Helper()
-	submitted := createAndSubmit(t, ctx, svc, makerClaims, donorName, taxID, date, amount)
-	issued, err := svc.Approve(ctx, submitted.ID, checkerClaims)
+	submitted := createAndSubmit(t, ctx, svc, makerClaims, makerID, donorName, taxID, date, amount)
+	issued, err := svc.Approve(ctx, submitted.ID, checkerID, checkerClaims)
 	require.NoError(t, err, "Approve must succeed")
 	require.Equal(t, "issued", issued.Status, "donation must be issued after Approve")
 	require.NotNil(t, issued.ReceiptFormatted, "receipt_formatted must be set after issuance")
@@ -809,20 +830,20 @@ func TestCancelRetainsReceiptNumber(t *testing.T) {
 
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-cancel@example.com", DisplayName: "Maker Cancel",
-		KeycloakSubject: "maker-cancel-kc",
+		KeycloakSubject: "2c9c9237-fc74-4977-8ab5-a383d9761bdd",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-cancel@example.com", DisplayName: "Checker Cancel",
-		KeycloakSubject: "checker-cancel-kc",
+		KeycloakSubject: "161a0286-6932-4f80-8063-9989f24e0850",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "2c9c9237-fc74-4977-8ab5-a383d9761bdd", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "161a0286-6932-4f80-8063-9989f24e0850", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
 	// Issue donation A — gets receipt number N (first in the fiscal year).
-	donationA := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+	donationA := createAndIssue(t, ctx, svc, makerClaims, checkerClaims, makerRow.ID, checkerRow.ID,
 		"นาย ทดสอบ ยกเลิก A", "1234567890123", "2026-07-01", 5000.00)
 	require.Equal(t, "issued", donationA.Status)
 	require.NotNil(t, donationA.ReceiptFormatted, "donation A must have a receipt number")
@@ -831,7 +852,7 @@ func TestCancelRetainsReceiptNumber(t *testing.T) {
 	// Cancel donation A (Checker cancels with reason).
 	cancelledA, err := svc.Cancel(ctx, donationA.ID, donation.CancelDonationRequest{
 		Reason: "ยกเลิกเนื่องจากข้อมูลผิดพลาด",
-	}, checkerClaims)
+	}, checkerRow.ID, checkerClaims)
 	require.NoError(t, err, "Cancel must succeed on an issued donation")
 	require.NotNil(t, cancelledA)
 
@@ -857,7 +878,7 @@ func TestCancelRetainsReceiptNumber(t *testing.T) {
 	assert.Equal(t, 1, auditCount, "exactly 1 audit row for donation.cancel must exist")
 
 	// Issue donation B — must get the consecutive next receipt number (no gap).
-	donationB := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+	donationB := createAndIssue(t, ctx, svc, makerClaims, checkerClaims, makerRow.ID, checkerRow.ID,
 		"นาย ทดสอบ ยกเลิก B", "9876543210987", "2026-07-01", 3000.00)
 	require.NotNil(t, donationB.ReceiptFormatted,
 		"donation B must have a receipt number")
@@ -907,14 +928,14 @@ func TestPII_TaxIDStoredEncrypted(t *testing.T) {
 	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:           "pii-enc-test@example.com",
 		DisplayName:     "PII Enc Test Maker",
-		KeycloakSubject: "pii-enc-test-keycloak-subject",
+		KeycloakSubject: "3ab05e3e-5f45-45b1-9b0b-20c33f8a0c29",
 	})
 	require.NoError(t, err)
 
 	const plainTaxID = "1234567890123"
 
 	claims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "3ab05e3e-5f45-45b1-9b0b-20c33f8a0c29",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
 	}
 
@@ -923,7 +944,7 @@ func TestPII_TaxIDStoredEncrypted(t *testing.T) {
 		DonorTaxID: plainTaxID,
 		Amount:     2500.00,
 		DonatedAt:  "2024-03-01",
-	}, claims)
+	}, userRow.ID, claims)
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.ID, "donation ID must be set")
 
@@ -968,17 +989,19 @@ func TestPII_RevealRequiresCheckerOrAdmin(t *testing.T) {
 
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-pii@example.com", DisplayName: "Maker PII",
-		KeycloakSubject: "maker-pii-kc",
+		KeycloakSubject: "9f275860-eff4-4ea5-b140-1536df5acc9a",
 	})
 	require.NoError(t, err)
-	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+	// checker row is created only so RevealPII's checker claims map to a real identity;
+	// RevealPII does not write a REFERENCES users(id) column, so its ID is not threaded.
+	_, err = queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-pii@example.com", DisplayName: "Checker PII",
-		KeycloakSubject: "checker-pii-kc",
+		KeycloakSubject: "d773c130-5923-446b-ae72-95de41e5e679",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "9f275860-eff4-4ea5-b140-1536df5acc9a", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "d773c130-5923-446b-ae72-95de41e5e679", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
 	const plainTaxID = "1234567890123"
 
@@ -988,7 +1011,7 @@ func TestPII_RevealRequiresCheckerOrAdmin(t *testing.T) {
 		DonorTaxID: plainTaxID,
 		Amount:     7500.00,
 		DonatedAt:  "2026-07-01",
-	}, makerClaims)
+	}, makerRow.ID, makerClaims)
 	require.NoError(t, err)
 
 	// --- Maker → ErrForbidden (D-46) ---
@@ -1046,7 +1069,7 @@ func TestPII_MaskDefault(t *testing.T) {
 	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:           "pii-mask-test@example.com",
 		DisplayName:     "PII Mask Test Maker",
-		KeycloakSubject: "pii-mask-test-keycloak-subject",
+		KeycloakSubject: "bbad0171-6c36-47fc-915f-32604f33e0de",
 	})
 	require.NoError(t, err)
 
@@ -1055,7 +1078,7 @@ func TestPII_MaskDefault(t *testing.T) {
 	const expectedMask = "x-xxxx-xxxxx-x0123"
 
 	claims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "bbad0171-6c36-47fc-915f-32604f33e0de",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
 	}
 
@@ -1064,7 +1087,7 @@ func TestPII_MaskDefault(t *testing.T) {
 		DonorTaxID: plainTaxID,
 		Amount:     1500.00,
 		DonatedAt:  "2024-04-01",
-	}, claims)
+	}, userRow.ID, claims)
 	require.NoError(t, err)
 
 	// GetByID must return masked value, not plaintext.
@@ -1102,28 +1125,28 @@ func TestVoidAndReissue(t *testing.T) {
 
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-reissue@example.com", DisplayName: "Maker Reissue",
-		KeycloakSubject: "maker-reissue-kc",
+		KeycloakSubject: "745dd9e9-5444-496c-a27f-d8389f600e03",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-reissue@example.com", DisplayName: "Checker Reissue",
-		KeycloakSubject: "checker-reissue-kc",
+		KeycloakSubject: "7ca65f0e-7550-4d67-b704-08d3cde5d09b",
 	})
 	require.NoError(t, err)
 	// checker2: approves the replacement draft.
 	// Needed because Reissue sets created_by=checker1, so checker1 cannot also Approve (SoD).
 	checker2Row, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker2-reissue@example.com", DisplayName: "Checker2 Reissue",
-		KeycloakSubject: "checker2-reissue-kc",
+		KeycloakSubject: "cd32185b-082a-4763-9df3-3207620d978e",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
-	checker2Claims := auth.KeycloakClaims{Subject: checker2Row.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "745dd9e9-5444-496c-a27f-d8389f600e03", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "7ca65f0e-7550-4d67-b704-08d3cde5d09b", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	checker2Claims := auth.KeycloakClaims{Subject: "cd32185b-082a-4763-9df3-3207620d978e", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
 	// Issue the original donation (gets receipt number 1).
-	original := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+	original := createAndIssue(t, ctx, svc, makerClaims, checkerClaims, makerRow.ID, checkerRow.ID,
 		"นาย ทดสอบ Reissue Original", "1234567890123", "2026-07-01", 10000.00)
 	require.Equal(t, "issued", original.Status)
 	require.NotNil(t, original.ReceiptFormatted)
@@ -1136,7 +1159,7 @@ func TestVoidAndReissue(t *testing.T) {
 		DonorTaxID: "9876543210987",
 		Amount:     10000.00,
 		DonatedAt:  "2026-07-01",
-	}, checkerClaims)
+	}, checkerRow.ID, checkerClaims)
 	require.NoError(t, err, "Reissue must succeed on an issued donation")
 	require.NotNil(t, replacement)
 
@@ -1190,7 +1213,7 @@ func TestVoidAndReissue(t *testing.T) {
 
 	// Approve the replacement via a DIFFERENT checker (SoD: created_by=checker1, approver=checker2).
 	// Reissue sets created_by=checkerClaims.Subject, so checkerClaims cannot also Approve.
-	issuedRep, err := svc.Approve(ctx, replacement.ID, checker2Claims)
+	issuedRep, err := svc.Approve(ctx, replacement.ID, checker2Row.ID, checker2Claims)
 	require.NoError(t, err, "Approve on submitted replacement must succeed")
 	require.NotNil(t, issuedRep)
 	assert.Equal(t, "issued", issuedRep.Status,
@@ -1232,12 +1255,12 @@ func TestSubmitMovesToPendingReview(t *testing.T) {
 	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:           "submit-test@example.com",
 		DisplayName:     "Submit Test Maker",
-		KeycloakSubject: "submit-test-keycloak-subject",
+		KeycloakSubject: "c3f22de7-8266-4cb4-9f7d-5238a4923b83",
 	})
 	require.NoError(t, err)
 
 	claims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "c3f22de7-8266-4cb4-9f7d-5238a4923b83",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
 	}
 
@@ -1248,7 +1271,7 @@ func TestSubmitMovesToPendingReview(t *testing.T) {
 		DonorTaxID: "1111222233334",
 		Amount:     7500.00,
 		DonatedAt:  "2024-07-01",
-	}, claims)
+	}, userRow.ID, claims)
 	require.NoError(t, err)
 	assert.Equal(t, "draft", draft.Status, "new donation must be in draft status")
 
@@ -1290,17 +1313,17 @@ func TestSearchDonations(t *testing.T) {
 
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-search@example.com", DisplayName: "Maker Search",
-		KeycloakSubject: "maker-search-kc",
+		KeycloakSubject: "bcbdc376-fb64-42b9-b1f2-0651cb8834ff",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-search@example.com", DisplayName: "Checker Search",
-		KeycloakSubject: "checker-search-kc",
+		KeycloakSubject: "09682ff1-e1ff-4572-ac6e-b59cc3586847",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "bcbdc376-fb64-42b9-b1f2-0651cb8834ff", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "09682ff1-e1ff-4572-ac6e-b59cc3586847", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
 	// Create test donations:
 	//   - "สมชาย" status=draft, donated 2026-01-10
@@ -1309,12 +1332,12 @@ func TestSearchDonations(t *testing.T) {
 
 	dA, err := svc.Create(ctx, donation.CreateDonationRequest{
 		DonorName: "สมชาย สุขใจ", DonorTaxID: "1111111111111", Amount: 1000.00, DonatedAt: "2026-01-10",
-	}, makerClaims)
+	}, makerRow.ID, makerClaims)
 	require.NoError(t, err, "Create donation A must succeed")
 
-	dBSubmit := createAndSubmit(t, ctx, svc, makerClaims, "สมหญิง ดีใจ", "2222222222222", "2026-02-15", 2000.00)
+	dBSubmit := createAndSubmit(t, ctx, svc, makerClaims, makerRow.ID, "สมหญิง ดีใจ", "2222222222222", "2026-02-15", 2000.00)
 
-	dC := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+	dC := createAndIssue(t, ctx, svc, makerClaims, checkerClaims, makerRow.ID, checkerRow.ID,
 		"ประยุทธ เก่งมาก", "3333333333333", "2026-03-20", 3000.00)
 	receiptC := *dC.ReceiptFormatted
 
@@ -1384,20 +1407,20 @@ func TestEDonationKeyedGuard_Integration(t *testing.T) {
 
 	makerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "maker-edon@example.com", DisplayName: "Maker EDon",
-		KeycloakSubject: "maker-edon-kc",
+		KeycloakSubject: "550ae95a-f2f1-455f-8a26-278899531ebd",
 	})
 	require.NoError(t, err)
 	checkerRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email: "checker-edon@example.com", DisplayName: "Checker EDon",
-		KeycloakSubject: "checker-edon-kc",
+		KeycloakSubject: "f74794d0-b6a8-49ac-9cc2-bfc00ebdf8b9",
 	})
 	require.NoError(t, err)
 
-	makerClaims := auth.KeycloakClaims{Subject: makerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
-	checkerClaims := auth.KeycloakClaims{Subject: checkerRow.ID.String(), RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
+	makerClaims := auth.KeycloakClaims{Subject: "550ae95a-f2f1-455f-8a26-278899531ebd", RealmAccess: auth.RealmRoles{Roles: []string{"maker"}}}
+	checkerClaims := auth.KeycloakClaims{Subject: "f74794d0-b6a8-49ac-9cc2-bfc00ebdf8b9", RealmAccess: auth.RealmRoles{Roles: []string{"checker"}}}
 
 	// Issue a donation.
-	d := createAndIssue(t, ctx, svc, makerClaims, checkerClaims,
+	d := createAndIssue(t, ctx, svc, makerClaims, checkerClaims, makerRow.ID, checkerRow.ID,
 		"นาย ทดสอบ eDonation Keyed", "5555666677778", "2026-07-01", 20000.00)
 	require.Equal(t, "issued", d.Status)
 
@@ -1409,7 +1432,7 @@ func TestEDonationKeyedGuard_Integration(t *testing.T) {
 	_, err = svc.Cancel(ctx, d.ID, donation.CancelDonationRequest{
 		Reason:               "ยกเลิก",
 		RDConfirmationReason: "", // missing!
-	}, checkerClaims)
+	}, checkerRow.ID, checkerClaims)
 	require.Error(t, err, "Cancel with edonation_keyed=true and no rd_confirmation_reason must error")
 	assert.ErrorIs(t, err, donation.ErrEDonationKeyedCancel,
 		"Must return ErrEDonationKeyedCancel when edonation_keyed=true and rd_confirmation_reason is empty (D-51)")
@@ -1425,7 +1448,7 @@ func TestEDonationKeyedGuard_Integration(t *testing.T) {
 	cancelled, err := svc.Cancel(ctx, d.ID, donation.CancelDonationRequest{
 		Reason:               "ยกเลิกหลังยืนยัน RD",
 		RDConfirmationReason: rdReason,
-	}, checkerClaims)
+	}, checkerRow.ID, checkerClaims)
 	require.NoError(t, err, "Cancel with edonation_keyed=true and rd_confirmation_reason must succeed (D-51)")
 	assert.Equal(t, "cancelled", cancelled.Status, "status must be cancelled after successful cancel")
 
@@ -1464,12 +1487,12 @@ func TestCreateDonation(t *testing.T) {
 	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:           "create-test@example.com",
 		DisplayName:     "Create Test Maker",
-		KeycloakSubject: "create-test-keycloak-subject",
+		KeycloakSubject: "32c1f156-fb70-4b31-a8c7-141d6a5131fb",
 	})
 	require.NoError(t, err)
 
 	claims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "32c1f156-fb70-4b31-a8c7-141d6a5131fb",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
 	}
 
@@ -1486,7 +1509,7 @@ func TestCreateDonation(t *testing.T) {
 		ConsentPurpose:     "tax_reduction_100percent",
 	}
 
-	resp, err := svc.Create(ctx, req, claims)
+	resp, err := svc.Create(ctx, req, userRow.ID, claims)
 	require.NoError(t, err, "Create must succeed with valid request")
 	require.NotNil(t, resp, "response must not be nil")
 
@@ -1528,12 +1551,12 @@ func TestEditDraft(t *testing.T) {
 	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:           "edit-draft-test@example.com",
 		DisplayName:     "Edit Draft Test Maker",
-		KeycloakSubject: "edit-draft-test-keycloak-subject",
+		KeycloakSubject: "5968bf3c-f47b-43f6-9117-55eb5b3e79b9",
 	})
 	require.NoError(t, err)
 
 	claims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "5968bf3c-f47b-43f6-9117-55eb5b3e79b9",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
 	}
 
@@ -1543,7 +1566,7 @@ func TestEditDraft(t *testing.T) {
 		DonorTaxID: "1112223334445",
 		Amount:     8000.00,
 		DonatedAt:  "2024-02-14",
-	}, claims)
+	}, userRow.ID, claims)
 	require.NoError(t, err)
 	assert.Equal(t, "draft", draft.Status)
 

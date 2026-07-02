@@ -102,16 +102,12 @@ func (s *SlipService) UploadSlip(
 	donationID string,
 	r io.Reader,
 	size int64,
+	actingUserID pgtype.UUID,
 	claims auth.KeycloakClaims,
 ) (*SlipResponse, error) {
 	var pgDonationID pgtype.UUID
 	if err := pgDonationID.Scan(donationID); err != nil {
 		return nil, fmt.Errorf("invalid donation ID: %w", err)
-	}
-
-	var pgUploaderID pgtype.UUID
-	if err := pgUploaderID.Scan(claims.Subject); err != nil {
-		return nil, fmt.Errorf("invalid uploader UUID: %w", err)
 	}
 
 	// D-48: reject if an active slip already exists — caller must remove first.
@@ -142,7 +138,7 @@ func (s *SlipService) UploadSlip(
 			ObjectKey:  objectKey,
 			MimeType:   mimeType,
 			SizeBytes:  size,
-			UploadedBy: pgUploaderID,
+			UploadedBy: actingUserID,
 		})
 		if insertErr != nil {
 			return fmt.Errorf("insert slip: %w", insertErr)
@@ -204,15 +200,10 @@ func (s *SlipService) ViewSlip(ctx context.Context, donationID string, claims au
 // The DB REVOKE DELETE on slip_attachments ensures the reference is also immutable.
 // D-48: if no active slip exists, returns ErrSlipNotFound (404).
 // Audit: slip.remove entry appended inside the same DB transaction as SoftDeleteSlip (Pattern D).
-func (s *SlipService) RemoveSlip(ctx context.Context, donationID string, claims auth.KeycloakClaims) error {
+func (s *SlipService) RemoveSlip(ctx context.Context, donationID string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) error {
 	var pgDonationID pgtype.UUID
 	if err := pgDonationID.Scan(donationID); err != nil {
 		return fmt.Errorf("invalid donation ID: %w", err)
-	}
-
-	var pgActorID pgtype.UUID
-	if err := pgActorID.Scan(claims.Subject); err != nil {
-		return fmt.Errorf("invalid actor UUID: %w", err)
 	}
 
 	// Load active slip before entering tx (avoids holding lock during GetActiveSlipByDonation).
@@ -230,7 +221,7 @@ func (s *SlipService) RemoveSlip(ctx context.Context, donationID string, claims 
 
 		if delErr := qtx.SoftDeleteSlip(ctx, db.SoftDeleteSlipParams{
 			ID:        slip.ID,
-			DeletedBy: pgActorID,
+			DeletedBy: actingUserID,
 		}); delErr != nil {
 			return fmt.Errorf("soft delete slip: %w", delErr)
 		}

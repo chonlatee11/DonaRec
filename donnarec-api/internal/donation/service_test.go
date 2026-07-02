@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -125,7 +126,8 @@ func TestMandatoryTaxID(t *testing.T) {
 		DonatedAt:  "2024-01-01",
 	}
 
-	_, createErr := svc.Create(ctx, req, claims)
+	// Unit test: empty tax ID fails before any FK write, so a zero actingUserID is fine.
+	_, createErr := svc.Create(ctx, req, pgtype.UUID{}, claims)
 	require.Error(t, createErr, "Create with empty tax ID must return an error")
 	assert.ErrorIs(t, createErr, ErrMissingTaxID,
 		"error must be ErrMissingTaxID when DonorTaxID is empty (D-44)")
@@ -152,16 +154,18 @@ func TestConsentCapture(t *testing.T) {
 	queries := db.New(pool)
 	svc := NewDonationService(pool, queries, nil, nil, kp, zap.NewNop())
 
-	// Create a test user to satisfy the created_by FK.
+	// Create a test user to satisfy the created_by FK. Resolution now happens in
+	// auth.ResolveAppUser middleware (created-by-fk-mismatch fix); calling the service
+	// directly, the test passes the resolved users.id (userRow.ID) as actingUserID.
 	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:           "consent-test@example.com",
 		DisplayName:     "Consent Test Maker",
-		KeycloakSubject: "consent-test-keycloak-subject",
+		KeycloakSubject: "e7f1bd16-60b0-486b-8685-d2418c53fadb",
 	})
 	require.NoError(t, err, "test user must be created")
 
 	claims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "e7f1bd16-60b0-486b-8685-d2418c53fadb",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
 	}
 
@@ -178,7 +182,7 @@ func TestConsentCapture(t *testing.T) {
 
 	before := time.Now().UTC().Add(-time.Second)
 
-	resp, err := svc.Create(ctx, req, claims)
+	resp, err := svc.Create(ctx, req, userRow.ID, claims)
 	require.NoError(t, err, "Create must succeed with valid consent fields")
 	require.NotNil(t, resp, "response must not be nil")
 
@@ -235,16 +239,17 @@ func TestStateMachine_InvalidTransitions(t *testing.T) {
 	queries := db.New(pool)
 	svc := NewDonationService(pool, queries, nil, nil, kp, zap.NewNop())
 
-	// Create a test user.
+	// Create a test user. Resolution now happens in auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch fix); calling the service directly, pass userRow.ID as actingUserID.
 	userRow, err := queries.CreateUser(ctx, db.CreateUserParams{
 		Email:           "sm-test@example.com",
 		DisplayName:     "SM Test Maker",
-		KeycloakSubject: "sm-test-keycloak-subject",
+		KeycloakSubject: "ff577676-cdd8-4f9b-97dd-79e413004659",
 	})
 	require.NoError(t, err)
 
 	makerClaims := auth.KeycloakClaims{
-		Subject:     userRow.ID.String(),
+		Subject:     "ff577676-cdd8-4f9b-97dd-79e413004659",
 		RealmAccess: auth.RealmRoles{Roles: []string{"maker"}},
 	}
 
@@ -254,7 +259,7 @@ func TestStateMachine_InvalidTransitions(t *testing.T) {
 		Amount:     3000.00,
 		DonatedAt:  "2024-01-01",
 	}
-	draft, err := svc.Create(ctx, createReq, makerClaims)
+	draft, err := svc.Create(ctx, createReq, userRow.ID, makerClaims)
 	require.NoError(t, err)
 
 	// Submit moves draft → pending_review.
@@ -301,25 +306,25 @@ func TestMandatoryReason(t *testing.T) {
 	donationID := "00000000-0000-0000-0000-000000000001"
 
 	// Return: empty reason → ErrMissingReason (D-45)
-	_, err = svc.Return(ctx, donationID, "", checkerClaims)
+	_, err = svc.Return(ctx, donationID, "", pgtype.UUID{}, checkerClaims)
 	require.Error(t, err, "Return with empty reason must error")
 	assert.ErrorIs(t, err, ErrMissingReason,
 		"Return with empty reason must return ErrMissingReason")
 
 	// Return: whitespace-only reason → ErrMissingReason
-	_, err = svc.Return(ctx, donationID, "   \t\n", checkerClaims)
+	_, err = svc.Return(ctx, donationID, "   \t\n", pgtype.UUID{}, checkerClaims)
 	require.Error(t, err, "Return with whitespace-only reason must error")
 	assert.ErrorIs(t, err, ErrMissingReason,
 		"Return with whitespace-only reason must return ErrMissingReason")
 
 	// Reject: empty reason → ErrMissingReason (D-45)
-	_, err = svc.Reject(ctx, donationID, "", checkerClaims)
+	_, err = svc.Reject(ctx, donationID, "", pgtype.UUID{}, checkerClaims)
 	require.Error(t, err, "Reject with empty reason must error")
 	assert.ErrorIs(t, err, ErrMissingReason,
 		"Reject with empty reason must return ErrMissingReason")
 
 	// Reject: whitespace-only reason → ErrMissingReason
-	_, err = svc.Reject(ctx, donationID, "   ", checkerClaims)
+	_, err = svc.Reject(ctx, donationID, "   ", pgtype.UUID{}, checkerClaims)
 	require.Error(t, err, "Reject with whitespace-only reason must error")
 	assert.ErrorIs(t, err, ErrMissingReason,
 		"Reject with whitespace-only reason must return ErrMissingReason")
@@ -347,13 +352,13 @@ func TestCancelRequiresReason(t *testing.T) {
 	donationID := "00000000-0000-0000-0000-000000000001"
 
 	// Empty reason → ErrMissingReason.
-	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: ""}, checkerClaims)
+	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: ""}, pgtype.UUID{}, checkerClaims)
 	require.Error(t, err, "Cancel with empty reason must return an error")
 	assert.ErrorIs(t, err, ErrMissingReason,
 		"Cancel with empty reason must return ErrMissingReason (D-47)")
 
 	// Whitespace-only reason → ErrMissingReason.
-	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: "   \t\n"}, checkerClaims)
+	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: "   \t\n"}, pgtype.UUID{}, checkerClaims)
 	require.Error(t, err, "Cancel with whitespace-only reason must return an error")
 	assert.ErrorIs(t, err, ErrMissingReason,
 		"Cancel with whitespace-only reason must return ErrMissingReason (D-47)")
@@ -380,7 +385,7 @@ func TestCancelAuthCheckerAdminOnly(t *testing.T) {
 	}
 	donationID := "00000000-0000-0000-0000-000000000001"
 
-	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: "ยกเลิก"}, makerClaims)
+	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{Reason: "ยกเลิก"}, pgtype.UUID{}, makerClaims)
 	require.Error(t, err, "Cancel by Maker must return an error (D-47)")
 	assert.ErrorIs(t, err, ErrForbidden,
 		"Cancel by Maker must return ErrForbidden — only Checker/Admin may cancel (D-47)")
@@ -411,7 +416,7 @@ func TestEDonationKeyedGuard(t *testing.T) {
 	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{
 		Reason:               "ยกเลิกและแจ้ง RD",
 		RDConfirmationReason: "แก้ไขข้อมูล e-Donation รอบ 2",
-	}, makerClaims)
+	}, pgtype.UUID{}, makerClaims)
 	require.Error(t, err, "Maker with rd_confirmation_reason must still be ErrForbidden")
 	assert.ErrorIs(t, err, ErrForbidden,
 		"Role check fires before edonation_keyed guard — Maker always gets ErrForbidden (D-47)")
@@ -424,7 +429,7 @@ func TestEDonationKeyedGuard(t *testing.T) {
 	_, err = svc.Cancel(ctx, donationID, CancelDonationRequest{
 		Reason:               "",
 		RDConfirmationReason: "confirmed",
-	}, checkerClaims)
+	}, pgtype.UUID{}, checkerClaims)
 	require.Error(t, err, "Empty reason must fail even with rd_confirmation_reason set")
 	assert.ErrorIs(t, err, ErrMissingReason,
 		"Reason check fires before edonation_keyed DB read — ErrMissingReason expected")
