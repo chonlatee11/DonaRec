@@ -3,15 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-06-30T18:41:12.531Z"
-last_activity: 2026-06-30
+stopped_at: "Phase 3 REOPENED — integration gate not met (3 runtime-seam bugs found in human-verify)"
+last_updated: "2026-07-02T08:40:00.000Z"
+last_activity: 2026-07-02
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 17
   completed_plans: 15
   percent: 33
+  note: "Phase 3 was Complete 2026-07-01 on unit-level 5/5; reopened 2026-07-02 — integration gate (criterion 6) OPEN"
 ---
 
 # Project State
@@ -25,12 +26,12 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 ## Current Position
 
-Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
-Plan: 2 of 8
-Status: Ready to execute
-Last activity: 2026-06-30
+Phase: 03 (donation-lifecycle-maker-checker-issuance) — ⚠️ REOPENED (integration gate open)
+Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
+Status: Remediation in progress — see Blockers/Concerns for the 3 runtime-seam bugs.
+Last activity: 2026-07-02
 
-Progress: [█████████░] 88%
+Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
 ## Performance Metrics
 
@@ -74,10 +75,20 @@ Recent decisions affecting current work:
 - [Phase 03]: Atomic 7-step Approve tx: lock→SoD→Allocate→Issue→Audit→Outbox in one WithTx closure — any failure rolls back all effects; receipt number exists only on issued records
 - [Phase 03]: SoD enforced at code layer (approverID != createdBy) AND DB CHECK (chk_sod_approver) — defense-in-depth; both layers tested by integration tests
 - [Phase 03]: Checker route group RequireRoles(Checker, Admin) at HTTP layer in addition to service-layer SoD guard — defense-in-depth over service layer
+  - ⚠️ CORRECTION 2026-07-02: this decision encoded the RBAC AND-bug. `RequireRoles(...)` enforces AND (user must hold ALL listed roles), so `RequireRoles(Checker, Admin)` requires checker AND admin — a checker-only user is wrongly blocked. Intent was "checker OR admin". Same bug on donationGroup `RequireRoles(Maker,Checker,Admin)`. Fix: add `RequireAnyRole` (OR) and use it at both sites. (bug #3, OPEN)
+- [Phase 03] 2026-07-02: Identity model clarified — `claims.Subject` (KC sub) ≠ `users.id` (surrogate PK). All `REFERENCES users(id)` writes must resolve sub→users.id via `auth.ResolveAppUser` middleware; `audit_log.actor_id` intentionally keeps raw sub (no FK). (bug #1 fix, committed ef7ede6)
+- [Phase 03] 2026-07-02: FE↔BE auth requires a Keycloak Audience mapper putting `donnarec-backend` in token `aud`, and `donnarec-frontend` must be a confidential client (NextAuth server-side). (bug #2 fix, uncommitted)
 
 ### Pending Todos
 
-None yet.
+Phase 3 integration-gate remediation (blocks marking Phase 3 Complete):
+
+1. [x] Bug #1 `created-by-fk-mismatch` — resolve sub→users.id in `auth.ResolveAppUser` middleware. FIXED + committed (ef7ede6, refactor a1e348e).
+2. [ ] Bug #2 `fe-be-audience-mismatch` — audience mapper + confidential frontend client + web env. Fixed in working tree (keycloak/realm-donnarec.json, donnarec-web/.env.example, donnarec-web/.env.local[gitignored]); COMMIT PENDING.
+3. [ ] Bug #3 RBAC AND-bug — add `RequireAnyRole` (OR) + use at main.go:236 (donationGroup) and :270 (checkerGroup) + test. OPEN.
+4. [ ] Add E2E HTTP integration test (real router + realistic token) covering Maker create/submit + Checker approve/return — satisfies integration gate (criterion 6) and guards regressions.
+5. [ ] Re-run real-token curl through core endpoints until 2xx; then human UI walkthrough (5 items from 03-VERIFICATION human_verification).
+6. [ ] Consider a wider auth/RBAC/wiring seam audit (option B) for any further latent seam bugs before re-closing Phase 3.
 
 ### Blockers/Concerns
 

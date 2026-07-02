@@ -235,3 +235,32 @@ The REQUIREMENTS.md tracking table shows FR-07, FR-09, FR-10, FR-19, FR-29 as "P
 
 _Verified: 2026-07-01_
 _Verifier: Claude (gsd-verifier)_
+
+---
+
+## ⚠️ Addendum — Phase REOPENED 2026-07-02 (integration gate not met)
+
+The 5/5 above was **unit/service-level** verification (artifacts + isolated service tests with
+hand-constructed claims/users). When the human-verification items were driven for real — full
+stack up (docker compose), a real Keycloak token issued to a seeded user — **three runtime
+request-seam bugs surfaced that the unit tests structurally could not catch**:
+
+1. **`created-by-fk-mismatch`** — services wrote `claims.Subject` (Keycloak `sub`) into columns
+   that `REFERENCES users(id)`, but `users.id` is an independent `gen_random_uuid()`. Every real
+   login FK-violated on write. Unit tests masked it by setting `claims.Subject = users.id`.
+   **FIXED + committed** (ef7ede6; refactored into `auth.ResolveAppUser` middleware, a1e348e).
+2. **`fe-be-audience-mismatch`** — Keycloak issued frontend tokens with `aud=account`; the Go
+   verifier requires `aud ∋ donnarec-backend` → **401 on every UI→API call**. Plus the frontend
+   NextAuth config assumes a confidential client while the realm defined a public one, and there
+   was no web env file. **FIXED** (audience mapper + confidential client persisted to
+   `keycloak/realm-donnarec.json`; `donnarec-web/.env.example`); **commit pending**.
+3. **RBAC AND-bug** — `RequireRoles(...)` enforces AND (all listed roles), but
+   `donationGroup RequireRoles(Maker,Checker,Admin)` and `checkerGroup RequireRoles(Checker,Admin)`
+   intended "any of" → **403 for every real user**. **OPEN.**
+
+**Process fix:** a new **Integration-test gate** was added as a phase done-criterion
+(Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6). Phase 3 remains **REOPENED**
+until: bugs #2–#3 fixed + committed, an automated **E2E HTTP integration test** (real router +
+realistic token) covers the critical Maker/Checker flows, and the human UI walkthrough passes.
+
+_Reopened: 2026-07-02 — Claude (orchestrator, human-directed)_

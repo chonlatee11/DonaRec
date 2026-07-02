@@ -23,3 +23,6 @@ graphify-out/
 
 # OMC tooling state (regenerable, per-session)
 .omc/
+
+# local-only port/infra overrides (not for staging/prod)
+docker-compose.override.yml
