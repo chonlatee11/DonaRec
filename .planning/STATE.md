@@ -87,8 +87,9 @@ Phase 3 integration-gate remediation (blocks marking Phase 3 Complete):
 2. [x] Bug #2 `fe-be-audience-mismatch` — audience mapper + confidential frontend client + web env. FIXED + committed (8604caa; debug doc 369dcce).
 3. [x] Bug #3 RBAC AND-bug — added `RequireAnyRole` (OR); switched donationGroup + checkerGroup guards; test added. FIXED + committed (b10fae8).
 4. [x] E2E HTTP integration test (real router + real signed token) — `cmd/server/e2e_test.go`: happy path + unprovisioned-403 + RBAC + SoD + audience. 5/5 subtests PASS (-race). COMMITTED (c5b0c4f). **Automated integration gate SATISFIED.**
-5. [~] Human UI browser walkthrough — LAST remaining gate item. Stack up (API :8000, Keycloak :8080, web :3000); users seeded (maker1/checker1/admin/makerchecker @ DonaRec123). Live E2E already proven via curl (Maker create→submit→Checker approve→issued, receipt 2569/000001). 5 visual items from 03-VERIFICATION human_verification still need a human at the browser.
-6. [ ] (Optional) wider auth/RBAC/wiring seam audit before formally re-closing Phase 3.
+5. [x] Gap #4 `frontend-auth-gating-missing` — frontend had NO route protection / login gating (root was a placeholder, no middleware, custom signin 404'd). Added middleware.ts (withAuth) + app/auth/signin (auto signIn keycloak) + `/`→`/donations` redirect + SessionProvider + SignOutButton. FIXED + committed (63c7a40; debug doc 71345e5). Verified: unauth /,/donations → 307 to signin; /auth/signin → 200.
+6. [~] Human UI browser walkthrough — LAST remaining gate item, now UNBLOCKED (login works). Stack up (API :8000, Keycloak :8080, web :3000); users seeded (maker1/checker1/admin/makerchecker @ DonaRec123). Live E2E already proven via curl (Maker create→submit→Checker approve→issued, receipt 2569/000001). 5 visual items from 03-VERIFICATION human_verification need a human at the browser.
+7. [ ] (Optional) wider auth/RBAC/wiring seam audit before formally re-closing Phase 3.
 
 Once item 5 passes, Phase 3 integration gate (ROADMAP criterion 6) is met → Phase 3 can be re-marked Complete.
 
