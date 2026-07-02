@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
 import { LocaleSwitcher } from "./LocaleSwitcher";
+import { SignOutButton } from "./SignOutButton";
 import { Toaster } from "@/components/ui/toaster";
 
 /**
@@ -72,6 +73,7 @@ export async function AppShell({
       <div className="flex flex-1 flex-col min-w-0">
         {/* Header */}
         <header className="flex h-14 shrink-0 items-center justify-end gap-4 border-b border-slate-200 bg-white px-6">
+          <SignOutButton />
           <LocaleSwitcher />
         </header>
 

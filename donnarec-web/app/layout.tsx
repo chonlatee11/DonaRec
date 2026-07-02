@@ -3,6 +3,7 @@ import { Sarabun, Inter } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { AppShell } from "@/components/AppShell";
+import { AuthSessionProvider } from "@/components/AuthSessionProvider";
 import "./globals.css";
 
 /**
@@ -50,8 +51,10 @@ export default async function RootLayout({
          * Server Components use getTranslations() directly.
          */}
         <NextIntlClientProvider locale={locale} messages={messages}>
-          {/* AppShell: slate-100 sidebar + slate-50 content + header with LocaleSwitcher */}
-          <AppShell>{children}</AppShell>
+          <AuthSessionProvider>
+            {/* AppShell: slate-100 sidebar + slate-50 content + header with LocaleSwitcher */}
+            <AppShell>{children}</AppShell>
+          </AuthSessionProvider>
         </NextIntlClientProvider>
       </body>
     </html>
