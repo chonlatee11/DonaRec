@@ -1,0 +1,323 @@
+// Package main — e2e_test.go
+//
+// End-to-end HTTP integration test satisfying the "integration-test gate"
+// (.planning/CONVENTIONS.md): it drives the REAL request seam
+//
+//	HTTP → RequireAuth (real signed JWT) → RequireAnyRole → ResolveAppUser
+//	     → handler → service → DB
+//
+// against a Postgres testcontainer and a local OIDC/JWKS test server that mints
+// realistic Keycloak-shaped tokens (aud=donnarec-backend, realm_access.roles,
+// iss=test issuer, sub=provisioned users' keycloak_subject).
+//
+// This is the regression guard for three seam bugs that isolated unit/service
+// tests structurally cannot catch:
+//
+//	created-by-fk-mismatch  — created_by must be users.id, not the raw sub
+//	fe-be-audience-mismatch — aud must include donnarec-backend or verify 401s
+//	RBAC AND-bug            — RequireAnyRole must accept "any of", not "all of"
+//
+// The test lives in package main (not an _test package) because setupRouter is
+// unexported and we REUSE it verbatim — the same wiring main() ships to prod.
+//
+// Requires Docker testcontainers. Skip with -short like the other integration tests.
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+
+	"github.com/donnarec/donnarec-api/internal/audit"
+	"github.com/donnarec/donnarec-api/internal/auth"
+	"github.com/donnarec/donnarec-api/internal/crypto"
+	db "github.com/donnarec/donnarec-api/internal/db/generated"
+	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/storage"
+	"github.com/donnarec/donnarec-api/internal/testutil"
+	"github.com/donnarec/donnarec-api/internal/users"
+)
+
+// e2eTestKEK is a 32-byte hex key for integration test use only (same value as
+// the donation package integration tests — test-only, never a real secret).
+const e2eTestKEK = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
+
+// backendClientID is the audience the real verifier enforces (KEYCLOAK_CLIENT_ID).
+const backendClientID = "donnarec-backend"
+
+// e2eHarness bundles the fully-wired router (via the production setupRouter) plus
+// the handles a test needs to provision users and mint matching tokens.
+type e2eHarness struct {
+	router  *gin.Engine
+	kc      *testutil.KeycloakTestServer
+	queries *db.Queries
+	ctx     context.Context
+}
+
+// newE2EHarness spins a Postgres testcontainer, a local OIDC/JWKS server, builds
+// the REAL auth middleware + services + handlers, and wires them through the
+// production setupRouter. All cleanup is registered on t.
+func newE2EHarness(t *testing.T) *e2eHarness {
+	t.Helper()
+
+	gin.SetMode(gin.TestMode)
+	ctx := context.Background()
+
+	pool := testutil.SetupTestPostgres(t)
+	queries := db.New(pool)
+
+	t.Setenv("DONAREC_KEK", e2eTestKEK)
+	keyProvider, err := crypto.NewEnvKeyProvider()
+	require.NoError(t, err, "crypto key provider must construct with test KEK")
+
+	logger := zap.NewNop()
+
+	// Local OIDC/JWKS server + REAL auth middleware pointed at it. discovery base
+	// is the test server URL; expected issuer is its realm URL — signature, iss,
+	// and aud verification all run for real (fe-be-audience-mismatch guard).
+	kc := testutil.NewKeycloakTestServer(t)
+	authMW, err := auth.NewAuthMiddleware(kc.Server.URL, "donnarec", backendClientID, kc.IssuerURL, logger)
+	require.NoError(t, err, "NewAuthMiddleware must succeed against the test OIDC server")
+
+	// Services (mirror cmd/server/main.go wiring).
+	auditSvc := audit.NewAuditService(pool, queries, logger)
+	userSvc := users.NewUserService(pool, queries, logger)
+	allocator := receiptno.NewAllocator(queries)
+	donationSvc := donation.NewDonationService(pool, queries, allocator, auditSvc, keyProvider, logger)
+
+	// SlipService needs a *storage.StorageClient. The create/submit/approve flow
+	// never touches slip storage, so we construct a real client against a dummy
+	// endpoint: minio.New is lazy (no network call at construction), which is all
+	// setupRouter requires. No slip route is exercised in this test.
+	storageClient, err := storage.NewStorageClient("localhost:9000", "minioadmin", "minioadmin", "donnarec-slips", false)
+	require.NoError(t, err, "storage client must construct (lazy — no connection)")
+	slipSvc := donation.NewSlipService(pool, queries, storageClient, auditSvc, logger)
+
+	// Handlers.
+	userHandler := users.NewUserHandler(userSvc, logger)
+	donationHandler := donation.NewDonationHandler(donationSvc, logger)
+	slipHandler := donation.NewSlipHandler(slipSvc, logger)
+
+	// appUserResolver: identical closure to main.go — maps Keycloak sub -> users.id,
+	// translating pgx.ErrNoRows to auth.ErrSubjectNotProvisioned (403 in middleware).
+	appUserResolver := func(ctx context.Context, subject string) (pgtype.UUID, error) {
+		u, err := queries.GetUserByKeycloakSubject(ctx, subject)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, auth.ErrSubjectNotProvisioned
+			}
+			return pgtype.UUID{}, err
+		}
+		return u.ID, nil
+	}
+
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, logger)
+
+	return &e2eHarness{router: router, kc: kc, queries: queries, ctx: ctx}
+}
+
+// provisionUser inserts a users row with the given keycloak_subject and assigns
+// the given roles, mirroring the seed pattern. Returns the resolved users.id.
+func (h *e2eHarness) provisionUser(t *testing.T, email, displayName, subject string, roles ...db.UserRoleEnum) pgtype.UUID {
+	t.Helper()
+	u, err := h.queries.CreateUser(h.ctx, db.CreateUserParams{
+		Email:           email,
+		DisplayName:     displayName,
+		KeycloakSubject: subject,
+	})
+	require.NoError(t, err, "CreateUser must succeed")
+	for _, r := range roles {
+		_, err := h.queries.AssignRole(h.ctx, db.AssignRoleParams{UserID: u.ID, Role: r})
+		require.NoError(t, err, "AssignRole must succeed")
+	}
+	return u.ID
+}
+
+// do performs an HTTP request against the wired router with an optional bearer
+// token and JSON body, returning the recorder for assertions.
+func (h *e2eHarness) do(t *testing.T, method, path, token string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader *bytes.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		require.NoError(t, err)
+		reader = bytes.NewReader(b)
+	} else {
+		reader = bytes.NewReader(nil)
+	}
+	req, err := http.NewRequest(method, path, reader)
+	require.NoError(t, err)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	h.router.ServeHTTP(w, req)
+	return w
+}
+
+// dataEnvelope decodes the {"data": ...} wrapper every donation handler returns.
+type dataEnvelope struct {
+	Data donation.DonationResponse `json:"data"`
+}
+
+type listEnvelope struct {
+	Data []donation.DonationResponse `json:"data"`
+}
+
+func decodeDonation(t *testing.T, w *httptest.ResponseRecorder) donation.DonationResponse {
+	t.Helper()
+	var env dataEnvelope
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env), "response body: %s", w.Body.String())
+	return env.Data
+}
+
+// validDonorBody returns a valid Create/Reissue donor payload.
+func validDonorBody(name string) map[string]any {
+	return map[string]any{
+		"donor_name":           name,
+		"donor_tax_id":         "1234567890123",
+		"donor_address":        "123 ถนนทดสอบ กรุงเทพฯ",
+		"amount":               1500.00,
+		"donated_at":           "2026-03-15",
+		"consent_given":        true,
+		"consent_text_version": "v1",
+		"consent_purpose":      "tax-receipt",
+	}
+}
+
+// TestE2E_MakerCheckerIssuancePipeline drives the full Maker→Checker→Issuance
+// pipeline over the real HTTP path, plus the seam regressions as subtests.
+//
+// Requires Docker testcontainers. Skip with -short.
+func TestE2E_MakerCheckerIssuancePipeline(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E integration test in short mode: requires Docker")
+	}
+
+	h := newE2EHarness(t)
+
+	// Provision maker + checker with DISTINCT keycloak_subject values (SoD needs
+	// approver_id != created_by). Tokens' sub matches each provisioned subject.
+	const subMaker = "11111111-1111-1111-1111-111111111111"
+	const subChecker = "22222222-2222-2222-2222-222222222222"
+	makerID := h.provisionUser(t, "maker-e2e@example.com", "Maker E2E", subMaker, db.UserRoleEnumMaker)
+	_ = h.provisionUser(t, "checker-e2e@example.com", "Checker E2E", subChecker, db.UserRoleEnumChecker)
+
+	makerToken := h.kc.MintTokenForSubject(subMaker, backendClientID, "maker")
+	checkerToken := h.kc.MintTokenForSubject(subChecker, backendClientID, "checker")
+
+	// donationID is threaded across the happy-path steps (create → submit → approve → list).
+	var donationID string
+
+	t.Run("HappyPath_CreateSubmitApproveList", func(t *testing.T) {
+		// --- Step 1: POST /api/donations (maker) → 201 ---
+		// RBAC AND-bug regression: a maker-only token MUST be accepted here
+		// (RequireAnyRole = "any of"), not 403.
+		w := h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาย ทดสอบ E2E"))
+		require.Equal(t, http.StatusCreated, w.Code, "maker must be accepted on create (RequireAnyRole); body: %s", w.Body.String())
+		created := decodeDonation(t, w)
+		donationID = created.ID
+		require.NotEmpty(t, donationID)
+		assert.Equal(t, "draft", created.Status)
+
+		// created-by-fk-mismatch regression: created_by is the maker's users.id,
+		// NOT the raw Keycloak subject (subMaker).
+		assert.Equal(t, makerID.String(), created.CreatedBy,
+			"created_by must be the resolved users.id, not the keycloak subject")
+		assert.NotEqual(t, subMaker, created.CreatedBy,
+			"created_by must NOT be the raw keycloak subject (created-by-fk-mismatch)")
+
+		// --- Step 2: POST /api/donations/{id}/submit (maker) → 200, pending_review ---
+		w = h.do(t, http.MethodPost, "/api/donations/"+donationID+"/submit", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "submit body: %s", w.Body.String())
+		submitted := decodeDonation(t, w)
+		assert.Equal(t, "pending_review", submitted.Status)
+
+		// --- Step 3: POST /api/donations/{id}/approve (checker) → 200, issued ---
+		// RBAC regression: a checker-only token (no admin) MUST be accepted on the
+		// checker-only route, not 403.
+		w = h.do(t, http.MethodPost, "/api/donations/"+donationID+"/approve", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "checker must be accepted on approve; body: %s", w.Body.String())
+		issued := decodeDonation(t, w)
+		assert.Equal(t, "issued", issued.Status)
+		require.NotNil(t, issued.ReceiptFormatted, "receipt_formatted must be set after issuance")
+		assert.NotEmpty(t, *issued.ReceiptFormatted,
+			"receipt number must be allocated in the issuance tx (gap-less counter)")
+
+		// --- Step 4: GET /api/donations?status=issued (checker) → 200, contains it ---
+		w = h.do(t, http.MethodGet, "/api/donations?status=issued", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "list body: %s", w.Body.String())
+		var list listEnvelope
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+		found := false
+		for _, d := range list.Data {
+			if d.ID == donationID {
+				found = true
+				assert.Equal(t, "issued", d.Status)
+			}
+		}
+		assert.True(t, found, "issued donation %s must appear in status=issued list", donationID)
+	})
+
+	t.Run("UnprovisionedSubject_403", func(t *testing.T) {
+		// Validly-signed token whose sub has NO users row → ResolveAppUser 403s.
+		orphanToken := h.kc.MintTokenForSubject("99999999-9999-9999-9999-999999999999", backendClientID, "maker")
+		w := h.do(t, http.MethodPost, "/api/donations", orphanToken, validDonorBody("นาย ไม่มีในระบบ"))
+		require.Equal(t, http.StatusForbidden, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "user_not_provisioned")
+	})
+
+	t.Run("RBAC_MakerRejectedFromCheckerOnlyRoute", func(t *testing.T) {
+		// Defense-in-depth complement to the happy path: a maker-only token is
+		// blocked by the checker route guard (RequireAnyRole(checker,admin)) with
+		// 403 "insufficient_role" — distinct from the SoD 403 ("sod_violation") below.
+		w := h.do(t, http.MethodPost, "/api/donations/"+donationID+"/approve", makerToken, nil)
+		require.Equal(t, http.StatusForbidden, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "insufficient_role")
+	})
+
+	t.Run("SoD_SelfApprove_403", func(t *testing.T) {
+		// A dual-role (maker+checker) user creates+submits, then approves their own
+		// donation. The checker route guard passes (they hold checker), so the
+		// request reaches the SERVICE SoD check: approver_id == created_by →
+		// ErrSoDViolation, which the handler maps to 403 {"error":"sod_violation"}.
+		const subDual = "33333333-3333-3333-3333-333333333333"
+		_ = h.provisionUser(t, "dual-e2e@example.com", "Dual E2E", subDual, db.UserRoleEnumMaker, db.UserRoleEnumChecker)
+		dualToken := h.kc.MintTokenForSubject(subDual, backendClientID, "maker", "checker")
+
+		w := h.do(t, http.MethodPost, "/api/donations", dualToken, validDonorBody("นาย ทดสอบ SoD"))
+		require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+		selfID := decodeDonation(t, w).ID
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+selfID+"/submit", dualToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+selfID+"/approve", dualToken, nil)
+		require.Equal(t, http.StatusForbidden, w.Code, "self-approve must be blocked by SoD; body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "sod_violation")
+	})
+
+	t.Run("Audience_WrongClient_401", func(t *testing.T) {
+		// Token minted with aud="wrong-client" must fail the real audience check
+		// (fe-be-audience-mismatch guard) → 401 invalid_token, before any handler.
+		wrongAudToken := h.kc.MintTokenForSubject(subMaker, "wrong-client", "maker")
+		w := h.do(t, http.MethodPost, "/api/donations", wrongAudToken, validDonorBody("นาย ผิด audience"))
+		require.Equal(t, http.StatusUnauthorized, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "invalid_token")
+	})
+}

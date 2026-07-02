@@ -90,22 +90,41 @@ func NewKeycloakTestServer(t *testing.T) *KeycloakTestServer {
 	return ts
 }
 
+// defaultTestSubject is the "sub" claim used by MintToken when no subject is
+// specified. Kept as a named constant so tests that don't care about identity
+// still get a stable, recognisable value.
+const defaultTestSubject = "test-subject-uuid"
+
 // MintToken creates a signed JWT with the given roles embedded under
 // realm_access.roles (Keycloak convention — never top-level "roles").
 // The token is signed with the test server's RSA private key and is
 // valid for 5 minutes from call time.
 //
 // clientID is used as the "aud" claim (matches KEYCLOAK_CLIENT_ID).
+// The "sub" claim is fixed to defaultTestSubject; use MintTokenForSubject when
+// distinct subjects are required (e.g. SoD: approver_id != created_by).
 //
 // Usage:
 //
 //	srv := testutil.NewKeycloakTestServer(t)
 //	token := srv.MintToken("donnarec-backend", "maker", "checker")
 func (ts *KeycloakTestServer) MintToken(clientID string, roles ...string) string {
+	return ts.MintTokenForSubject(defaultTestSubject, clientID, roles...)
+}
+
+// MintTokenForSubject creates a signed JWT identical to MintToken but with a
+// caller-specified "sub" claim. This is required by the E2E integration tests
+// where the Maker and Checker must have DISTINCT subjects so that the SoD rule
+// (approver_id != created_by) and identity resolution (sub -> users.id) can be
+// exercised over the real request path.
+//
+// The token also carries "email" = "<subject>@example.com" so audit rows have a
+// non-empty actor_email; roles go under realm_access.roles (never top-level).
+func (ts *KeycloakTestServer) MintTokenForSubject(subject, clientID string, roles ...string) string {
 	now := time.Now()
 	claims := jwt.MapClaims{
-		"sub":   "test-subject-uuid",
-		"email": "test@example.com",
+		"sub":   subject,
+		"email": subject + "@example.com",
 		"iss":   ts.IssuerURL,
 		"aud":   []string{clientID},
 		"iat":   now.Unix(),
@@ -120,7 +139,7 @@ func (ts *KeycloakTestServer) MintToken(clientID string, roles ...string) string
 
 	signed, err := token.SignedString(ts.PrivateKey)
 	if err != nil {
-		panic("testutil.MintToken: failed to sign token: " + err.Error())
+		panic("testutil.MintTokenForSubject: failed to sign token: " + err.Error())
 	}
 	return signed
 }
