@@ -84,11 +84,13 @@ Recent decisions affecting current work:
 Phase 3 integration-gate remediation (blocks marking Phase 3 Complete):
 
 1. [x] Bug #1 `created-by-fk-mismatch` — resolve sub→users.id in `auth.ResolveAppUser` middleware. FIXED + committed (ef7ede6, refactor a1e348e).
-2. [ ] Bug #2 `fe-be-audience-mismatch` — audience mapper + confidential frontend client + web env. Fixed in working tree (keycloak/realm-donnarec.json, donnarec-web/.env.example, donnarec-web/.env.local[gitignored]); COMMIT PENDING.
-3. [ ] Bug #3 RBAC AND-bug — add `RequireAnyRole` (OR) + use at main.go:236 (donationGroup) and :270 (checkerGroup) + test. OPEN.
-4. [ ] Add E2E HTTP integration test (real router + realistic token) covering Maker create/submit + Checker approve/return — satisfies integration gate (criterion 6) and guards regressions.
-5. [ ] Re-run real-token curl through core endpoints until 2xx; then human UI walkthrough (5 items from 03-VERIFICATION human_verification).
-6. [ ] Consider a wider auth/RBAC/wiring seam audit (option B) for any further latent seam bugs before re-closing Phase 3.
+2. [x] Bug #2 `fe-be-audience-mismatch` — audience mapper + confidential frontend client + web env. FIXED + committed (8604caa; debug doc 369dcce).
+3. [x] Bug #3 RBAC AND-bug — added `RequireAnyRole` (OR); switched donationGroup + checkerGroup guards; test added. FIXED + committed (b10fae8).
+4. [x] E2E HTTP integration test (real router + real signed token) — `cmd/server/e2e_test.go`: happy path + unprovisioned-403 + RBAC + SoD + audience. 5/5 subtests PASS (-race). COMMITTED (c5b0c4f). **Automated integration gate SATISFIED.**
+5. [~] Human UI browser walkthrough — LAST remaining gate item. Stack up (API :8000, Keycloak :8080, web :3000); users seeded (maker1/checker1/admin/makerchecker @ DonaRec123). Live E2E already proven via curl (Maker create→submit→Checker approve→issued, receipt 2569/000001). 5 visual items from 03-VERIFICATION human_verification still need a human at the browser.
+6. [ ] (Optional) wider auth/RBAC/wiring seam audit before formally re-closing Phase 3.
+
+Once item 5 passes, Phase 3 integration gate (ROADMAP criterion 6) is met → Phase 3 can be re-marked Complete.
 
 ### Blockers/Concerns
 
