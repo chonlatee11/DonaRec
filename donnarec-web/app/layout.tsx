@@ -4,6 +4,7 @@ import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
 import { AppShell } from "@/components/AppShell";
 import { AuthSessionProvider } from "@/components/AuthSessionProvider";
+import { Providers } from "./providers";
 import "./globals.css";
 
 /**
@@ -52,8 +53,15 @@ export default async function RootLayout({
          */}
         <NextIntlClientProvider locale={locale} messages={messages}>
           <AuthSessionProvider>
-            {/* AppShell: slate-100 sidebar + slate-50 content + header with LocaleSwitcher */}
-            <AppShell>{children}</AppShell>
+            {/*
+             * Providers: mounts the TanStack Query QueryClientProvider (D-R1)
+             * so client components under AppShell can drive list/detail data
+             * through the same-origin BFF routes.
+             */}
+            <Providers>
+              {/* AppShell: slate-100 sidebar + slate-50 content + header with LocaleSwitcher */}
+              <AppShell>{children}</AppShell>
+            </Providers>
           </AuthSessionProvider>
         </NextIntlClientProvider>
       </body>

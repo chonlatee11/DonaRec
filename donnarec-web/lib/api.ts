@@ -165,7 +165,22 @@ export async function apiFetch<T>(
 
   // 204 No Content — return undefined (e.g. DELETE slip, soft-delete endpoints)
   if (res.status === 204) return undefined as T;
-  return res.json() as Promise<T>;
+
+  // D-R2: the Go API wraps successful payloads in a `{ "data": ... }` envelope
+  // (list responses: `{ data: { items, total, page, per_page } }`; single-object
+  // responses: `{ data: {...} }`). Unwrap `data` so all callers receive the inner
+  // payload directly — this is the root fix for bug #5 (callers read
+  // `result.donations`/`result.items` off the raw envelope and crashed on
+  // `undefined.length`).
+  const body = (await res.json()) as unknown;
+  if (
+    body !== null &&
+    typeof body === "object" &&
+    "data" in (body as Record<string, unknown>)
+  ) {
+    return (body as { data: T }).data;
+  }
+  return body as T;
 }
 
 // ---------------------------------------------------------------------------
