@@ -1,7 +1,14 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { useTranslations, useLocale } from "next-intl";
+import {
+  type ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from "@tanstack/react-table";
 import {
   Table,
   TableBody,
@@ -23,7 +30,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import type { DonationSummary } from "@/lib/donations";
 
 interface DonationTableProps {
-  donations: DonationSummary[];
+  /** D-R2: rows from the `{data:{items,...}}` envelope */
+  items: DonationSummary[];
   total: number;
   page: number;
   perPage: number;
@@ -34,18 +42,21 @@ interface DonationTableProps {
 }
 
 /**
- * DonationTable — Screen 1 table.
+ * DonationTable — Screen 1 table (TanStack Table).
  *
- * UI-SPEC §Screen 1 "Table columns":
+ * UI-SPEC §Screen 1 "Table columns" (order preserved):
  *   วันที่บริจาค / ชื่อผู้บริจาค / จำนวนเงิน (right-aligned comma) /
  *   สถานะ (StatusBadge) / เลขที่ใบเสร็จ (issued/cancelled only, em-dash otherwise) /
  *   ผู้สร้าง / จัดการ
  *
  * Row height: 56px minimum (UI-SPEC Spacing).
  * Pagination: 20 rows / page, shadcn Pagination.
+ *
+ * Rendered by DonationListView, which drives data through TanStack Query +
+ * the same-origin BFF route (D-R1). Column model built with @tanstack/react-table.
  */
 export function DonationTable({
-  donations,
+  items,
   total,
   page,
   perPage,
@@ -60,11 +71,13 @@ export function DonationTable({
 
   // ── Formatters ──────────────────────────────────────────────────────────────
 
-  function formatAmount(amount: number): string {
+  function formatAmount(amount: string): string {
+    // D-R2/03-09: amount arrives as a numeric string ("1500.00").
+    const value = parseFloat(amount);
     return new Intl.NumberFormat("th-TH", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(amount);
+    }).format(Number.isFinite(value) ? value : 0);
   }
 
   function formatDate(dateStr: string): string {
@@ -120,8 +133,88 @@ export function DonationTable({
       );
     }
     // All other statuses: em-dash
-    return <span className="text-slate-400" aria-label="ไม่มีเลขที่ใบเสร็จ">—</span>;
+    return (
+      <span className="text-slate-400" aria-label="ไม่มีเลขที่ใบเสร็จ">
+        —
+      </span>
+    );
   }
+
+  // ── Column model (TanStack Table) ─────────────────────────────────────────────
+  // Order + widths + alignment preserve UI-SPEC Screen 1 exactly.
+
+  const columns = useMemo<ColumnDef<DonationSummary>[]>(
+    () => [
+      {
+        id: "donatedAt",
+        header: () => t("fields.donatedAt"),
+        cell: ({ row }) => formatDate(row.original.donated_at),
+        meta: { headClass: "w-[120px]", cellClass: "text-[16px]" },
+      },
+      {
+        id: "donorName",
+        header: () => t("fields.donorName"),
+        cell: ({ row }) => row.original.donor_name,
+        meta: {
+          headClass: "",
+          cellClass: "text-[16px] font-medium text-slate-900",
+        },
+      },
+      {
+        id: "amount",
+        header: () => t("fields.amount"),
+        cell: ({ row }) => formatAmount(row.original.amount),
+        meta: {
+          headClass: "w-[130px] text-right",
+          cellClass: "text-right text-[16px] tabular-nums",
+        },
+      },
+      {
+        id: "status",
+        header: () => t("fields.status"),
+        cell: ({ row }) => (
+          <StatusBadge status={row.original.status} locale={locale} />
+        ),
+        meta: { headClass: "w-[140px]", cellClass: "" },
+      },
+      {
+        id: "receiptNumber",
+        header: () => t("fields.receiptNumber"),
+        cell: ({ row }) => renderReceiptCell(row.original),
+        meta: { headClass: "w-[150px]", cellClass: "" },
+      },
+      {
+        id: "createdBy",
+        header: () => t("fields.createdBy"),
+        cell: ({ row }) => row.original.created_by,
+        meta: {
+          headClass: "w-[110px]",
+          cellClass: "text-[14px] text-slate-600",
+        },
+      },
+      {
+        id: "manage",
+        header: () => t("fields.managedAt"),
+        cell: ({ row }) => (
+          <Link
+            href={getDetailHref(row.original)}
+            className="text-[14px] font-medium text-blue-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1"
+          >
+            {t("actions.viewDetails")}
+          </Link>
+        ),
+        meta: { headClass: "w-[80px]", cellClass: "" },
+      },
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [t, locale, viewerId]
+  );
+
+  const table = useReactTable({
+    data: items,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  });
 
   // ── Pagination href builder ─────────────────────────────────────────────────
 
@@ -138,7 +231,7 @@ export function DonationTable({
 
   // ── Empty states ─────────────────────────────────────────────────────────────
 
-  if (donations.length === 0) {
+  if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
         <p className="text-[20px] font-semibold leading-snug text-slate-900">
@@ -158,19 +251,15 @@ export function DonationTable({
   // ── Pagination helper ─────────────────────────────────────────────────────────
 
   function buildPageItems(): Array<number | "ellipsis"> {
-    const items: Array<number | "ellipsis"> = [];
+    const pageItems: Array<number | "ellipsis"> = [];
     for (let p = 1; p <= totalPages; p++) {
-      if (
-        p === 1 ||
-        p === totalPages ||
-        (p >= page - 2 && p <= page + 2)
-      ) {
-        items.push(p);
-      } else if (items[items.length - 1] !== "ellipsis") {
-        items.push("ellipsis");
+      if (p === 1 || p === totalPages || (p >= page - 2 && p <= page + 2)) {
+        pageItems.push(p);
+      } else if (pageItems[pageItems.length - 1] !== "ellipsis") {
+        pageItems.push("ellipsis");
       }
     }
-    return items;
+    return pageItems;
   }
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -180,89 +269,62 @@ export function DonationTable({
       {/* Table */}
       <div className="overflow-hidden rounded-lg border border-slate-200">
         <Table role="grid">
-          <caption className="sr-only">
-            {t("donations.title")}
-          </caption>
+          <caption className="sr-only">{t("donations.title")}</caption>
           <TableHeader>
-            <TableRow className="bg-slate-50">
-              <TableHead
-                scope="col"
-                className="w-[120px] text-[14px] text-slate-600"
-              >
-                {t("fields.donatedAt")}
-              </TableHead>
-              <TableHead scope="col" className="text-[14px] text-slate-600">
-                {t("fields.donorName")}
-              </TableHead>
-              <TableHead
-                scope="col"
-                className="w-[130px] text-right text-[14px] text-slate-600"
-              >
-                {t("fields.amount")}
-              </TableHead>
-              <TableHead
-                scope="col"
-                className="w-[140px] text-[14px] text-slate-600"
-              >
-                {t("fields.status")}
-              </TableHead>
-              <TableHead
-                scope="col"
-                className="w-[150px] text-[14px] text-slate-600"
-              >
-                {t("fields.receiptNumber")}
-              </TableHead>
-              <TableHead
-                scope="col"
-                className="w-[110px] text-[14px] text-slate-600"
-              >
-                {t("fields.createdBy")}
-              </TableHead>
-              <TableHead
-                scope="col"
-                className="w-[80px] text-[14px] text-slate-600"
-              >
-                {t("fields.managedAt")}
-              </TableHead>
-            </TableRow>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id} className="bg-slate-50">
+                {headerGroup.headers.map((header) => {
+                  const headClass =
+                    (
+                      header.column.columnDef.meta as
+                        | { headClass?: string }
+                        | undefined
+                    )?.headClass ?? "";
+                  return (
+                    <TableHead
+                      key={header.id}
+                      scope="col"
+                      className={`text-[14px] text-slate-600 ${headClass}`}
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            ))}
           </TableHeader>
           <TableBody>
-            {donations.map((donation) => (
+            {table.getRowModel().rows.map((row) => (
               <TableRow
-                key={donation.id}
+                key={row.id}
                 className={[
                   "min-h-[56px]",
-                  donation.status === "rejected" ? "text-slate-500" : "",
+                  row.original.status === "rejected" ? "text-slate-500" : "",
                 ]
                   .filter(Boolean)
                   .join(" ")}
               >
-                <TableCell className="py-4 text-[16px]">
-                  {formatDate(donation.donated_at)}
-                </TableCell>
-                <TableCell className="py-4 text-[16px] font-medium text-slate-900">
-                  {donation.donor_name}
-                </TableCell>
-                <TableCell className="py-4 text-right text-[16px] tabular-nums">
-                  {formatAmount(donation.amount)}
-                </TableCell>
-                <TableCell className="py-4">
-                  <StatusBadge status={donation.status} locale={locale} />
-                </TableCell>
-                <TableCell className="py-4">
-                  {renderReceiptCell(donation)}
-                </TableCell>
-                <TableCell className="py-4 text-[14px] text-slate-600">
-                  {donation.created_by}
-                </TableCell>
-                <TableCell className="py-4">
-                  <Link
-                    href={getDetailHref(donation)}
-                    className="text-[14px] font-medium text-blue-600 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-1"
-                  >
-                    {t("actions.viewDetails")}
-                  </Link>
-                </TableCell>
+                {row.getVisibleCells().map((cell) => {
+                  const cellClass =
+                    (
+                      cell.column.columnDef.meta as
+                        | { cellClass?: string }
+                        | undefined
+                    )?.cellClass ?? "";
+                  return (
+                    <TableCell key={cell.id} className={`py-4 ${cellClass}`}>
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext()
+                      )}
+                    </TableCell>
+                  );
+                })}
               </TableRow>
             ))}
           </TableBody>

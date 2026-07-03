@@ -28,7 +28,12 @@ export interface DonationSummary {
   id: string;
   donated_at: string;            // ISO date (YYYY-MM-DD)
   donor_name: string;
-  amount: number;
+  /**
+   * D-R2 / 03-09: backend serialises monetary amounts as a numeric STRING
+   * (e.g. "1500.00") to preserve exact decimal precision. Callers parse with
+   * parseFloat/Number at the render boundary.
+   */
+  amount: string;
   status: DonationStatus;
   /** Non-null only for status=issued or status=cancelled */
   receipt_formatted: string | null;
@@ -63,7 +68,7 @@ export interface DonationDetail extends DonationSummary {
 }
 
 export interface DonationListResponse {
-  donations: DonationSummary[];
+  items: DonationSummary[];
   total: number;
   page: number;
   per_page: number;
@@ -91,14 +96,11 @@ export interface SearchFilter {
 // ---------------------------------------------------------------------------
 
 /**
- * GET /api/donations — paginated list with filters.
- *
- * D-53: Only name, date range, status, receipt_no are searchable.
- * national/tax ID search is intentionally absent.
+ * Build the donation list query string from a SearchFilter.
+ * D-53: Only name / date range / status / receipt_no / page are emitted —
+ * national/tax ID is intentionally never a search key (no PII search).
  */
-export async function searchDonations(
-  filter: SearchFilter
-): Promise<DonationListResponse> {
+export function buildDonationQuery(filter: SearchFilter): string {
   const params = new URLSearchParams();
   if (filter.name) params.set("name", filter.name);
   if (filter.status) params.set("status", filter.status);
@@ -106,9 +108,53 @@ export async function searchDonations(
   if (filter.to) params.set("to", filter.to);
   if (filter.receipt_no) params.set("receipt_no", filter.receipt_no);
   if (filter.page && filter.page > 1) params.set("page", String(filter.page));
+  return params.toString();
+}
 
-  const qs = params.toString();
+/**
+ * GET /api/donations — paginated list with filters (SERVER-side via apiFetch).
+ *
+ * apiFetch unwraps the D-R2 `{data:...}` envelope, so this resolves to the inner
+ * `{items,total,page,per_page}` payload directly.
+ */
+export async function searchDonations(
+  filter: SearchFilter
+): Promise<DonationListResponse> {
+  const qs = buildDonationQuery(filter);
   return apiFetch<DonationListResponse>(`/api/donations${qs ? `?${qs}` : ""}`);
+}
+
+/**
+ * fetchDonations — CLIENT-side list fetcher for TanStack Query (D-R1).
+ *
+ * Calls the same-origin BFF Route Handler `/api/bff/donations`, which obtains
+ * the Keycloak token server-side and forwards to the Go API. The access token
+ * therefore never reaches the browser. The BFF passes the Go `{data:{...}}`
+ * envelope through unchanged, so we unwrap `.data` here.
+ */
+export async function fetchDonations(
+  filter: SearchFilter
+): Promise<DonationListResponse> {
+  const qs = buildDonationQuery(filter);
+  const res = await fetch(`/api/bff/donations${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    let message = "ไม่สามารถโหลดรายการบริจาคได้ — กรุณาลองอีกครั้ง";
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body?.message) message = body.message;
+    } catch {
+      // keep default message
+    }
+    throw new Error(message);
+  }
+
+  const body = (await res.json()) as { data?: DonationListResponse };
+  // BFF returns the Go envelope { data: { items, total, page, per_page } }.
+  return (body.data ?? (body as unknown as DonationListResponse));
 }
 
 /** GET /api/donations/:id — full record including server-computed authorization flags */

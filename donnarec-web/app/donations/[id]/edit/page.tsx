@@ -122,7 +122,9 @@ export default async function EditDonationPage({
           donor_name: donation.donor_name,
           address: donation.address,
           email: donation.email,
-          amount: donation.amount,
+          // D-R2/03-09: DonationDetail.amount is now a numeric string; the form
+          // model expects a number.
+          amount: Number(donation.amount),
           donated_at: donation.donated_at,
           note: donation.note,
           slip_url: donation.slip_url,

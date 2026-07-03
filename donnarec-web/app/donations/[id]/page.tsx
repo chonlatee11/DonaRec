@@ -193,11 +193,13 @@ export default async function DonationDetailPage({
     }).format(date);
   }
 
-  function formatAmount(amount: number): string {
+  function formatAmount(amount: string): string {
+    // D-R2/03-09: amount arrives as a numeric string ("1500.00").
+    const value = parseFloat(amount);
     return new Intl.NumberFormat("th-TH", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
-    }).format(amount);
+    }).format(Number.isFinite(value) ? value : 0);
   }
 
   const isReceiptVisible =

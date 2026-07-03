@@ -3,9 +3,8 @@ import { getTranslations } from "next-intl/server";
 import { getServerSession } from "next-auth/next";
 import { Plus } from "lucide-react";
 import { authOptions } from "@/lib/auth";
-import { searchDonations } from "@/lib/donations";
 import { DonationFilterBar } from "@/components/DonationFilterBar";
-import { DonationTable } from "@/components/DonationTable";
+import { DonationListView } from "@/components/DonationListView";
 import { Button } from "@/components/ui/button";
 import type { SearchFilter, DonationStatus } from "@/lib/donations";
 
@@ -47,14 +46,6 @@ export default async function DonationsPage({
     page: params.page ? parseInt(params.page, 10) : 1,
   };
 
-  // Build a plain string map for DonationTable's pagination href builder
-  const filterMap: Record<string, string> = {};
-  if (params.name) filterMap.name = params.name;
-  if (rawStatus) filterMap.status = rawStatus;
-  if (params.from) filterMap.from = params.from;
-  if (params.to) filterMap.to = params.to;
-  if (params.receipt_no) filterMap.receipt_no = params.receipt_no;
-
   // ── Extract viewer ID from Keycloak access token (for row routing) ─────────
   // Needed to route Maker's own drafts to the edit form (UI-SPEC Screen 1 row rules).
   // We decode the JWT payload without a library — `sub` claim is the Keycloak UUID.
@@ -75,21 +66,10 @@ export default async function DonationsPage({
     // Token not available or malformed — proceed without viewer-based routing
   }
 
-  // ── Fetch donation list ────────────────────────────────────────────────────
-
-  let result: Awaited<ReturnType<typeof searchDonations>> | null = null;
-  let fetchError: string | null = null;
-  try {
-    result = await searchDonations(filter);
-  } catch (err) {
-    const e = err as { error?: { message?: string }; message?: string };
-    fetchError =
-      e?.error?.message ??
-      e?.message ??
-      t("errors.network");
-  }
-
   // ── Render ─────────────────────────────────────────────────────────────────
+  // D-R1: the list is fetched CLIENT-side through TanStack Query + the BFF route
+  // (DonationListView). The server no longer fetches here — this removes the old
+  // `result.donations` crash site (bug #5).
 
   return (
     <div className="flex flex-col gap-6">
@@ -120,27 +100,11 @@ export default async function DonationsPage({
       {/* Filter bar (Client Component) */}
       <DonationFilterBar currentFilter={filter} />
 
-      {/* Error state */}
-      {fetchError && (
-        <div
-          className="rounded-lg border border-red-200 bg-red-50 p-4 text-[14px] text-red-600"
-          role="alert"
-        >
-          {fetchError}
-        </div>
-      )}
-
-      {/* Donation table (Client Component — receives serialized data from server) */}
-      {result && (
-        <DonationTable
-          donations={result.donations}
-          total={result.total}
-          page={result.page}
-          perPage={result.per_page}
-          currentFilter={filterMap}
-          viewerId={viewerId}
-        />
-      )}
+      {/*
+       * List view (Client Component): TanStack Query drives the fetch through
+       * the same-origin BFF route; handles loading skeleton + error alert.
+       */}
+      <DonationListView filter={filter} viewerId={viewerId} />
     </div>
   );
 }
