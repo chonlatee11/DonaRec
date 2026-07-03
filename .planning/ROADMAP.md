@@ -73,7 +73,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Cancelling an issued receipt sets status to "ยกเลิก" and retains its number (no gap, never deleted), with the action audited.
   5. Donor details (name, tax/national ID, address, email) are stored with the ID encrypted at rest and masked everywhere except authorized, audited reveals; staff can search/filter records by name, date range, status, and receipt number.
   6. **[Integration gate — added 2026-07-02]** An end-to-end integration test drives the real HTTP path (router → RequireAuth → RequireRoles/ResolveAppUser → handler → service → DB) with a realistic Keycloak token, covering the critical Maker create/submit and Checker approve/return flows; AND the human UI walkthrough passes. (See Conventions → Integration-test gate.)
-**Plans**: 8 plans (criteria 1–5) + integration-gate remediation (criterion 6)
+**Plans**: 8 plans (criteria 1–5) + 5 remediation plans (criterion 6 — integration gate: TanStack migration + FE↔BE contract alignment)
 - [x] 03-01-PLAN.md — Data layer: migrations 000005 (donations) + 000007 (outbox) + sqlc queries + Wave 0 test scaffolds
 - [x] 03-02-PLAN.md — Frontend bootstrap: Next.js 15 + shadcn + next-intl + Keycloak bearer + app shell
 - [x] 03-03-PLAN.md — Maker draft slice (TDD): create/edit/submit + PII encrypt/mask + consent + state machine
@@ -82,6 +82,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 03-06-PLAN.md — Cancel / Void & Reissue + audited PII reveal + search (TDD)
 - [x] 03-07-PLAN.md — Frontend list/search + detail/review + SoD blocked state
 - [x] 03-08-PLAN.md — Frontend create/edit form + slip upload + consent + reveal/cancel dialogs
+- [ ] 03-09-PLAN.md — Backend list contract: {data:{items,total,page,per_page}} envelope + COUNT + creator-name join + E2E (TDD)
+- [ ] 03-10-PLAN.md — FE foundation + list slice: TanStack Query/Table + BFF proxy + apiFetch unwrap + list screen migrated
+- [ ] 03-11-PLAN.md — Backend detail contract: DonationDetailResponse + server-computed auth flags + review_history + E2E (TDD)
+- [ ] 03-12-PLAN.md — FE detail/review/PII-reveal slice: BFF routes + useQuery/useMutation + SoD DOM-removal + audited reveal
+- [ ] 03-13-PLAN.md — FE create/edit/slip + cancel/void-reissue slice: BFF request field-mapping + TanStack mutations + E2E create/cancel
 **UI hint**: yes
 
 > Note: the issue transaction enqueues an outbox job here, but the worker that consumes it (PDF + email) is built in Phase 4. Consent capture for Flow A donors is recorded here against the Phase 1 retention model (NFR-03).
@@ -146,7 +151,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
-| 3. Donation Lifecycle & Maker-Checker Issuance | 8/8 plans; integration gate OPEN | ⚠️ Reopened (integration gaps) | — (was 2026-07-01) |
+| 3. Donation Lifecycle & Maker-Checker Issuance | 8/8 shipped + 0/5 remediation | ⚠️ Reopened (integration gate) | — (was 2026-07-01) |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
