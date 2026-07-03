@@ -3,16 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Phase 3 REOPENED — integration gate not met (3 runtime-seam bugs found in human-verify)"
-last_updated: "2026-07-02T08:40:00.000Z"
-last_activity: 2026-07-02
+stopped_at: Completed 03-09-PLAN.md (D-R2 donation list pagination envelope)
+last_updated: "2026-07-03T05:57:33.347Z"
+last_activity: 2026-07-03
 progress:
   total_phases: 6
   completed_phases: 2
-  total_plans: 17
-  completed_plans: 15
+  total_plans: 22
+  completed_plans: 18
   percent: 33
-  note: "Phase 3 was Complete 2026-07-01 on unit-level 5/5; reopened 2026-07-02 — integration gate (criterion 6) OPEN"
 ---
 
 # Project State
@@ -26,10 +25,11 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 ## Current Position
 
-Phase: 03 (donation-lifecycle-maker-checker-issuance) — ⚠️ REOPENED (integration gate open)
+Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
+Plan: 2 of 13
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
-Status: Remediation in progress — see Blockers/Concerns for the 3 runtime-seam bugs.
-Last activity: 2026-07-02
+Status: Ready to execute
+Last activity: 2026-07-03
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -58,6 +58,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 02 P03 | 256 | 1 tasks | 2 files |
 | Phase 02-gap-less-receipt-numbering-core P04 | 502 | 2 tasks | 4 files |
 | Phase 03 P05 | 120 | 3 tasks | 7 files |
+| Phase 03 P09 | 35min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -78,6 +79,8 @@ Recent decisions affecting current work:
   - ⚠️ CORRECTION 2026-07-02: this decision encoded the RBAC AND-bug. `RequireRoles(...)` enforces AND (user must hold ALL listed roles), so `RequireRoles(Checker, Admin)` requires checker AND admin — a checker-only user is wrongly blocked. Intent was "checker OR admin". Same bug on donationGroup `RequireRoles(Maker,Checker,Admin)`. Fix: add `RequireAnyRole` (OR) and use it at both sites. (bug #3, OPEN)
 - [Phase 03] 2026-07-02: Identity model clarified — `claims.Subject` (KC sub) ≠ `users.id` (surrogate PK). All `REFERENCES users(id)` writes must resolve sub→users.id via `auth.ResolveAppUser` middleware; `audit_log.actor_id` intentionally keeps raw sub (no FK). (bug #1 fix, committed ef7ede6)
 - [Phase 03] 2026-07-02: FE↔BE auth requires a Keycloak Audience mapper putting `donnarec-backend` in token `aud`, and `donnarec-frontend` must be a confidential client (NextAuth server-side). (bug #2 fix, uncommitted)
+- [Phase 03]: GET /api/donations now returns the D-R2 pagination envelope {data:{items,total,page,per_page}} with a real COUNT (CountDonations mirrors SearchDonations' filter predicate) and creator display-name/UUID per row
+- [Phase 03]: donations.sql list filters use sqlc.narg(...) instead of bare @param for nullable params — fixes a hand-edited generated-code fragility (donations.sql.go pointer types were manually patched, violating DO NOT EDIT); sqlc.narg() makes the D-53 nil-skips-filter semantics regeneration-safe
 
 ### Pending Todos
 
@@ -111,6 +114,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-30T18:40:11.574Z
-Stopped at: Phase 3 UI-SPEC approved
+Last session: 2026-07-03T05:57:33.340Z
+Stopped at: Completed 03-09-PLAN.md (D-R2 donation list pagination envelope)
 Resume file: None

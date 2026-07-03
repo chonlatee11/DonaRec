@@ -82,7 +82,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 03-06-PLAN.md — Cancel / Void & Reissue + audited PII reveal + search (TDD)
 - [x] 03-07-PLAN.md — Frontend list/search + detail/review + SoD blocked state
 - [x] 03-08-PLAN.md — Frontend create/edit form + slip upload + consent + reveal/cancel dialogs
-- [ ] 03-09-PLAN.md — Backend list contract: {data:{items,total,page,per_page}} envelope + COUNT + creator-name join + E2E (TDD)
+- [x] 03-09-PLAN.md — Backend list contract: {data:{items,total,page,per_page}} envelope + COUNT + creator-name join + E2E (TDD)
 - [ ] 03-10-PLAN.md — FE foundation + list slice: TanStack Query/Table + BFF proxy + apiFetch unwrap + list screen migrated
 - [ ] 03-11-PLAN.md — Backend detail contract: DonationDetailResponse + server-computed auth flags + review_history + E2E (TDD)
 - [ ] 03-12-PLAN.md — FE detail/review/PII-reveal slice: BFF routes + useQuery/useMutation + SoD DOM-removal + audited reveal
@@ -151,7 +151,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
-| 3. Donation Lifecycle & Maker-Checker Issuance | 8/8 shipped + 0/5 remediation | ⚠️ Reopened (integration gate) | — (was 2026-07-01) |
+| 3. Donation Lifecycle & Maker-Checker Issuance | 9/13 | In Progress|  |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |

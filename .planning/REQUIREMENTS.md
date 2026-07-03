@@ -30,7 +30,7 @@
 - [ ] **FR-09**: ดู/แก้ไขข้อมูลรายการก่อนอนุมัติ พร้อมดูสลิปแนบ [M]
 - [x] **FR-11**: สถานะรายการชัดเจน: ร่าง → รอตรวจสอบ → อนุมัติ/ออกใบเสร็จแล้ว → ปฏิเสธ → ยกเลิก [M]
 - [ ] **FR-08**: แสดงคิวรายการ "รอตรวจสอบ" จากเว็บ (Flow B) [M]
-- [ ] **FR-10**: ค้นหา/กรองรายการ (ชื่อ, ช่วงวันที่, สถานะ, เลขที่ใบเสร็จ) [M]
+- [x] **FR-10**: ค้นหา/กรองรายการ (ชื่อ, ช่วงวันที่, สถานะ, เลขที่ใบเสร็จ) [M]
 
 ### Approval (ตรวจสอบและอนุมัติ — maker/checker)
 
@@ -139,7 +139,7 @@ Which phases cover which requirements.
 | FR-07 | Phase 3 | Pending |
 | FR-09 | Phase 3 | Pending |
 | FR-11 | Phase 3 | Complete |
-| FR-10 | Phase 3 | Pending |
+| FR-10 | Phase 3 | Complete |
 | FR-12 | Phase 3 | Complete |
 | FR-14 | Phase 3 | Complete |
 | FR-19 | Phase 3 | Pending |
