@@ -222,25 +222,49 @@ WHERE id = @id;
 --   pass NULL  → filter is skipped (no restriction applied)
 --   pass value → filter is applied
 -- Results exclude PII ciphertext columns for performance and least-privilege.
+-- LEFT JOINs users to expose the creator's display name (created_by_name) alongside
+-- the raw created_by UUID, so the UI can label rows without a second round-trip
+-- (D-R2 remediation — list envelope carries created_by/created_by_id).
 -- Pagination: caller passes @limit_n rows starting at @offset_n.
 SELECT
-    id,
-    status,
-    donor_name,
-    donated_at,
-    amount,
-    receipt_formatted,
-    created_at,
-    approved_at,
-    created_by,
-    edonation_keyed
-FROM donations
+    d.id,
+    d.status,
+    d.donor_name,
+    d.donated_at,
+    d.amount,
+    d.receipt_formatted,
+    d.created_at,
+    d.approved_at,
+    d.created_by,
+    d.edonation_keyed,
+    u.display_name AS created_by_name
+FROM donations d
+LEFT JOIN users u ON u.id = d.created_by
 WHERE
-    (@donor_name::TEXT         IS NULL OR donor_name       ILIKE '%' || @donor_name || '%')
-    AND (@status::donation_status IS NULL OR status        = @status)
-    AND (@from_date::DATE         IS NULL OR donated_at   >= @from_date)
-    AND (@to_date::DATE           IS NULL OR donated_at   <= @to_date)
-    AND (@receipt_no::TEXT        IS NULL OR receipt_formatted = @receipt_no)
-ORDER BY created_at DESC
+    (sqlc.narg('donor_name')::TEXT         IS NULL OR d.donor_name       ILIKE '%' || sqlc.narg('donor_name') || '%')
+    AND (sqlc.narg('status')::donation_status IS NULL OR d.status        = sqlc.narg('status'))
+    AND (sqlc.narg('from_date')::DATE         IS NULL OR d.donated_at   >= sqlc.narg('from_date'))
+    AND (sqlc.narg('to_date')::DATE           IS NULL OR d.donated_at   <= sqlc.narg('to_date'))
+    AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'))
+ORDER BY d.created_at DESC
 LIMIT  @limit_n
 OFFSET @offset_n;
+
+-- name: CountDonations :one
+-- Count donations matching the SAME filter predicate as SearchDonations (D-R2).
+-- Used to compute `total` for the pagination envelope — NEVER derived from len(items),
+-- since a page only contains up to @limit_n rows (T-09 mitigation: real COUNT).
+-- No LIMIT/OFFSET/ORDER BY — this is a full count over the filtered set.
+-- Uses sqlc.narg(...) (not bare @param) so sqlc emits nullable *string/*DonationStatus
+-- param fields — required for the "nil = skip this filter" semantics (D-53) to compile
+-- and behave correctly; a bare @param here would generate non-nullable string fields
+-- where an empty string ("") is NOT the same as SQL NULL and would silently break the
+-- IS NULL skip-filter guard.
+SELECT COUNT(*)
+FROM donations d
+WHERE
+    (sqlc.narg('donor_name')::TEXT         IS NULL OR d.donor_name       ILIKE '%' || sqlc.narg('donor_name') || '%')
+    AND (sqlc.narg('status')::donation_status IS NULL OR d.status        = sqlc.narg('status'))
+    AND (sqlc.narg('from_date')::DATE         IS NULL OR d.donated_at   >= sqlc.narg('from_date'))
+    AND (sqlc.narg('to_date')::DATE           IS NULL OR d.donated_at   <= sqlc.narg('to_date'))
+    AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'));

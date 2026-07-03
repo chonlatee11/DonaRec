@@ -97,6 +97,35 @@ type ListFilter struct {
 	Limit     int32
 }
 
+// DonationListItem is a single row in the paginated donation list response (FR-10, D-R2).
+//
+// Security rules (D-53, T-09-02):
+//   - No tax/national ID field of any kind — the list is PII-free by design.
+//   - CreatedBy is the creator's display name (for UI labelling); CreatedByID is the
+//     raw users.id UUID string (so the UI can route to "my drafts"). If the creator's
+//     user row is missing (LEFT JOIN NULL), CreatedBy falls back to "" while
+//     CreatedByID still carries the raw UUID from donations.created_by.
+type DonationListItem struct {
+	ID               string  `json:"id"`
+	Status           string  `json:"status"`
+	DonorName        string  `json:"donor_name"`
+	Amount           string  `json:"amount"`
+	DonatedAt        string  `json:"donated_at"`
+	ReceiptFormatted *string `json:"receipt_formatted,omitempty"`
+	CreatedBy        string  `json:"created_by"`
+	CreatedByID      string  `json:"created_by_id"`
+}
+
+// DonationListResult is the D-R2 pagination envelope payload for GET /api/donations.
+// The handler wraps this in the standard {"data": ...} envelope, i.e. the wire shape is
+// {"data": {"items": [...], "total": N, "page": P, "per_page": 20}} — never a bare array.
+type DonationListResult struct {
+	Items   []DonationListItem `json:"items"`
+	Total   int64              `json:"total"`
+	Page    int                `json:"page"`
+	PerPage int                `json:"per_page"`
+}
+
 // CancelDonationRequest is the JSON request body for Cancel (void) of an issued receipt (D-47, FR-19).
 // Reason is mandatory — empty or whitespace-only returns ErrMissingReason (422).
 // RDConfirmationReason is required when edonation_keyed=true (D-51, T-03-25).

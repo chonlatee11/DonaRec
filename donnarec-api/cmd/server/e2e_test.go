@@ -175,8 +175,10 @@ type dataEnvelope struct {
 	Data donation.DonationResponse `json:"data"`
 }
 
+// listEnvelope decodes the D-R2 pagination envelope
+// {"data": {"items": [...], "total": N, "page": P, "per_page": 20}} — NOT a bare array.
 type listEnvelope struct {
-	Data []donation.DonationResponse `json:"data"`
+	Data donation.DonationListResult `json:"data"`
 }
 
 func decodeDonation(t *testing.T, w *httptest.ResponseRecorder) donation.DonationResponse {
@@ -259,16 +261,27 @@ func TestE2E_MakerCheckerIssuancePipeline(t *testing.T) {
 		assert.NotEmpty(t, *issued.ReceiptFormatted,
 			"receipt number must be allocated in the issuance tx (gap-less counter)")
 
-		// --- Step 4: GET /api/donations?status=issued (checker) → 200, contains it ---
+		// --- Step 4: GET /api/donations?status=issued (checker) → 200, D-R2 envelope ---
+		// bug #5 regression guard: the response body MUST be the nested pagination
+		// envelope {"data":{"items":[...],"total":N,"page":P,"per_page":20}}, never a
+		// bare {"data":[...]} array (that shape crashes DonationTable on undefined.length).
 		w = h.do(t, http.MethodGet, "/api/donations?status=issued", checkerToken, nil)
 		require.Equal(t, http.StatusOK, w.Code, "list body: %s", w.Body.String())
 		var list listEnvelope
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list))
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &list), "response body: %s", w.Body.String())
+		assert.Equal(t, 1, list.Data.Page, "default page must be 1")
+		assert.Equal(t, 20, list.Data.PerPage, "per_page must be fixed at 20 (D-R2)")
+		assert.GreaterOrEqual(t, list.Data.Total, int64(1),
+			"total must be a real COUNT over the status=issued filter, not len(items)")
 		found := false
-		for _, d := range list.Data {
+		for _, d := range list.Data.Items {
 			if d.ID == donationID {
 				found = true
 				assert.Equal(t, "issued", d.Status)
+				assert.Equal(t, makerID.String(), d.CreatedByID,
+					"created_by_id must be the maker's users.id UUID so the UI can route own-drafts")
+				assert.Equal(t, "Maker E2E", d.CreatedBy,
+					"created_by must be the creator's display name (users join), not a raw UUID")
 			}
 		}
 		assert.True(t, found, "issued donation %s must appear in status=issued list", donationID)

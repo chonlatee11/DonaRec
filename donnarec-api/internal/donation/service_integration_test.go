@@ -1341,22 +1341,27 @@ func TestSearchDonations(t *testing.T) {
 		"ประยุทธ เก่งมาก", "3333333333333", "2026-03-20", 3000.00)
 	receiptC := *dC.ReceiptFormatted
 
-	// --- No filters: returns all 3 donations ---
-	all, err := svc.Search(ctx, donation.ListFilter{Limit: 20, Offset: 0}, checkerClaims)
+	// --- No filters: returns all 3 donations, total is a real COUNT (not len(items)) ---
+	all, allTotal, err := svc.Search(ctx, donation.ListFilter{Limit: 20, Offset: 0}, checkerClaims)
 	require.NoError(t, err, "Search with no filters must succeed")
 	assert.GreaterOrEqual(t, len(all), 3,
 		"no-filter search must return at least the 3 donations we created")
+	assert.Equal(t, int64(len(all)), allTotal,
+		"total must equal the real COUNT for a single-page result (D-R2)")
 
 	// --- Filter by donor_name ILIKE "สมชาย" → only donation A ---
 	name := "สมชาย"
-	byName, err := svc.Search(ctx, donation.ListFilter{DonorName: &name, Limit: 20}, checkerClaims)
+	byName, byNameTotal, err := svc.Search(ctx, donation.ListFilter{DonorName: &name, Limit: 20}, checkerClaims)
 	require.NoError(t, err, "Search by donor_name must succeed")
 	require.Len(t, byName, 1, "exactly 1 donation must match 'สมชาย' ILIKE filter")
 	assert.Equal(t, dA.ID, byName[0].ID, "donor_name filter must return donation A")
+	assert.Equal(t, dA.CreatedBy, byName[0].CreatedByID, "created_by_id must be the raw creator UUID")
+	assert.Equal(t, "Maker Search", byName[0].CreatedBy, "created_by must be the creator's display name (join)")
+	assert.Equal(t, int64(1), byNameTotal, "CountDonations total must mirror the donor_name filter")
 
-	// --- Filter by status=draft → only donation A (sมชาย is still draft) ---
+	// --- Filter by status=draft → only donation A (สมชาย is still draft) ---
 	statusDraft := "draft"
-	byStatus, err := svc.Search(ctx, donation.ListFilter{Status: &statusDraft, Limit: 20}, checkerClaims)
+	byStatus, byStatusTotal, err := svc.Search(ctx, donation.ListFilter{Status: &statusDraft, Limit: 20}, checkerClaims)
 	require.NoError(t, err, "Search by status must succeed")
 	ids := make([]string, len(byStatus))
 	for i, r := range byStatus {
@@ -1366,21 +1371,32 @@ func TestSearchDonations(t *testing.T) {
 	for _, r := range byStatus {
 		assert.Equal(t, "draft", r.Status, "all results of status=draft filter must have status=draft")
 	}
+	assert.Equal(t, int64(len(byStatus)), byStatusTotal, "total must mirror the status=draft filter count")
 
 	// --- Filter by from_date / to_date ---
 	// from=2026-02-01, to=2026-02-28 → only "สมหญิง" (donated 2026-02-15)
 	from := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC)
-	byDate, err := svc.Search(ctx, donation.ListFilter{FromDate: &from, ToDate: &to, Limit: 20}, checkerClaims)
+	byDate, byDateTotal, err := svc.Search(ctx, donation.ListFilter{FromDate: &from, ToDate: &to, Limit: 20}, checkerClaims)
 	require.NoError(t, err, "Search by date range must succeed")
 	require.Len(t, byDate, 1, "exactly 1 donation must fall in 2026-02 range")
 	assert.Equal(t, dBSubmit.ID, byDate[0].ID, "date-range filter must return donation B (สมหญิง)")
+	assert.Equal(t, int64(1), byDateTotal, "total must mirror the date-range filter count")
 
 	// --- Filter by receipt_no → only issued donation C ---
-	byReceipt, err := svc.Search(ctx, donation.ListFilter{ReceiptNo: &receiptC, Limit: 20}, checkerClaims)
+	byReceipt, byReceiptTotal, err := svc.Search(ctx, donation.ListFilter{ReceiptNo: &receiptC, Limit: 20}, checkerClaims)
 	require.NoError(t, err, "Search by receipt_no must succeed")
 	require.Len(t, byReceipt, 1, "exactly 1 donation must match the receipt number filter")
 	assert.Equal(t, dC.ID, byReceipt[0].ID, "receipt_no filter must return donation C")
+	assert.Equal(t, int64(1), byReceiptTotal, "total must mirror the receipt_no filter count")
+
+	// --- total must be a real COUNT, not len(items): request a page smaller than the
+	// result set and assert total still reflects the full filtered count (D-R2, T-09) ---
+	firstPage, firstPageTotal, err := svc.Search(ctx, donation.ListFilter{Limit: 1, Offset: 0}, checkerClaims)
+	require.NoError(t, err, "Search with a 1-row page must succeed")
+	require.Len(t, firstPage, 1, "page size must be honoured")
+	assert.GreaterOrEqual(t, firstPageTotal, int64(3),
+		"total on a partial page must be the full filtered COUNT, not len(items)==1")
 }
 
 // TestEDonationKeyedGuard_Integration verifies the edonation_keyed=true guard (D-51):
