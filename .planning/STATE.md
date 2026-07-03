@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-09-PLAN.md (D-R2 donation list pagination envelope)
-last_updated: "2026-07-03T05:57:33.347Z"
+stopped_at: Completed 03-11-PLAN.md (donation detail-screen contract — DonationDetailResponse + server-computed auth flags)
+last_updated: "2026-07-03T06:22:16.360Z"
 last_activity: 2026-07-03
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 22
-  completed_plans: 18
+  completed_plans: 19
   percent: 33
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
-Plan: 2 of 13
+Plan: 3 of 13
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
 Status: Ready to execute
 Last activity: 2026-07-03
@@ -59,6 +59,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 02-gap-less-receipt-numbering-core P04 | 502 | 2 tasks | 4 files |
 | Phase 03 P05 | 120 | 3 tasks | 7 files |
 | Phase 03 P09 | 35min | 3 tasks | 7 files |
+| Phase 03 P11 | 30min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -81,6 +82,8 @@ Recent decisions affecting current work:
 - [Phase 03] 2026-07-02: FE↔BE auth requires a Keycloak Audience mapper putting `donnarec-backend` in token `aud`, and `donnarec-frontend` must be a confidential client (NextAuth server-side). (bug #2 fix, uncommitted)
 - [Phase 03]: GET /api/donations now returns the D-R2 pagination envelope {data:{items,total,page,per_page}} with a real COUNT (CountDonations mirrors SearchDonations' filter predicate) and creator display-name/UUID per row
 - [Phase 03]: donations.sql list filters use sqlc.narg(...) instead of bare @param for nullable params — fixes a hand-edited generated-code fragility (donations.sql.go pointer types were manually patched, violating DO NOT EDIT); sqlc.narg() makes the D-53 nil-skips-filter semantics regeneration-safe
+- [Phase 03]: DonationDetailResponse (D-R3): GetByID + all 8 mutations now share one buildDetailResponse builder returning national_id_masked/address/email/note/created_by(name)+created_by_id(UUID)/review_history/replaces+replaced_by({id,receipt_formatted}) plus server-computed viewer_is_creator/can_approve/can_return/can_reject/can_reveal_pii (T-03-31); viewer_is_creator always resolves claims.Subject to users.id via GetUserByKeycloakSubject, never compares claims.Subject directly (T-11-03)
+- [Phase 03]: review_history is sourced from audit_log (immutable, full return/reject history) via a new GetDonationReviewHistory sqlc query, not donations.review_reason which only holds the latest review action
 
 ### Pending Todos
 
@@ -114,6 +117,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T05:57:33.340Z
-Stopped at: Completed 03-09-PLAN.md (D-R2 donation list pagination envelope)
+Last session: 2026-07-03T06:22:16.353Z
+Stopped at: Completed 03-11-PLAN.md (donation detail-screen contract — DonationDetailResponse + server-computed auth flags)
 Resume file: None
