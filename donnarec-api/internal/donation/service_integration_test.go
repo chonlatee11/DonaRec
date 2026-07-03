@@ -64,7 +64,7 @@ func createAndSubmit(
 	makerID pgtype.UUID,
 	donorName, taxID, date string,
 	amount float64,
-) *donation.DonationResponse {
+) *donation.DonationDetailResponse {
 	t.Helper()
 	d, err := svc.Create(ctx, donation.CreateDonationRequest{
 		DonorName:  donorName,
@@ -795,7 +795,7 @@ func createAndIssue(
 	makerID, checkerID pgtype.UUID,
 	donorName, taxID, date string,
 	amount float64,
-) *donation.DonationResponse {
+) *donation.DonationDetailResponse {
 	t.Helper()
 	submitted := createAndSubmit(t, ctx, svc, makerClaims, makerID, donorName, taxID, date, amount)
 	issued, err := svc.Approve(ctx, submitted.ID, checkerID, checkerClaims)
@@ -1094,10 +1094,10 @@ func TestPII_MaskDefault(t *testing.T) {
 	got, err := svc.GetByID(ctx, created.ID, claims)
 	require.NoError(t, err)
 
-	assert.Equal(t, expectedMask, got.DonorTaxIDMasked,
+	assert.Equal(t, expectedMask, got.NationalIDMasked,
 		"GetByID must return masked tax ID (last-4 reveal) — never plaintext (T-03-09)")
-	assert.NotEqual(t, plainTaxID, got.DonorTaxIDMasked,
-		"DonorTaxIDMasked must not equal the plaintext tax ID")
+	assert.NotEqual(t, plainTaxID, got.NationalIDMasked,
+		"NationalIDMasked must not equal the plaintext tax ID")
 }
 
 // TestVoidAndReissue verifies D-50 void & reissue flow (FR-19):
@@ -1172,7 +1172,7 @@ func TestVoidAndReissue(t *testing.T) {
 	// --- replaces link: new.replaces = original.ID ---
 	require.NotNil(t, replacement.Replaces,
 		"replacement.Replaces must be set to original ID (D-50)")
-	assert.Equal(t, original.ID, *replacement.Replaces,
+	assert.Equal(t, original.ID, replacement.Replaces.ID,
 		"replacement.Replaces must point to the original donation ID")
 
 	// --- replaced_by link on original: original.replaced_by = replacement.ID ---
@@ -1355,7 +1355,7 @@ func TestSearchDonations(t *testing.T) {
 	require.NoError(t, err, "Search by donor_name must succeed")
 	require.Len(t, byName, 1, "exactly 1 donation must match 'สมชาย' ILIKE filter")
 	assert.Equal(t, dA.ID, byName[0].ID, "donor_name filter must return donation A")
-	assert.Equal(t, dA.CreatedBy, byName[0].CreatedByID, "created_by_id must be the raw creator UUID")
+	assert.Equal(t, dA.CreatedByID, byName[0].CreatedByID, "created_by_id must be the raw creator UUID")
 	assert.Equal(t, "Maker Search", byName[0].CreatedBy, "created_by must be the creator's display name (join)")
 	assert.Equal(t, int64(1), byNameTotal, "CountDonations total must mirror the donor_name filter")
 
@@ -1533,9 +1533,9 @@ func TestCreateDonation(t *testing.T) {
 	assert.NotEmpty(t, resp.ID, "donation ID must be a non-empty UUID")
 	assert.Equal(t, "draft", resp.Status, "new donation must start in draft status")
 	assert.Equal(t, req.DonorName, resp.DonorName, "donor name must be set")
-	assert.NotEmpty(t, resp.DonorTaxIDMasked, "masked tax ID must be set")
-	assert.Equal(t, req.DonorAddress, resp.DonorAddress, "donor address must be set")
-	assert.Equal(t, userRow.ID.String(), resp.CreatedBy, "created_by must be set to the maker's user ID")
+	assert.NotEmpty(t, resp.NationalIDMasked, "masked tax ID must be set")
+	assert.Equal(t, req.DonorAddress, resp.Address, "donor address must be set")
+	assert.Equal(t, userRow.ID.String(), resp.CreatedByID, "created_by_id must be set to the maker's user ID")
 
 	// Verify the record exists in the database.
 	var count int

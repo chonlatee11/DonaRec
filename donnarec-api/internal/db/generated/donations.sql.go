@@ -264,6 +264,102 @@ func (q *Queries) GetDonationByID(ctx context.Context, id pgtype.UUID) (Donation
 	return i, err
 }
 
+const getDonationReviewHistory = `-- name: GetDonationReviewHistory :many
+SELECT
+    id,
+    action,
+    (after_json ->> 'review_reason')::TEXT AS reason,
+    actor_email AS actor_name,
+    created_at AS acted_at
+FROM audit_log
+WHERE action IN ('donation.return', 'donation.reject')
+  AND resource IN (
+        '/api/donations/' || $1::text || '/return',
+        '/api/donations/' || $1::text || '/reject'
+      )
+ORDER BY created_at ASC
+`
+
+type GetDonationReviewHistoryRow struct {
+	ID        int64              `db:"id" json:"id"`
+	Action    string             `db:"action" json:"action"`
+	Reason    string             `db:"reason" json:"reason"`
+	ActorName string             `db:"actor_name" json:"actor_name"`
+	ActedAt   pgtype.Timestamptz `db:"acted_at" json:"acted_at"`
+}
+
+// Returns the ordered return/reject review history for one donation, sourced from
+// the immutable audit_log rather than donations.review_reason (which only holds the
+// LATEST review action — a donation may be returned more than once before being
+// resubmitted, and the detail screen needs the full history, FR-12/D-R3).
+// resource embeds the donation id as written by Return/Reject's AppendAuditEntryTx
+// call (see internal/donation/service.go): '/api/donations/<id>/return' or '/reject'.
+// reason is extracted from the JSONB after_json snapshot (->> 'review_reason').
+func (q *Queries) GetDonationReviewHistory(ctx context.Context, donationID string) ([]GetDonationReviewHistoryRow, error) {
+	rows, err := q.db.Query(ctx, getDonationReviewHistory, donationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDonationReviewHistoryRow
+	for rows.Next() {
+		var i GetDonationReviewHistoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Action,
+			&i.Reason,
+			&i.ActorName,
+			&i.ActedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getReceiptRefByID = `-- name: GetReceiptRefByID :one
+SELECT id, receipt_formatted
+FROM donations
+WHERE id = $1
+`
+
+type GetReceiptRefByIDRow struct {
+	ID               pgtype.UUID `db:"id" json:"id"`
+	ReceiptFormatted *string     `db:"receipt_formatted" json:"receipt_formatted"`
+}
+
+// Returns the {id, receipt_formatted} pair for a donation — used to expand the
+// replaces/replaced_by self-FK pointers (D-50) into nested objects for the detail
+// response (D-R3 detail contract).
+func (q *Queries) GetReceiptRefByID(ctx context.Context, id pgtype.UUID) (GetReceiptRefByIDRow, error) {
+	row := q.db.QueryRow(ctx, getReceiptRefByID, id)
+	var i GetReceiptRefByIDRow
+	err := row.Scan(&i.ID, &i.ReceiptFormatted)
+	return i, err
+}
+
+const getUserDisplayName = `-- name: GetUserDisplayName :one
+SELECT display_name
+FROM users
+WHERE id = $1
+`
+
+// Returns a user's display_name by users.id — used to enrich the donation detail
+// response's created_by field with a human-readable name (D-R3 detail contract).
+// No is_active filter: a donation's creator display name must still resolve even if
+// the user has since been deactivated (mirrors the SearchDonations creator LEFT JOIN,
+// which also does not filter on is_active).
+func (q *Queries) GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getUserDisplayName, id)
+	var display_name string
+	err := row.Scan(&display_name)
+	return display_name, err
+}
+
 const issueDonation = `-- name: IssueDonation :exec
 UPDATE donations
 SET

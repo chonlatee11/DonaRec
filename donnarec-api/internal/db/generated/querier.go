@@ -59,6 +59,14 @@ type Querier interface {
 	// Full read of a donation row including PII ciphertext columns.
 	// PII decrypt + masking is done at service layer (never in SQL).
 	GetDonationByID(ctx context.Context, id pgtype.UUID) (Donation, error)
+	// Returns the ordered return/reject review history for one donation, sourced from
+	// the immutable audit_log rather than donations.review_reason (which only holds the
+	// LATEST review action — a donation may be returned more than once before being
+	// resubmitted, and the detail screen needs the full history, FR-12/D-R3).
+	// resource embeds the donation id as written by Return/Reject's AppendAuditEntryTx
+	// call (see internal/donation/service.go): '/api/donations/<id>/return' or '/reject'.
+	// reason is extracted from the JSONB after_json snapshot (->> 'review_reason').
+	GetDonationReviewHistory(ctx context.Context, donationID string) ([]GetDonationReviewHistoryRow, error)
 	// audit.sql — sqlc queries for the audit_log table
 	// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
 	// Parameterized queries only — no string concatenation (T-1-tamper-01).
@@ -77,8 +85,18 @@ type Querier interface {
 	// Reading inside the tx ensures the allocator sees config consistent with its own snapshot;
 	// the formatted snapshot is frozen in the ledger at this moment (D-42).
 	GetReceiptNumberConfig(ctx context.Context) (GetReceiptNumberConfigRow, error)
+	// Returns the {id, receipt_formatted} pair for a donation — used to expand the
+	// replaces/replaced_by self-FK pointers (D-50) into nested objects for the detail
+	// response (D-R3 detail contract).
+	GetReceiptRefByID(ctx context.Context, id pgtype.UUID) (GetReceiptRefByIDRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserByKeycloakSubject(ctx context.Context, keycloakSubject string) (User, error)
+	// Returns a user's display_name by users.id — used to enrich the donation detail
+	// response's created_by field with a human-readable name (D-R3 detail contract).
+	// No is_active filter: a donation's creator display name must still resolve even if
+	// the user has since been deactivated (mirrors the SearchDonations creator LEFT JOIN,
+	// which also does not filter on is_active).
+	GetUserDisplayName(ctx context.Context, id pgtype.UUID) (string, error)
 	// Increment last_running_no by 1 and return the new value.
 	// MUST be called only while holding the FOR UPDATE lock from LockCounterForUpdate.
 	// updated_at is refreshed here so the counter row has an accurate last-modified timestamp.

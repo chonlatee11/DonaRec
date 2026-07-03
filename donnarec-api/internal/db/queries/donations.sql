@@ -268,3 +268,43 @@ WHERE
     AND (sqlc.narg('from_date')::DATE         IS NULL OR d.donated_at   >= sqlc.narg('from_date'))
     AND (sqlc.narg('to_date')::DATE           IS NULL OR d.donated_at   <= sqlc.narg('to_date'))
     AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'));
+
+-- name: GetUserDisplayName :one
+-- Returns a user's display_name by users.id — used to enrich the donation detail
+-- response's created_by field with a human-readable name (D-R3 detail contract).
+-- No is_active filter: a donation's creator display name must still resolve even if
+-- the user has since been deactivated (mirrors the SearchDonations creator LEFT JOIN,
+-- which also does not filter on is_active).
+SELECT display_name
+FROM users
+WHERE id = @id;
+
+-- name: GetReceiptRefByID :one
+-- Returns the {id, receipt_formatted} pair for a donation — used to expand the
+-- replaces/replaced_by self-FK pointers (D-50) into nested objects for the detail
+-- response (D-R3 detail contract).
+SELECT id, receipt_formatted
+FROM donations
+WHERE id = @id;
+
+-- name: GetDonationReviewHistory :many
+-- Returns the ordered return/reject review history for one donation, sourced from
+-- the immutable audit_log rather than donations.review_reason (which only holds the
+-- LATEST review action — a donation may be returned more than once before being
+-- resubmitted, and the detail screen needs the full history, FR-12/D-R3).
+-- resource embeds the donation id as written by Return/Reject's AppendAuditEntryTx
+-- call (see internal/donation/service.go): '/api/donations/<id>/return' or '/reject'.
+-- reason is extracted from the JSONB after_json snapshot (->> 'review_reason').
+SELECT
+    id,
+    action,
+    (after_json ->> 'review_reason')::TEXT AS reason,
+    actor_email AS actor_name,
+    created_at AS acted_at
+FROM audit_log
+WHERE action IN ('donation.return', 'donation.reject')
+  AND resource IN (
+        '/api/donations/' || @donation_id::text || '/return',
+        '/api/donations/' || @donation_id::text || '/reject'
+      )
+ORDER BY created_at ASC;
