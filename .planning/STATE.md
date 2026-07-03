@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 03-11-PLAN.md (donation detail-screen contract — DonationDetailResponse + server-computed auth flags)
-last_updated: "2026-07-03T06:22:16.360Z"
+last_updated: "2026-07-03T06:46:13.827Z"
 last_activity: 2026-07-03
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 22
-  completed_plans: 19
+  completed_plans: 20
   percent: 33
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
-Plan: 3 of 13
+Plan: 4 of 13
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
 Status: Ready to execute
 Last activity: 2026-07-03
@@ -60,6 +60,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 03 P05 | 120 | 3 tasks | 7 files |
 | Phase 03 P09 | 35min | 3 tasks | 7 files |
 | Phase 03 P11 | 30min | 3 tasks | 7 files |
+| Phase 03 P10 | 18min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,8 @@ Recent decisions affecting current work:
 - [Phase 03]: donations.sql list filters use sqlc.narg(...) instead of bare @param for nullable params — fixes a hand-edited generated-code fragility (donations.sql.go pointer types were manually patched, violating DO NOT EDIT); sqlc.narg() makes the D-53 nil-skips-filter semantics regeneration-safe
 - [Phase 03]: DonationDetailResponse (D-R3): GetByID + all 8 mutations now share one buildDetailResponse builder returning national_id_masked/address/email/note/created_by(name)+created_by_id(UUID)/review_history/replaces+replaced_by({id,receipt_formatted}) plus server-computed viewer_is_creator/can_approve/can_return/can_reject/can_reveal_pii (T-03-31); viewer_is_creator always resolves claims.Subject to users.id via GetUserByKeycloakSubject, never compares claims.Subject directly (T-11-03)
 - [Phase 03]: review_history is sourced from audit_log (immutable, full return/reject history) via a new GetDonationReviewHistory sqlc query, not donations.review_reason which only holds the latest review action
+- [Phase ?]: [Phase 03] 03-10: BFF proxy pattern (D-R1) - app/api/bff Route Handlers + lib/bff.ts bffForward obtain the Keycloak token via getServerSession and forward a Bearer server-side; access token never reaches the browser. TanStack Query calls the same-origin BFF route only.
+- [Phase ?]: [Phase 03] 03-10: apiFetch unwraps the data envelope (D-R2); DonationListResponse key donations to items; DonationSummary.amount is a numeric string (parseFloat at render). Root fix for bug #5 (undefined.length on result.donations). Donation list screen migrated to TanStack Query + TanStack Table.
 
 ### Pending Todos
 
@@ -117,6 +120,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T06:22:16.353Z
+Last session: 2026-07-03T06:45:56.131Z
 Stopped at: Completed 03-11-PLAN.md (donation detail-screen contract — DonationDetailResponse + server-computed auth flags)
 Resume file: None
