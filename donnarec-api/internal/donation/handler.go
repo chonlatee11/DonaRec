@@ -534,13 +534,15 @@ func (h *DonationHandler) List(c *gin.Context) {
 	if receiptNo := c.Query("receipt_no"); receiptNo != "" {
 		filter.ReceiptNo = &receiptNo
 	}
+	page := int32(1)
 	if pageStr := c.Query("page"); pageStr != "" {
-		if page := parsePositiveInt32(pageStr); page > 0 {
+		if p := parsePositiveInt32(pageStr); p > 0 {
+			page = p
 			filter.Offset = (page - 1) * filter.Limit
 		}
 	}
 
-	resp, err := h.svc.Search(c.Request.Context(), filter, claims)
+	items, total, err := h.svc.Search(c.Request.Context(), filter, claims)
 	if err != nil {
 		// Pattern C: log operation only — no PII
 		h.logger.Error("failed to search donations",
@@ -551,8 +553,15 @@ func (h *DonationHandler) List(c *gin.Context) {
 		return
 	}
 
-	c.Set("audit_after", resp)
-	c.JSON(http.StatusOK, gin.H{"data": resp})
+	c.Set("audit_after", items)
+	// D-R2 pagination envelope: {"data":{"items":[...],"total":N,"page":P,"per_page":20}}.
+	// NEVER a bare array (bug #5) — the frontend crashes on `undefined.length` otherwise.
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"items":    items,
+		"total":    total,
+		"page":     int(page),
+		"per_page": int(filter.Limit),
+	}})
 }
 
 // Cancel voids an issued receipt (FR-19, D-47).

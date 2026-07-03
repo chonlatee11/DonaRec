@@ -1180,13 +1180,16 @@ func (s *DonationService) RevealPII(ctx context.Context, id string, claims auth.
 	}, nil
 }
 
-// Search returns a paginated, PII-free list of donations filtered by optional criteria (FR-10, D-53).
+// Search returns a paginated, PII-free list of donations filtered by optional criteria
+// (FR-10, D-53, D-R2). total is a real COUNT over the SAME filter predicate as the page
+// query (via CountDonations) — it is NEVER derived from len(items), since a page only
+// contains up to filter.Limit rows (T-09-03 mitigation).
 //
 // Supported filters: donor_name (ILIKE), status, from_date, to_date, receipt_no.
 // Tax ID is intentionally excluded as a filter parameter (D-53, T-03-29).
-// Results use SearchDonations which excludes PII ciphertext columns (least-privilege).
-// DonorTaxIDMasked in each result uses the standard placeholder since DEK is not loaded.
-func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims auth.KeycloakClaims) ([]DonationResponse, error) {
+// Results use SearchDonations which excludes PII ciphertext columns (least-privilege);
+// each row is enriched with the creator's display name via a LEFT JOIN to users.
+func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims auth.KeycloakClaims) ([]DonationListItem, int64, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 20
@@ -1196,54 +1199,73 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 		offset = 0
 	}
 
-	// Build nullable search params — nil means "skip this filter" (D-53, Pattern F).
-	params := db.SearchDonationsParams{
-		LimitN:  limit,
-		OffsetN: offset,
-	}
+	// Build nullable filter values shared by SearchDonations and CountDonations — nil
+	// means "skip this filter" (D-53, Pattern F). Both queries MUST see identical filter
+	// values so total always matches the same predicate as the page (D-R2).
+	var donorName *string
+	var status *db.DonationStatus
+	var fromDate, toDate pgtype.Date
+	var receiptNo *string
 
 	if filter.DonorName != nil {
-		params.DonorName = filter.DonorName
+		donorName = filter.DonorName
 	}
 	if filter.Status != nil {
-		s := db.DonationStatus(*filter.Status)
-		params.Status = &s
+		st := db.DonationStatus(*filter.Status)
+		status = &st
 	}
 	if filter.FromDate != nil {
-		params.FromDate = pgtype.Date{Time: *filter.FromDate, Valid: true}
+		fromDate = pgtype.Date{Time: *filter.FromDate, Valid: true}
 	}
 	if filter.ToDate != nil {
-		params.ToDate = pgtype.Date{Time: *filter.ToDate, Valid: true}
+		toDate = pgtype.Date{Time: *filter.ToDate, Valid: true}
 	}
 	if filter.ReceiptNo != nil {
-		params.ReceiptNo = filter.ReceiptNo
+		receiptNo = filter.ReceiptNo
 	}
 
-	rows, queryErr := s.queries.SearchDonations(ctx, params)
+	rows, queryErr := s.queries.SearchDonations(ctx, db.SearchDonationsParams{
+		LimitN:    limit,
+		OffsetN:   offset,
+		DonorName: donorName,
+		Status:    status,
+		FromDate:  fromDate,
+		ToDate:    toDate,
+		ReceiptNo: receiptNo,
+	})
 	if queryErr != nil {
-		return nil, fmt.Errorf("search donations: %w", queryErr)
+		return nil, 0, fmt.Errorf("search donations: %w", queryErr)
 	}
 
-	result := make([]DonationResponse, 0, len(rows))
+	total, countErr := s.queries.CountDonations(ctx, db.CountDonationsParams{
+		DonorName: donorName,
+		Status:    status,
+		FromDate:  fromDate,
+		ToDate:    toDate,
+		ReceiptNo: receiptNo,
+	})
+	if countErr != nil {
+		return nil, 0, fmt.Errorf("count donations: %w", countErr)
+	}
+
+	result := make([]DonationListItem, 0, len(rows))
 	for _, row := range rows {
-		resp := DonationResponse{
+		createdByName := ""
+		if row.CreatedByName != nil {
+			createdByName = *row.CreatedByName
+		}
+		result = append(result, DonationListItem{
 			ID:               row.ID.String(),
 			Status:           string(row.Status),
 			DonorName:        row.DonorName,
-			DonorTaxIDMasked: pii.MaskNationalID(""), // no PII in search results (D-53)
 			Amount:           numericStr(row.Amount),
 			DonatedAt:        dateStr(row.DonatedAt),
 			ReceiptFormatted: row.ReceiptFormatted,
-			CreatedBy:        row.CreatedBy.String(),
-			CreatedAt:        row.CreatedAt.Time,
-		}
-		if row.ApprovedAt.Valid {
-			t := row.ApprovedAt.Time
-			resp.ApprovedAt = &t
-		}
-		result = append(result, resp)
+			CreatedBy:        createdByName,
+			CreatedByID:      row.CreatedBy.String(),
+		})
 	}
-	return result, nil
+	return result, total, nil
 }
 
 // --- Private helpers ---
