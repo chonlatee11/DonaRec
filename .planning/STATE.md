@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-11-PLAN.md (donation detail-screen contract — DonationDetailResponse + server-computed auth flags)
-last_updated: "2026-07-03T06:46:13.827Z"
+stopped_at: Completed 03-12-PLAN.md (frontend detail/review slice — BFF routes + client DonationDetailView, TanStack Query/Mutation)
+last_updated: "2026-07-03T07:02:31.958Z"
 last_activity: 2026-07-03
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 22
-  completed_plans: 20
+  completed_plans: 21
   percent: 33
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
 Status: Ready to execute
 Last activity: 2026-07-03
@@ -61,6 +61,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 03 P09 | 35min | 3 tasks | 7 files |
 | Phase 03 P11 | 30min | 3 tasks | 7 files |
 | Phase 03 P10 | 18min | 2 tasks | 13 files |
+| Phase 03 P12 | 35min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -87,6 +88,7 @@ Recent decisions affecting current work:
 - [Phase 03]: review_history is sourced from audit_log (immutable, full return/reject history) via a new GetDonationReviewHistory sqlc query, not donations.review_reason which only holds the latest review action
 - [Phase ?]: [Phase 03] 03-10: BFF proxy pattern (D-R1) - app/api/bff Route Handlers + lib/bff.ts bffForward obtain the Keycloak token via getServerSession and forward a Bearer server-side; access token never reaches the browser. TanStack Query calls the same-origin BFF route only.
 - [Phase ?]: [Phase 03] 03-10: apiFetch unwraps the data envelope (D-R2); DonationListResponse key donations to items; DonationSummary.amount is a numeric string (parseFloat at render). Root fix for bug #5 (undefined.length on result.donations). Donation list screen migrated to TanStack Query + TanStack Table.
+- [Phase 03]: 03-12: BFF Route Handlers for donation detail (composes slip_url via a second server-side /:id/slip call)/pii (donor_tax_id->national_id mapping)/approve/return/reject; client DonationDetailView (useQuery+useMutation) drives Screen 3+4 — ReviewActionPanel/MaskedIdField needed zero changes since their existing Promise<{error}|null> callback contracts already matched the new mutation wrappers. Cancel/reissue deliberately deferred to 03-13.
 
 ### Pending Todos
 
@@ -120,6 +122,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T06:45:56.131Z
-Stopped at: Completed 03-11-PLAN.md (donation detail-screen contract — DonationDetailResponse + server-computed auth flags)
+Last session: 2026-07-03T07:02:31.950Z
+Stopped at: Completed 03-12-PLAN.md (frontend detail/review slice — BFF routes + client DonationDetailView, TanStack Query/Mutation)
 Resume file: None
