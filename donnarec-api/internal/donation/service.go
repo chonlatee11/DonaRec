@@ -115,7 +115,7 @@ func canTransition(from db.DonationStatus, action string) bool {
 // T-03-08: EncryptField is called before any DB write — plaintext never reaches Postgres.
 // D-49: consent fields (consent_given/at/text_version/purpose) are captured per-snapshot.
 // Pattern C: logs only donation_id + created_by UUID — no PII fields ever logged.
-func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	// D-44: mandatory tax ID check — fail fast before any DB call.
 	if req.DonorTaxID == "" {
 		return nil, ErrMissingTaxID
@@ -169,11 +169,10 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 		consentPurpose = &v
 	}
 
-	var row db.CreateDonationRow
+	var fullRow db.Donation
 	err = dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		qtx := s.queries.WithTx(tx)
-		var txErr error
-		row, txErr = qtx.CreateDonation(ctx, db.CreateDonationParams{
+		row, txErr := qtx.CreateDonation(ctx, db.CreateDonationParams{
 			CreatedBy:          actingUserID,
 			DonorName:          req.DonorName,
 			DonorAddress:       req.DonorAddress,
@@ -190,7 +189,14 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
 		})
-		return txErr
+		if txErr != nil {
+			return txErr
+		}
+		// Re-fetch the full row (buildDetailResponse needs the full db.Donation shape —
+		// CreateDonation's RETURNING only carries id/created_by/status/created_at/updated_at).
+		var getErr error
+		fullRow, getErr = qtx.GetDonationByID(ctx, row.ID)
+		return getErr
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create donation: %w", err)
@@ -198,32 +204,11 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 
 	// Pattern C: log only donation_id + created_by — no donor name, tax ID, or email.
 	s.logger.Info("donation created",
-		zap.String("donation_id", row.ID.String()),
-		zap.String("created_by", row.CreatedBy.String()),
+		zap.String("donation_id", fullRow.ID.String()),
+		zap.String("created_by", fullRow.CreatedBy.String()),
 	)
 
-	resp := &DonationResponse{
-		ID:                 row.ID.String(),
-		Status:             string(row.Status),
-		DonorName:          req.DonorName,
-		DonorTaxIDMasked:   pii.MaskNationalID(req.DonorTaxID), // T-03-09: masked, never plaintext
-		DonorAddress:       req.DonorAddress,
-		DonorEmail:         donorEmail,
-		Amount:             strconv.FormatFloat(req.Amount, 'f', 2, 64),
-		DonatedAt:          req.DonatedAt,
-		Notes:              notes,
-		ConsentGiven:       req.ConsentGiven,
-		ConsentTextVersion: consentTextVersion,
-		ConsentPurpose:     consentPurpose,
-		CreatedBy:          row.CreatedBy.String(),
-		CreatedAt:          row.CreatedAt.Time,
-		UpdatedAt:          row.UpdatedAt.Time,
-	}
-	if req.ConsentGiven && consentAt.Valid {
-		t := consentAt.Time
-		resp.ConsentAt = &t
-	}
-	return resp, nil
+	return s.buildDetailResponse(ctx, fullRow, pii.MaskNationalID(req.DonorTaxID), claims)
 }
 
 // GetByID retrieves a donation by ID, decrypting the tax ID and returning the masked value.
@@ -231,7 +216,7 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 // T-03-09: Response exposes DonorTaxIDMasked only (last-4 reveal via pii.MaskNationalID).
 // The plaintext tax ID is decrypted in memory solely to compute the mask and is never returned.
 // For authorised full-PII reveal (Checker/Admin), use the /pii endpoint (plan 03-05).
-func (s *DonationService) GetByID(ctx context.Context, id string, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) GetByID(ctx context.Context, id string, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	var pgUUID pgtype.UUID
 	if err := pgUUID.Scan(id); err != nil {
 		return nil, fmt.Errorf("invalid donation ID: %w", err)
@@ -252,7 +237,7 @@ func (s *DonationService) GetByID(ctx context.Context, id string, claims auth.Ke
 	}
 	maskedTaxID := pii.MaskNationalID(string(plaintext))
 
-	return donationRowToResponse(row, maskedTaxID), nil
+	return s.buildDetailResponse(ctx, row, maskedTaxID, claims)
 }
 
 // UpdateDraft updates Maker-editable fields on a draft donation (FR-09).
@@ -261,7 +246,7 @@ func (s *DonationService) GetByID(ctx context.Context, id string, claims auth.Ke
 // status and apply the update. Returns ErrInvalidTransition if the donation is not
 // in 'draft' status (state machine guard — D-45, T-03-13).
 // Re-encrypts the tax ID whenever it is provided (T-03-08: always fresh EncryptField).
-func (s *DonationService) UpdateDraft(ctx context.Context, id string, req UpdateDraftRequest, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) UpdateDraft(ctx context.Context, id string, req UpdateDraftRequest, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	if req.DonorTaxID == "" {
 		return nil, ErrMissingTaxID
 	}
@@ -367,7 +352,7 @@ func (s *DonationService) UpdateDraft(ctx context.Context, id string, req Update
 		zap.String("created_by", updatedRow.CreatedBy.String()),
 	)
 
-	return donationRowToResponse(updatedRow, pii.MaskNationalID(req.DonorTaxID)), nil
+	return s.buildDetailResponse(ctx, updatedRow, pii.MaskNationalID(req.DonorTaxID), claims)
 }
 
 // Submit transitions a draft donation to pending_review status (FR-11, D-45).
@@ -375,7 +360,7 @@ func (s *DonationService) UpdateDraft(ctx context.Context, id string, req Update
 // Uses LockDonationForUpdate within a transaction to atomically check the current
 // status and apply the transition. Returns ErrInvalidTransition if not in 'draft'.
 // submitted_at is set by the SubmitDonation query (DEFAULT now()).
-func (s *DonationService) Submit(ctx context.Context, id string, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Submit(ctx context.Context, id string, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	var pgUUID pgtype.UUID
 	if err := pgUUID.Scan(id); err != nil {
 		return nil, fmt.Errorf("invalid donation ID: %w", err)
@@ -422,7 +407,7 @@ func (s *DonationService) Submit(ctx context.Context, id string, claims auth.Key
 		return nil, fmt.Errorf("decrypt donor tax ID: %w", decErr)
 	}
 
-	return donationRowToResponse(submittedRow, pii.MaskNationalID(string(plaintext))), nil
+	return s.buildDetailResponse(ctx, submittedRow, pii.MaskNationalID(string(plaintext)), claims)
 }
 
 // List returns a paginated, masked list of donations ordered by created_at DESC.
@@ -533,7 +518,7 @@ func (s *DonationService) List(ctx context.Context, filter ListFilter, claims au
 //
 // Any error causes WithTx to roll back ALL seven effects.
 // PDF render and email send are NOT performed here — only the outbox job is enqueued.
-func (s *DonationService) Approve(ctx context.Context, id string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Approve(ctx context.Context, id string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	var pgUUID pgtype.UUID
 	if err := pgUUID.Scan(id); err != nil {
 		return nil, fmt.Errorf("invalid donation ID: %w", err)
@@ -639,7 +624,7 @@ func (s *DonationService) Approve(ctx context.Context, id string, actingUserID p
 		zap.String("approved_by", claims.Subject),
 	)
 
-	return donationRowToResponse(issuedRow, pii.MaskNationalID(string(plaintext))), nil
+	return s.buildDetailResponse(ctx, issuedRow, pii.MaskNationalID(string(plaintext)), claims)
 }
 
 // Return transitions a pending_review donation back to draft so the Maker can correct it (D-45, FR-12).
@@ -647,7 +632,7 @@ func (s *DonationService) Approve(ctx context.Context, id string, actingUserID p
 // reason is mandatory — returns ErrMissingReason before any DB call if empty/whitespace.
 // Uses LockDonationForUpdate + status precondition to serialize concurrent reviewer attempts.
 // AppendAuditEntryTx records the action in the same transaction (NFR-05).
-func (s *DonationService) Return(ctx context.Context, id string, reason string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Return(ctx context.Context, id string, reason string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	// Mandatory reason check — early exit before any DB call.
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrMissingReason
@@ -719,14 +704,14 @@ func (s *DonationService) Return(ctx context.Context, id string, reason string, 
 		zap.String("reviewed_by", claims.Subject),
 	)
 
-	return donationRowToResponse(returnedRow, pii.MaskNationalID(string(plaintext))), nil
+	return s.buildDetailResponse(ctx, returnedRow, pii.MaskNationalID(string(plaintext)), claims)
 }
 
 // Reject permanently rejects a pending_review donation (D-45, FR-12).
 // 'rejected' is a terminal state — no further transitions are allowed.
 //
 // reason is mandatory — returns ErrMissingReason before any DB call if empty/whitespace.
-func (s *DonationService) Reject(ctx context.Context, id string, reason string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Reject(ctx context.Context, id string, reason string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	// Mandatory reason check — early exit before any DB call.
 	if strings.TrimSpace(reason) == "" {
 		return nil, ErrMissingReason
@@ -798,7 +783,7 @@ func (s *DonationService) Reject(ctx context.Context, id string, reason string, 
 		zap.String("reviewed_by", claims.Subject),
 	)
 
-	return donationRowToResponse(rejectedRow, pii.MaskNationalID(string(plaintext))), nil
+	return s.buildDetailResponse(ctx, rejectedRow, pii.MaskNationalID(string(plaintext)), claims)
 }
 
 // Cancel voids an issued receipt: issued → cancelled (FR-19, D-47, plan 03-06).
@@ -811,7 +796,7 @@ func (s *DonationService) Reject(ctx context.Context, id string, reason string, 
 //
 // All effects (status update + audit) are committed atomically inside WithTx.
 // Pattern C: only donation_id + cancelled_by logged — no PII in logs.
-func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	// D-47: Checker/Admin only — Maker cannot cancel.
 	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
 		return nil, ErrForbidden
@@ -902,7 +887,7 @@ func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonat
 		zap.String("cancelled_by", claims.Subject),
 	)
 
-	return donationRowToResponse(cancelledRow, pii.MaskNationalID(string(plaintext))), nil
+	return s.buildDetailResponse(ctx, cancelledRow, pii.MaskNationalID(string(plaintext)), claims)
 }
 
 // Reissue performs Void & Reissue (D-50): cancels an issued receipt and creates a corrected draft.
@@ -918,7 +903,7 @@ func (s *DonationService) Cancel(ctx context.Context, id string, req CancelDonat
 // CRITICAL (D-50): the new draft does NOT get a receipt number here.
 // It must go through the normal Submit → Approve path (plan 03-05) to earn a fresh number.
 // This preserves Maker-Checker SoD and gap-less numbering — no bypass is allowed.
-func (s *DonationService) Reissue(ctx context.Context, originalID string, req ReissueDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationResponse, error) {
+func (s *DonationService) Reissue(ctx context.Context, originalID string, req ReissueDonationRequest, actingUserID pgtype.UUID, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
 	// D-47: Checker/Admin only.
 	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
 		return nil, ErrForbidden
@@ -985,6 +970,7 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 	}
 
 	var newRow db.CreateDonationRow
+	var newFullRow db.Donation
 	err = dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		qtx := s.queries.WithTx(tx)
 
@@ -1057,6 +1043,14 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 			return fmt.Errorf("set replaces on new draft: %w", err)
 		}
 
+		// Re-fetch the full replacement row (buildDetailResponse needs the full db.Donation
+		// shape, including the replaces pointer just set above).
+		var getErr error
+		newFullRow, getErr = qtx.GetDonationByID(ctx, newRow.ID)
+		if getErr != nil {
+			return fmt.Errorf("get replacement donation: %w", getErr)
+		}
+
 		// Step 6: Audit the reissue action.
 		afterMap := map[string]any{
 			"action":         "donation.reissue",
@@ -1091,23 +1085,8 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 		zap.String("reissued_by", claims.Subject),
 	)
 
-	replacesStr := originalID
-	return &DonationResponse{
-		ID:        newRow.ID.String(),
-		Status:    string(newRow.Status),
-		CreatedBy: newRow.CreatedBy.String(),
-		CreatedAt: newRow.CreatedAt.Time,
-		UpdatedAt: newRow.UpdatedAt.Time,
-		Replaces:  &replacesStr,
-		// Tax ID masked for the response — plaintext never returned from service
-		DonorTaxIDMasked: pii.MaskNationalID(req.DonorTaxID),
-		DonorName:        req.DonorName,
-		DonorAddress:     req.DonorAddress,
-		DonorEmail:       donorEmail,
-		Amount:           strconv.FormatFloat(req.Amount, 'f', 2, 64),
-		DonatedAt:        req.DonatedAt,
-		Notes:            notes,
-	}, nil
+	// Tax ID masked for the response — plaintext never returned from service (T-03-09).
+	return s.buildDetailResponse(ctx, newFullRow, pii.MaskNationalID(req.DonorTaxID), claims)
 }
 
 // RevealPII decrypts and returns the full plaintext donor tax/national ID (D-46, T-03-26).
@@ -1270,27 +1249,113 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 
 // --- Private helpers ---
 
-// donationRowToResponse converts a full db.Donation row to a DonationResponse.
-// maskedTaxID must be the result of pii.MaskNationalID — never pass ciphertext or plaintext (T-03-09).
-func donationRowToResponse(row db.Donation, maskedTaxID string) *DonationResponse {
-	resp := &DonationResponse{
+// reviewActionLabel normalizes an audit_log action string ("donation.return" /
+// "donation.reject") to the short label the FE contract expects ("return" / "reject").
+// Any other value passes through unchanged (defensive — should not occur given the
+// action IN (...) filter in GetDonationReviewHistory).
+func reviewActionLabel(auditAction string) string {
+	switch auditAction {
+	case "donation.return":
+		return "return"
+	case "donation.reject":
+		return "reject"
+	default:
+		return auditAction
+	}
+}
+
+// buildDetailResponse converts a full db.Donation row into the FE-aligned
+// DonationDetailResponse (D-R3 detail contract) — the single shared builder used by
+// GetByID AND every mutation (Create/UpdateDraft/Submit/Approve/Return/Reject/Cancel/
+// Reissue), so enriching this one function aligns every screen at once (T-03-31).
+//
+// maskedTaxID must be the result of pii.MaskNationalID — never pass ciphertext or
+// plaintext (T-03-09, T-11-02).
+//
+// Server-computed auth flags (T-03-31, T-11-01, T-11-03): the viewer's identity is
+// resolved from claims.Subject to their internal users.id via GetUserByKeycloakSubject
+// — NEVER compared directly against claims.Subject (created-by-fk-mismatch class of bug).
+// These flags are UI hints only; every mutation independently re-enforces SoD/RBAC.
+func (s *DonationService) buildDetailResponse(ctx context.Context, row db.Donation, maskedTaxID string, claims auth.KeycloakClaims) (*DonationDetailResponse, error) {
+	// Resolve the viewer's internal users.id from their Keycloak subject. A caller whose
+	// subject has no provisioned users row (should not happen on the real HTTP path —
+	// auth.ResolveAppUser middleware already 403s unprovisioned subjects before the
+	// handler runs) is defensively treated as "not the creator" rather than erroring.
+	viewerIsCreator := false
+	if viewerRow, err := s.queries.GetUserByKeycloakSubject(ctx, claims.Subject); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("resolve viewer user: %w", err)
+		}
+	} else {
+		viewerIsCreator = viewerRow.ID == row.CreatedBy
+	}
+
+	isReviewer := claims.HasRole(auth.RoleChecker) || claims.HasRole(auth.RoleAdmin)
+	isPendingReview := row.Status == db.DonationStatusPendingReview
+	// SoD-aware UI hint (T-11-01): a reviewer may not approve/return/reject their own record.
+	canReview := isReviewer && isPendingReview && !viewerIsCreator
+
+	createdByName := ""
+	if name, err := s.queries.GetUserDisplayName(ctx, row.CreatedBy); err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("resolve creator display name: %w", err)
+		}
+	} else {
+		createdByName = name
+	}
+
+	replaces, err := s.expandReceiptRef(ctx, row.Replaces)
+	if err != nil {
+		return nil, fmt.Errorf("resolve replaces receipt ref: %w", err)
+	}
+	replacedBy, err := s.expandReceiptRef(ctx, row.ReplacedBy)
+	if err != nil {
+		return nil, fmt.Errorf("resolve replaced_by receipt ref: %w", err)
+	}
+
+	historyRows, err := s.queries.GetDonationReviewHistory(ctx, row.ID.String())
+	if err != nil {
+		return nil, fmt.Errorf("get donation review history: %w", err)
+	}
+	reviewHistory := make([]ReviewHistoryEntry, 0, len(historyRows))
+	for _, h := range historyRows {
+		reviewHistory = append(reviewHistory, ReviewHistoryEntry{
+			ID:        h.ID,
+			Action:    reviewActionLabel(h.Action),
+			Reason:    h.Reason,
+			ActorName: h.ActorName,
+			ActedAt:   h.ActedAt.Time,
+		})
+	}
+
+	resp := &DonationDetailResponse{
 		ID:                 row.ID.String(),
 		Status:             string(row.Status),
 		DonorName:          row.DonorName,
-		DonorTaxIDMasked:   maskedTaxID,
-		DonorAddress:       row.DonorAddress,
-		DonorEmail:         row.DonorEmail,
+		NationalIDMasked:   maskedTaxID,
+		Address:            row.DonorAddress,
+		Email:              row.DonorEmail,
 		Amount:             numericStr(row.Amount),
 		DonatedAt:          dateStr(row.DonatedAt),
-		Notes:              row.Notes,
+		Note:               row.Notes,
 		ConsentGiven:       row.ConsentGiven,
 		ConsentTextVersion: row.ConsentTextVersion,
 		ConsentPurpose:     row.ConsentPurpose,
 		ReviewReason:       row.ReviewReason,
 		ReceiptFormatted:   row.ReceiptFormatted,
-		CreatedBy:          row.CreatedBy.String(),
+		CreatedBy:          createdByName,
+		CreatedByID:        row.CreatedBy.String(),
 		CreatedAt:          row.CreatedAt.Time,
 		UpdatedAt:          row.UpdatedAt.Time,
+		EdonationKeyed:     row.EdonationKeyed,
+		Replaces:           replaces,
+		ReplacedBy:         replacedBy,
+		ReviewHistory:      reviewHistory,
+		ViewerIsCreator:    viewerIsCreator,
+		CanApprove:         canReview,
+		CanReturn:          canReview,
+		CanReject:          canReview,
+		CanRevealPII:       pii.CanRevealFull(claims),
 	}
 	if row.ConsentAt.Valid {
 		t := row.ConsentAt.Time
@@ -1300,7 +1365,6 @@ func donationRowToResponse(row db.Donation, maskedTaxID string) *DonationRespons
 		t := row.SubmittedAt.Time
 		resp.SubmittedAt = &t
 	}
-	// Checker/approval fields — populated after review actions (plan 03-05).
 	if row.ApprovedAt.Valid {
 		t := row.ApprovedAt.Time
 		resp.ApprovedAt = &t
@@ -1313,7 +1377,6 @@ func donationRowToResponse(row db.Donation, maskedTaxID string) *DonationRespons
 		t := row.ReviewedAt.Time
 		resp.ReviewedAt = &t
 	}
-	// Cancellation fields — populated after Cancel action (plan 03-06, FR-19, D-47).
 	if row.CancelledBy.Valid {
 		s := row.CancelledBy.String()
 		resp.CancelledBy = &s
@@ -1323,16 +1386,29 @@ func donationRowToResponse(row db.Donation, maskedTaxID string) *DonationRespons
 		resp.CancelledAt = &t
 	}
 	resp.CancelReason = row.CancelReason
-	// Void & Reissue self-FK links (D-50).
-	if row.Replaces.Valid {
-		s := row.Replaces.String()
-		resp.Replaces = &s
+	return resp, nil
+}
+
+// expandReceiptRef expands a nullable self-FK donation-id pointer (row.Replaces or
+// row.ReplacedBy, D-50) into a nested {id, receipt_formatted} object. Returns nil if
+// the pointer is not set. A missing referenced row (should not happen — the pointer
+// only ever targets a real donation) is treated as "no ref" rather than an error.
+func (s *DonationService) expandReceiptRef(ctx context.Context, id pgtype.UUID) (*ReceiptRef, error) {
+	if !id.Valid {
+		return nil, nil
 	}
-	if row.ReplacedBy.Valid {
-		s := row.ReplacedBy.String()
-		resp.ReplacedBy = &s
+	ref, err := s.queries.GetReceiptRefByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	return resp
+	formatted := ""
+	if ref.ReceiptFormatted != nil {
+		formatted = *ref.ReceiptFormatted
+	}
+	return &ReceiptRef{ID: ref.ID.String(), ReceiptFormatted: formatted}, nil
 }
 
 // numericStr converts a pgtype.Numeric (big.Int + Exp) to a decimal string.

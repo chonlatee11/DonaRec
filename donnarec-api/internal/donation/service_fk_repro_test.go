@@ -101,11 +101,13 @@ func TestCreate_ActingUserIDWritesCorrectCreatedBy(t *testing.T) {
 		"Create with actingUserID = resolved users.id must succeed (fix for created-by-fk-mismatch)")
 	require.NotNil(t, resp)
 
-	// The persisted created_by must be actingUserID (users.id), never the raw KC sub.
-	require.Equal(t, userRow.ID.String(), resp.CreatedBy,
-		"created_by must equal the actingUserID (users.id), not the raw Keycloak sub")
-	require.NotEqual(t, keycloakSub, resp.CreatedBy,
-		"created_by must NOT be the raw Keycloak sub (that was the bug)")
+	// The persisted created_by_id must be actingUserID (users.id), never the raw KC sub.
+	// (resp.CreatedBy is now the creator's DISPLAY NAME under the D-R3 detail contract —
+	// the UUID identity check belongs on CreatedByID.)
+	require.Equal(t, userRow.ID.String(), resp.CreatedByID,
+		"created_by_id must equal the actingUserID (users.id), not the raw Keycloak sub")
+	require.NotEqual(t, keycloakSub, resp.CreatedByID,
+		"created_by_id must NOT be the raw Keycloak sub (that was the bug)")
 
 	// Cross-check directly against the DB row (not just the service response mapping).
 	var pgDonationID pgtype.UUID
