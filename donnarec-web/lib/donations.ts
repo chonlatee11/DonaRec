@@ -1,4 +1,5 @@
-import { apiFetch, apiFetchFormData } from "@/lib/api";
+import { apiFetch, apiFetchFormData, DonnaRecApiError } from "@/lib/api";
+import type { ApiError } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Status type (keep in sync with StatusBadge DonationStatus)
@@ -157,48 +158,165 @@ export async function fetchDonations(
   return (body.data ?? (body as unknown as DonationListResponse));
 }
 
-/** GET /api/donations/:id — full record including server-computed authorization flags */
+/**
+ * GET /api/donations/:id — full record including server-computed authorization flags.
+ * SERVER-side (apiFetch). Still used by the edit page (app/donations/[id]/edit/page.tsx)
+ * to seed initial form values. The detail/review screen (Screen 3) uses the
+ * CLIENT-side fetchDonation below instead (03-12).
+ */
 export async function getDonation(id: string): Promise<DonationDetail> {
   return apiFetch<DonationDetail>(`/api/donations/${id}`);
 }
 
+// ---------------------------------------------------------------------------
+// Client-side BFF fetchers (03-12) — used by DonationDetailView (TanStack Query).
+//
+// D-R1: calls the same-origin BFF Route Handlers under app/api/bff/donations/[id]/**,
+// which obtain the Keycloak token server-side and forward it to the Go API. The
+// access token never reaches the browser. Errors are thrown as DonnaRecApiError
+// (same shape as the server-side apiFetch) so callers can branch on .error.type.
+// ---------------------------------------------------------------------------
+
+function mapBffError(status: number, body: Record<string, unknown>): ApiError {
+  switch (status) {
+    case 403:
+      // SoD violation: Go API returns code="SOD_VIOLATION"
+      if (body?.code === "SOD_VIOLATION") {
+        return {
+          type: "sod",
+          status: 403,
+          message:
+            (body.message as string) ??
+            "คุณเป็นผู้สร้างรายการนี้ — ผู้อนุมัติต้องเป็นบุคคลอื่น (หลักการแยกหน้าที่)",
+          details: body,
+        };
+      }
+      return {
+        type: "forbidden",
+        status: 403,
+        message: (body.message as string) ?? "ไม่มีสิทธิ์ดำเนินการ",
+        details: body,
+      };
+    case 409:
+      return {
+        type: "statusConflict",
+        status: 409,
+        message:
+          (body.message as string) ??
+          "รายการนี้ได้รับการดำเนินการแล้ว — กรุณาโหลดหน้าใหม่เพื่อดูสถานะล่าสุด",
+        details: body,
+      };
+    case 422:
+      return {
+        type: "validation",
+        status: 422,
+        message: (body.message as string) ?? "กรุณาระบุเหตุผลก่อนดำเนินการ",
+        details: body,
+      };
+    default:
+      return {
+        type: "network",
+        status,
+        message:
+          (body.message as string) ??
+          "บันทึกไม่สำเร็จ — กรุณาตรวจสอบการเชื่อมต่อและลองอีกครั้ง",
+        details: body,
+      };
+  }
+}
+
+async function bffClientFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      ...init,
+      headers: {
+        Accept: "application/json",
+        ...(init?.body ? { "Content-Type": "application/json" } : {}),
+        ...(init?.headers as Record<string, string> | undefined),
+      },
+    });
+  } catch (err) {
+    throw new DonnaRecApiError({
+      type: "network",
+      status: 0,
+      message: "บันทึกไม่สำเร็จ — กรุณาตรวจสอบการเชื่อมต่อและลองอีกครั้ง",
+      details: err,
+    });
+  }
+
+  const text = await res.text();
+  let parsed: unknown = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (!res.ok) {
+    const body = (parsed ?? {}) as Record<string, unknown>;
+    throw new DonnaRecApiError(mapBffError(res.status, body));
+  }
+
+  if (res.status === 204) return undefined as T;
+
+  const body = parsed as { data?: T } | null;
+  return (body?.data ?? (parsed as T)) as T;
+}
+
 /**
- * POST /api/donations/:id/approve — Checker approves a pending_review record.
+ * fetchDonation — CLIENT-side detail fetcher for TanStack Query (D-R1, 03-12).
+ * Calls the same-origin BFF `/api/bff/donations/:id`, which composes `slip_url`
+ * server-side and unwraps to the DonationDetailResponse contract (03-11).
+ */
+export async function fetchDonation(id: string): Promise<DonationDetail> {
+  return bffClientFetch<DonationDetail>(`/api/bff/donations/${id}`);
+}
+
+/**
+ * approve — CLIENT-side mutation via the BFF (D-R1, 03-12).
  * Server enforces SoD (approver != creator). UI check is UX-only (T-03-31).
  */
-export async function approve(id: string): Promise<void> {
-  return apiFetch<void>(`/api/donations/${id}/approve`, { method: "POST" });
+export async function approve(id: string): Promise<DonationDetail> {
+  return bffClientFetch<DonationDetail>(`/api/bff/donations/${id}/approve`, {
+    method: "POST",
+  });
 }
 
 /**
- * POST /api/donations/:id/return — Checker returns a record to Maker with reason.
+ * returnForEdit — CLIENT-side mutation via the BFF (D-R1, 03-12).
  * Reason is mandatory (FR-12, UI-SPEC Copywriting Contract).
  */
-export async function returnForEdit(id: string, reason: string): Promise<void> {
-  return apiFetch<void>(`/api/donations/${id}/return`, {
+export async function returnForEdit(
+  id: string,
+  reason: string
+): Promise<DonationDetail> {
+  return bffClientFetch<DonationDetail>(`/api/bff/donations/${id}/return`, {
     method: "POST",
     body: JSON.stringify({ reason }),
   });
 }
 
 /**
- * POST /api/donations/:id/reject — Checker permanently rejects a record.
+ * reject — CLIENT-side mutation via the BFF (D-R1, 03-12).
  * Reason is mandatory (FR-12).
  */
-export async function reject(id: string, reason: string): Promise<void> {
-  return apiFetch<void>(`/api/donations/${id}/reject`, {
+export async function reject(id: string, reason: string): Promise<DonationDetail> {
+  return bffClientFetch<DonationDetail>(`/api/bff/donations/${id}/reject`, {
     method: "POST",
     body: JSON.stringify({ reason }),
   });
 }
 
 /**
- * GET /api/donations/:id/pii — reveal plaintext national/tax ID.
- * Server creates an audit log entry on every call (T-03-32).
+ * revealPII — CLIENT-side audited reveal fetcher via the BFF (D-R1, 03-12).
+ * Server creates an audit log entry on every call (T-03-32/T-12-01).
  * Only available to Checker / Admin (can_reveal_pii = true).
  */
 export async function revealPII(id: string): Promise<{ national_id: string }> {
-  return apiFetch<{ national_id: string }>(`/api/donations/${id}/pii`);
+  return bffClientFetch<{ national_id: string }>(`/api/bff/donations/${id}/pii`);
 }
 
 // ---------------------------------------------------------------------------
