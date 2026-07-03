@@ -30,6 +30,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -171,8 +172,11 @@ func (h *e2eHarness) do(t *testing.T, method, path, token string, body any) *htt
 }
 
 // dataEnvelope decodes the {"data": ...} wrapper every donation handler returns.
+// Data is donation.DonationDetailResponse (D-R3 detail contract remediation) — the
+// FE-aligned shape with server-computed auth flags (viewer_is_creator/can_approve/...)
+// that GetByID and every mutation now return.
 type dataEnvelope struct {
-	Data donation.DonationResponse `json:"data"`
+	Data donation.DonationDetailResponse `json:"data"`
 }
 
 // listEnvelope decodes the D-R2 pagination envelope
@@ -181,12 +185,16 @@ type listEnvelope struct {
 	Data donation.DonationListResult `json:"data"`
 }
 
-func decodeDonation(t *testing.T, w *httptest.ResponseRecorder) donation.DonationResponse {
+func decodeDonation(t *testing.T, w *httptest.ResponseRecorder) donation.DonationDetailResponse {
 	t.Helper()
 	var env dataEnvelope
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env), "response body: %s", w.Body.String())
 	return env.Data
 }
+
+// thirteenConsecutiveDigits matches a run of 13 consecutive digits — the shape of a
+// plaintext Thai national/tax ID. national_id_masked must NEVER match this (T-11-02).
+var thirteenConsecutiveDigits = regexp.MustCompile(`\d{13}`)
 
 // validDonorBody returns a valid Create/Reissue donor payload.
 func validDonorBody(name string) map[string]any {
@@ -237,18 +245,60 @@ func TestE2E_MakerCheckerIssuancePipeline(t *testing.T) {
 		require.NotEmpty(t, donationID)
 		assert.Equal(t, "draft", created.Status)
 
-		// created-by-fk-mismatch regression: created_by is the maker's users.id,
-		// NOT the raw Keycloak subject (subMaker).
-		assert.Equal(t, makerID.String(), created.CreatedBy,
-			"created_by must be the resolved users.id, not the keycloak subject")
-		assert.NotEqual(t, subMaker, created.CreatedBy,
-			"created_by must NOT be the raw keycloak subject (created-by-fk-mismatch)")
+		// created-by-fk-mismatch regression: created_by_id is the maker's users.id,
+		// NOT the raw Keycloak subject (subMaker). created_by is now the creator's
+		// DISPLAY NAME under the D-R3 detail contract, not a UUID.
+		assert.Equal(t, makerID.String(), created.CreatedByID,
+			"created_by_id must be the resolved users.id, not the keycloak subject")
+		assert.NotEqual(t, subMaker, created.CreatedByID,
+			"created_by_id must NOT be the raw keycloak subject (created-by-fk-mismatch)")
+		assert.Equal(t, "Maker E2E", created.CreatedBy,
+			"created_by must be the creator's display name (users join), not a raw UUID")
 
 		// --- Step 2: POST /api/donations/{id}/submit (maker) → 200, pending_review ---
 		w = h.do(t, http.MethodPost, "/api/donations/"+donationID+"/submit", makerToken, nil)
 		require.Equal(t, http.StatusOK, w.Code, "submit body: %s", w.Body.String())
 		submitted := decodeDonation(t, w)
 		assert.Equal(t, "pending_review", submitted.Status)
+
+		// --- Step 2b: GET /api/donations/{id} — D-R3 detail contract, driven by BOTH
+		// tokens on the same pending_review record. Server-computed auth flags (T-03-31)
+		// must reflect each viewer's own resolved identity + role, never trust the client. ---
+
+		// Maker viewing their own record: viewer_is_creator=true, can_approve=false (SoD).
+		w = h.do(t, http.MethodGet, "/api/donations/"+donationID, makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "get-by-maker body: %s", w.Body.String())
+		detailAsMaker := decodeDonation(t, w)
+		assert.True(t, detailAsMaker.ViewerIsCreator,
+			"maker viewing their own record: viewer_is_creator must be true")
+		assert.False(t, detailAsMaker.CanApprove,
+			"maker viewing their own record: can_approve must be false (SoD — creator cannot approve)")
+
+		// Checker viewing the maker's record while pending_review: viewer_is_creator=false,
+		// can_approve=true.
+		w = h.do(t, http.MethodGet, "/api/donations/"+donationID, checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "get-by-checker body: %s", w.Body.String())
+		detailAsChecker := decodeDonation(t, w)
+		assert.False(t, detailAsChecker.ViewerIsCreator,
+			"checker viewing the maker's record: viewer_is_creator must be false")
+		assert.True(t, detailAsChecker.CanApprove,
+			"checker viewing a pending_review record they did not create: can_approve must be true")
+
+		// national_id_masked must be present and NEVER contain a run of 13 consecutive
+		// digits (i.e. never the plaintext national ID — T-11-02, FR-29).
+		assert.NotEmpty(t, detailAsChecker.NationalIDMasked, "national_id_masked must be present")
+		assert.False(t, thirteenConsecutiveDigits.MatchString(detailAsChecker.NationalIDMasked),
+			"national_id_masked must not contain a run of 13 consecutive digits (never plaintext)")
+
+		// created_by/created_by_id must match the maker on the detail contract too.
+		assert.Equal(t, "Maker E2E", detailAsChecker.CreatedBy,
+			"detail created_by must be the maker's display name")
+		assert.Equal(t, makerID.String(), detailAsChecker.CreatedByID,
+			"detail created_by_id must equal the maker's users.id")
+
+		// edonation_keyed must be present as a bool field — false for a freshly created record.
+		assert.False(t, detailAsChecker.EdonationKeyed,
+			"edonation_keyed must default to false for a freshly submitted donation")
 
 		// --- Step 3: POST /api/donations/{id}/approve (checker) → 200, issued ---
 		// RBAC regression: a checker-only token (no admin) MUST be accepted on the
