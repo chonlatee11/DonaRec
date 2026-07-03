@@ -1,6 +1,14 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
-import { bffForward } from "@/lib/bff";
+import {
+  bffForward,
+  getBffToken,
+  goFetch,
+  mapFeDonorFieldsToGo,
+  passthroughGoResponse,
+  unauthenticatedResponse,
+  type FeDonorFields,
+} from "@/lib/bff";
 
 /**
  * GET /api/bff/donations/:id — BFF proxy for the donation DETAIL screen (Screen 3).
@@ -42,4 +50,35 @@ export async function GET(
     { data: { ...detail, slip_url: slipUrl } },
     { status: 200 }
   );
+}
+
+/**
+ * PUT /api/bff/donations/:id — BFF proxy for updating a draft (Screen 2, FR-09).
+ *
+ * Same D-R3 field-name mapping as the create (POST) route. Go returns 409
+ * (status_conflict) once the record has left draft status — passed through
+ * unchanged.
+ */
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+): Promise<Response> {
+  const { id } = await params;
+  const token = await getBffToken();
+  if (!token) return unauthenticatedResponse();
+
+  let body: FeDonorFields;
+  try {
+    body = (await request.json()) as FeDonorFields;
+  } catch {
+    return NextResponse.json({ error: "invalid_request_body" }, { status: 400 });
+  }
+
+  const goRes = await goFetch(token, `/api/donations/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(mapFeDonorFieldsToGo(body)),
+  });
+
+  return passthroughGoResponse(goRes);
 }
