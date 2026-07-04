@@ -36,6 +36,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -64,6 +65,7 @@ type e2eHarness struct {
 	router  *gin.Engine
 	kc      *testutil.KeycloakTestServer
 	queries *db.Queries
+	pool    *pgxpool.Pool
 	ctx     context.Context
 }
 
@@ -106,6 +108,14 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	require.NoError(t, err, "storage client must construct (lazy — no connection)")
 	slipSvc := donation.NewSlipService(pool, queries, storageClient, auditSvc, logger)
 
+	// Receipts StorageClient for DownloadReceipt's presigned URL (FR-28, 04-06).
+	// PresignedGetObject is a pure client-side signature computation — no network
+	// call is made at construction OR at presign time, so a dummy endpoint is fine
+	// (mirrors the slip storageClient comment above).
+	receiptsStore, err := storage.NewStorageClient("localhost:9000", "minioadmin", "minioadmin", "donnarec-receipts", false)
+	require.NoError(t, err, "receipts storage client must construct (lazy — no connection)")
+	donationSvc.SetReceiptsStore(receiptsStore)
+
 	// Handlers.
 	userHandler := users.NewUserHandler(userSvc, logger)
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
@@ -126,7 +136,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 
 	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, logger)
 
-	return &e2eHarness{router: router, kc: kc, queries: queries, ctx: ctx}
+	return &e2eHarness{router: router, kc: kc, queries: queries, pool: pool, ctx: ctx}
 }
 
 // provisionUser inserts a users row with the given keycloak_subject and assigns
@@ -452,5 +462,81 @@ func TestE2E_MakerCheckerIssuancePipeline(t *testing.T) {
 			"receipt number must be retained on cancel (gap-less invariant — cancelled records keep their number)")
 		assert.Equal(t, originalReceipt, *cancelled.ReceiptFormatted,
 			"the cancelled record's receipt number must be identical to the pre-cancel issued number")
+	})
+
+	t.Run("ResendAndDownload_RealPath", func(t *testing.T) {
+		// Create → submit → approve a fresh donation over the real router.
+		w := h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาง ทดสอบ ส่งซ้ำ"))
+		require.Equal(t, http.StatusCreated, w.Code, "create body: %s", w.Body.String())
+		targetID := decodeDonation(t, w).ID
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+targetID+"/submit", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "submit body: %s", w.Body.String())
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+targetID+"/approve", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "approve body: %s", w.Body.String())
+		issued := decodeDonation(t, w)
+		require.NotNil(t, issued.ReceiptFormatted)
+		originalReceipt := *issued.ReceiptFormatted
+
+		// --- Download before freeze: the worker has not run yet → not-ready error ---
+		w = h.do(t, http.MethodGet, "/api/donations/"+targetID+"/receipt-pdf", makerToken, nil)
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"download before the PDF is frozen must be a conflict/not-ready error; body: %s", w.Body.String())
+
+		// --- Resend before freeze: no frozen PDF to resend → not-ready error ---
+		w = h.do(t, http.MethodPost, "/api/donations/"+targetID+"/resend", checkerToken, nil)
+		assert.Equal(t, http.StatusConflict, w.Code,
+			"resend before the PDF is frozen must be a conflict/not-ready error; body: %s", w.Body.String())
+
+		// Simulate the outbox worker (04-05) having frozen the receipt PDF.
+		var pgID pgtype.UUID
+		require.NoError(t, pgID.Scan(targetID))
+		objectKey := "receipts/" + targetID + "/receipt.pdf"
+		require.NoError(t, h.queries.SetReceiptPDFObjectKey(h.ctx, db.SetReceiptPDFObjectKeyParams{
+			ReceiptPdfObjectKey: &objectKey,
+			ID:                  pgID,
+		}))
+
+		// --- Download by every staff role → 200 with a non-empty presigned URL (FR-28) ---
+		for _, tok := range []string{makerToken, checkerToken} {
+			w = h.do(t, http.MethodGet, "/api/donations/"+targetID+"/receipt-pdf", tok, nil)
+			require.Equal(t, http.StatusOK, w.Code, "download body: %s", w.Body.String())
+			var env struct {
+				Data struct {
+					URL string `json:"url"`
+				} `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env), "response body: %s", w.Body.String())
+			assert.NotEmpty(t, env.Data.URL, "download must return a non-empty presigned URL")
+		}
+
+		// --- Resend by Maker → 403 (checkerGroup RBAC guard, T-04-15) ---
+		w = h.do(t, http.MethodPost, "/api/donations/"+targetID+"/resend", makerToken, nil)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"maker token must be rejected from the checker-only resend route; body: %s", w.Body.String())
+
+		// --- Resend by Checker → 200, enqueues exactly one NEW outbox job (D-56/D-57) ---
+		var jobCountBefore int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM outbox_jobs WHERE payload->>'donation_id' = $1`, targetID,
+		).Scan(&jobCountBefore))
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+targetID+"/resend", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "resend body: %s", w.Body.String())
+
+		var jobCountAfter int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM outbox_jobs WHERE payload->>'donation_id' = $1`, targetID,
+		).Scan(&jobCountAfter))
+		assert.Equal(t, jobCountBefore+1, jobCountAfter, "resend must enqueue exactly one new outbox job")
+
+		// --- receipt_no must be byte-identical before/after resend (T-04-16) ---
+		w = h.do(t, http.MethodGet, "/api/donations/"+targetID, checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "get body: %s", w.Body.String())
+		afterResend := decodeDonation(t, w)
+		require.NotNil(t, afterResend.ReceiptFormatted)
+		assert.Equal(t, originalReceipt, *afterResend.ReceiptFormatted,
+			"resend must never allocate a new receipt number (D-56/D-57, T-04-16)")
 	})
 }
