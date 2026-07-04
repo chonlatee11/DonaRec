@@ -75,8 +75,8 @@
 
 ### Reports & Settings (รายงานและการตั้งค่า)
 
-- [ ] **FR-33**: Admin ตั้งค่าเทมเพลต ลายน้ำ ลายเซ็น และรูปแบบเลขที่ได้ (แยก config จากโค้ด) [S]
-- [ ] **NFR-09**: แยกการตั้งค่า (เทมเพลต/เลข/ลายเซ็น) ออกจากโค้ด ปรับได้โดยไม่ต้อง deploy [M]
+- [x] **FR-33**: Admin ตั้งค่าเทมเพลต ลายน้ำ ลายเซ็น และรูปแบบเลขที่ได้ (แยก config จากโค้ด) [S]
+- [x] **NFR-09**: แยกการตั้งค่า (เทมเพลต/เลข/ลายเซ็น) ออกจากโค้ด ปรับได้โดยไม่ต้อง deploy [M]
 - [ ] **FR-32**: รายงานสรุปการบริจาค (ตามช่วงเวลา/ยอดรวม) [S]
 
 ### Cross-cutting Non-functional
@@ -154,8 +154,8 @@ Which phases cover which requirements.
 | FR-26 | Phase 4 | Complete |
 | FR-27 | Phase 4 | Complete |
 | FR-28 | Phase 4 | Complete |
-| FR-33 | Phase 4 | Pending |
-| NFR-09 | Phase 4 | Pending |
+| FR-33 | Phase 4 | Complete |
+| NFR-09 | Phase 4 | Complete |
 | FR-30 | Phase 5 | Pending |
 | FR-31 | Phase 5 | Pending |
 | FR-32 | Phase 5 | Pending |
