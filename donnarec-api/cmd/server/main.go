@@ -20,9 +20,13 @@ import (
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/i18n"
+	"github.com/donnarec/donnarec-api/internal/mailer"
+	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/users"
+	"github.com/donnarec/donnarec-api/internal/worker"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -126,6 +130,61 @@ func main() {
 	// Slip service: upload/view/remove donation slip attachments (Plan 03-04, D-48, D-54).
 	slipSvc := donation.NewSlipService(pool, queries, storageClient, auditSvc, logger)
 
+	// --------------------------------------------------------
+	// Outbox worker (Phase 4, plan 04-05): polls outbox_jobs enqueued by the
+	// Approve issuance tx (Step 7) and renders/freezes/emails the receipt PDF
+	// entirely off the issuance lock path (NFR-07).
+	// --------------------------------------------------------
+
+	// Receipts object storage client: separate bucket from slips (D-56).
+	receiptsStore, err := storage.NewStorageClient(
+		cfg.MinIO.Endpoint,
+		cfg.MinIO.AccessKey,
+		cfg.MinIO.SecretKey,
+		cfg.MinIO.ReceiptsBucket,
+		cfg.MinIO.Secure,
+	)
+	if err != nil {
+		logger.Fatal("receipts storage client init failed", zap.Error(err))
+	}
+
+	// Sandboxed remote-Chromium renderer (D-58) — dials the chrome sidecar over CDP.
+	pdfRenderer, err := pdf.NewRenderer(cfg.Worker.ChromeWSURL)
+	if err != nil {
+		logger.Fatal("pdf renderer init failed", zap.Error(err))
+	}
+
+	// i18n bundle for bilingual receipt/email text (FR-23/26). LOCALES_DIR
+	// defaults to "/locales", matching the Dockerfile's COPY of
+	// internal/i18n/locales into the runtime image; override for local
+	// `go run` dev where the working directory is the module root.
+	localesDir := os.Getenv("LOCALES_DIR")
+	if localesDir == "" {
+		localesDir = "/locales"
+	}
+	i18nBundle, err := i18n.SetupBundle(localesDir)
+	if err != nil {
+		logger.Fatal("i18n bundle load failed", zap.Error(err), zap.String("locales_dir", localesDir))
+	}
+
+	// EmailSender: dev/local capture only this phase (D-60) — a real provider
+	// (SES/Postmark) is a stakeholder gate deferred to a later phase.
+	// MAIL_DEV_OUTDIR defaults to a fixed path so captured messages are easy
+	// to find in a running dev container.
+	mailDevOutDir := os.Getenv("MAIL_DEV_OUTDIR")
+	if mailDevOutDir == "" {
+		mailDevOutDir = "/tmp/donnarec-mail-dev"
+	}
+	emailSender := &mailer.DevSender{OutDir: mailDevOutDir}
+
+	outboxWorker := worker.New(pool, queries, receiptsStore, pdfRenderer, emailSender, i18nBundle, logger, worker.Config{
+		PollInterval: cfg.Worker.PollInterval,
+		MaxAttempts:  int32(cfg.Worker.MaxAttempts),
+		ComputeBackoff: func(attempts int32) time.Duration {
+			return cfg.Worker.ComputeBackoff(int(attempts))
+		},
+	})
+
 	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
 	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
 	// (not in internal/auth) so the auth package stays DB-agnostic; pgx.ErrNoRows is
@@ -172,6 +231,12 @@ func main() {
 			logger.Fatal("server error", zap.Error(err))
 		}
 	}()
+
+	// Start the outbox worker in its own goroutine, sharing the SAME
+	// signal.NotifyContext ctx as the HTTP server for graceful shutdown
+	// (Phase 4, plan 04-05 — mirrors the pattern above).
+	go outboxWorker.Run(ctx)
+	logger.Info("outbox worker started", zap.Duration("poll_interval", cfg.Worker.PollInterval))
 
 	// Block until OS signal
 	<-ctx.Done()
