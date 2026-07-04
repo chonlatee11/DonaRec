@@ -28,9 +28,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -47,7 +51,9 @@ import (
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/settings"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/testutil"
 	"github.com/donnarec/donnarec-api/internal/users"
@@ -69,14 +75,55 @@ func (fakeReceiptsStore) PresignedGet(_ context.Context, objectKey string, _ tim
 	return "https://fake-receipts.example.test/" + objectKey, nil
 }
 
+// fakeSettingsStore is a hermetic, in-memory settings.ReceiptsStore stub — avoids
+// requiring a live MinIO for the Admin settings E2E subtests below, mirroring
+// fakeReceiptsStore's rationale above. PutTemplateImage still runs the REAL
+// storage.ValidateTemplateImage magic-byte/size validation (only the actual network PUT
+// is faked), so the 415/413 error-mapping paths in settings.Handler are genuinely
+// exercised, not bypassed.
+type fakeSettingsStore struct {
+	mu      sync.Mutex
+	objects map[string][]byte
+}
+
+func newFakeSettingsStore() *fakeSettingsStore {
+	return &fakeSettingsStore{objects: make(map[string][]byte)}
+}
+
+func (f *fakeSettingsStore) GetObject(_ context.Context, key string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	data, ok := f.objects[key]
+	if !ok {
+		return nil, fmt.Errorf("fakeSettingsStore: object %q not found", key)
+	}
+	return data, nil
+}
+
+func (f *fakeSettingsStore) PutTemplateImage(_ context.Context, r io.Reader, size int64, slot string) (string, string, error) {
+	detected, head, err := storage.ValidateTemplateImage(r, size)
+	if err != nil {
+		return "", "", err
+	}
+	rest, _ := io.ReadAll(r)
+	full := append(append([]byte{}, head...), rest...)
+
+	key := fmt.Sprintf("template-assets/%s/fake%s", slot, detected.Extension())
+	f.mu.Lock()
+	f.objects[key] = full
+	f.mu.Unlock()
+	return key, detected.String(), nil
+}
+
 // e2eHarness bundles the fully-wired router (via the production setupRouter) plus
 // the handles a test needs to provision users and mint matching tokens.
 type e2eHarness struct {
-	router  *gin.Engine
-	kc      *testutil.KeycloakTestServer
-	queries *db.Queries
-	pool    *pgxpool.Pool
-	ctx     context.Context
+	router        *gin.Engine
+	kc            *testutil.KeycloakTestServer
+	queries       *db.Queries
+	pool          *pgxpool.Pool
+	ctx           context.Context
+	settingsStore *fakeSettingsStore
 }
 
 // newE2EHarness spins a Postgres testcontainer, a local OIDC/JWKS server, builds
@@ -128,6 +175,20 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	// deterministic and host-independent.
 	donationSvc.SetReceiptsStore(fakeReceiptsStore{})
 
+	// Settings service + handler (Phase 4, plan 04-07): a REAL chrome sidecar
+	// (testutil.StartChrome, 04-02) backs the real-PDF preview path so PreviewPDF is
+	// genuinely exercised through the SAME sandboxed pipeline production uses
+	// (D-58/D-61) — not a fake/stub renderer. A hermetic in-memory fakeSettingsStore
+	// stands in for MinIO (same rationale as fakeReceiptsStore above): this test's job
+	// is the HTTP -> auth -> RBAC(admin) -> handler -> service -> DB seam, not a MinIO
+	// round-trip (already covered by internal/storage's own tests).
+	chromeWSURL, _ := testutil.StartChrome(t)
+	pdfRenderer, err := pdf.NewRenderer(chromeWSURL)
+	require.NoError(t, err, "pdf renderer must construct against the test chrome sidecar")
+	settingsStore := newFakeSettingsStore()
+	settingsSvc := settings.NewSettingsService(queries, settingsStore, logger)
+	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
+
 	// Handlers.
 	userHandler := users.NewUserHandler(userSvc, logger)
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
@@ -146,9 +207,9 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		return u.ID, nil
 	}
 
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, logger)
 
-	return &e2eHarness{router: router, kc: kc, queries: queries, pool: pool, ctx: ctx}
+	return &e2eHarness{router: router, kc: kc, queries: queries, pool: pool, ctx: ctx, settingsStore: settingsStore}
 }
 
 // provisionUser inserts a users row with the given keycloak_subject and assigns
@@ -185,6 +246,30 @@ func (h *e2eHarness) do(t *testing.T, method, path, token string, body any) *htt
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	w := httptest.NewRecorder()
+	h.router.ServeHTTP(w, req)
+	return w
+}
+
+// doMultipart performs a multipart/form-data POST with a single "file" field — used by
+// the settings image-upload E2E subtests (mirrors SlipHandler.Upload's c.FormFile("file")
+// contract).
+func (h *e2eHarness) doMultipart(t *testing.T, path, token, filename string, fileBytes []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	part, err := mw.CreateFormFile("file", filename)
+	require.NoError(t, err)
+	_, err = part.Write(fileBytes)
+	require.NoError(t, err)
+	require.NoError(t, mw.Close())
+
+	req, err := http.NewRequest(http.MethodPost, path, &buf)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -556,5 +641,211 @@ func TestE2E_MakerCheckerIssuancePipeline(t *testing.T) {
 		require.NotNil(t, afterResend.ReceiptFormatted)
 		assert.Equal(t, originalReceipt, *afterResend.ReceiptFormatted,
 			"resend must never allocate a new receipt number (D-56/D-57, T-04-16)")
+	})
+}
+
+// settingsPNGBytes returns a minimal PNG magic-byte prefix padded to 512 bytes — same
+// signature shape as internal/storage's own test fixtures, duplicated locally since that
+// package's test helpers are unexported to their own _test package.
+func settingsPNGBytes() []byte {
+	b := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	return append(b, make([]byte, 512)...)
+}
+
+// settingsPDFBytes returns a minimal PDF magic-byte prefix — used to prove the settings
+// image-upload endpoint rejects a PDF (image-only allowlist, unlike the slip upload path).
+func settingsPDFBytes() []byte {
+	b := []byte{'%', 'P', 'D', 'F', '-', '1', '.', '4', '\n'}
+	return append(b, make([]byte, 512)...)
+}
+
+// settingsPayload returns a valid PUT /api/admin/settings request body.
+func settingsPayload() map[string]any {
+	return map[string]any{
+		"template_html":        `<html><body>{{.DonorName}} {{.ReceiptNo}} {{.Section6Text}}</body></html>`,
+		"template_html_en":     `<html><body>{{.DonorName}} {{.ReceiptNo}} {{.Section6Text}}</body></html>`,
+		"section6_text_th":     "หัก ณ ที่จ่าย 1 เท่า (E2E)",
+		"section6_text_en":     "1x tax deduction (E2E)",
+		"deduction_multiplier": "2x",
+		"separator":            "-",
+		"running_no_padding":   7,
+		"year_format":          "CE4",
+		"prefix":               "E2E",
+	}
+}
+
+// settingsEnvelope decodes the {"data": ReceiptSettings} wrapper GET/PUT settings return.
+type settingsEnvelope struct {
+	Data settings.ReceiptSettings `json:"data"`
+}
+
+// TestE2E_AdminSettings drives the Phase 4 (plan 04-07) Admin settings API over the real
+// HTTP path: HTTP -> RequireAuth (real Keycloak-shaped token) -> RequireRoles(Admin) ->
+// ResolveAppUser -> settings.Handler -> settings.SettingsService -> DB (Postgres
+// testcontainer). Also proves the real-PDF preview goes through the SAME sandboxed
+// Chromium pipeline as production (D-58/D-61), via a real chrome sidecar
+// (testutil.StartChrome).
+//
+// Requires Docker testcontainers (Postgres + chrome sidecar). Skip with -short.
+func TestE2E_AdminSettings(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E integration test in short mode: requires Docker")
+	}
+
+	h := newE2EHarness(t)
+
+	const subAdmin = "44444444-4444-4444-4444-444444444444"
+	const subMaker = "55555555-5555-5555-5555-555555555555"
+	_ = h.provisionUser(t, "admin-settings-e2e@example.com", "Admin Settings E2E", subAdmin, db.UserRoleEnumAdmin)
+	_ = h.provisionUser(t, "maker-settings-e2e@example.com", "Maker Settings E2E", subMaker, db.UserRoleEnumMaker)
+
+	adminToken := h.kc.MintTokenForSubject(subAdmin, backendClientID, "admin")
+	makerToken := h.kc.MintTokenForSubject(subMaker, backendClientID, "maker")
+
+	t.Run("GetSettings_SeededDefaults", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/admin/settings", adminToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		var env settingsEnvelope
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env), "response body: %s", w.Body.String())
+		assert.NotEmpty(t, env.Data.TemplateHTML, "the 04-01-seeded Thai template must be non-empty before any admin edit")
+		assert.NotEmpty(t, env.Data.Separator, "the Phase 2 number-format config must be present (consolidated onto this screen)")
+	})
+
+	t.Run("NonAdmin_Forbidden", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/admin/settings", makerToken, nil)
+		assert.Equal(t, http.StatusForbidden, w.Code, "maker token must be rejected from the Admin-only settings route; body: %s", w.Body.String())
+
+		w = h.do(t, http.MethodPut, "/api/admin/settings", makerToken, settingsPayload())
+		assert.Equal(t, http.StatusForbidden, w.Code, "maker token must be rejected from PUT settings; body: %s", w.Body.String())
+	})
+
+	t.Run("Save_InvalidTemplate_422", func(t *testing.T) {
+		bad := settingsPayload()
+		bad["template_html"] = "{{.DonorName" // malformed action
+		w := h.do(t, http.MethodPut, "/api/admin/settings", adminToken, bad)
+		require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "invalid_template")
+	})
+
+	t.Run("Save_InvalidNumberFormat_422", func(t *testing.T) {
+		bad := settingsPayload()
+		bad["separator"] = "<script>"
+		w := h.do(t, http.MethodPut, "/api/admin/settings", adminToken, bad)
+		require.Equal(t, http.StatusUnprocessableEntity, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "invalid_number_format")
+	})
+
+	t.Run("Save_ValidRoundTrip_AuditedAndPersisted", func(t *testing.T) {
+		w := h.do(t, http.MethodPut, "/api/admin/settings", adminToken, settingsPayload())
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		// GET reflects the newly-saved values — round-trips through the real DB.
+		w = h.do(t, http.MethodGet, "/api/admin/settings", adminToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		var env settingsEnvelope
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env), "response body: %s", w.Body.String())
+		assert.Equal(t, "2x", env.Data.DeductionMultiplier)
+		assert.Equal(t, "-", env.Data.Separator)
+		assert.Equal(t, 7, env.Data.RunningNoPadding)
+		assert.Equal(t, "CE4", env.Data.YearFormat)
+		assert.Equal(t, "E2E", env.Data.Prefix)
+		assert.Contains(t, env.Data.Section6TextTh, "E2E")
+
+		// Append-only audit row (D-58 "every settings mutation is Admin-gated and
+		// append-only audited") — AuditMiddleware writes one row per PUT with the
+		// authenticated actor's raw Keycloak subject.
+		var auditCount int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM audit_log WHERE actor_id = $1 AND resource = $2`,
+			subAdmin, "/api/admin/settings",
+		).Scan(&auditCount))
+		assert.GreaterOrEqual(t, auditCount, 1, "PUT /api/admin/settings must write an append-only audit row")
+	})
+
+	t.Run("Preview_EscapesInjectedSection6Text", func(t *testing.T) {
+		// Section6Text is admin-configured but substituted into the template via
+		// html/template — a value containing markup must render ESCAPED, proving the
+		// preview endpoint never wraps assembled HTML as trusted raw content (T-04-20).
+		req := map[string]any{
+			"template_html":        `<html><body><div id="s6">{{.Section6Text}}</div></body></html>`,
+			"template_html_en":     `<html><body><div id="s6">{{.Section6Text}}</div></body></html>`,
+			"section6_text_th":     `<script>alert('xss')</script>`,
+			"deduction_multiplier": "1x",
+			"language":             "th",
+		}
+		w := h.do(t, http.MethodPost, "/api/admin/settings/preview", adminToken, req)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		var env struct {
+			Data struct {
+				HTML string `json:"html"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env), "response body: %s", w.Body.String())
+		assert.NotContains(t, env.Data.HTML, "<script>alert",
+			"raw <script> must NOT appear in preview HTML — html/template must escape it")
+		assert.Contains(t, env.Data.HTML, "&lt;script&gt;",
+			"the injected Section6Text must appear HTML-entity-escaped in the preview")
+	})
+
+	t.Run("Preview_NonAdmin_Forbidden", func(t *testing.T) {
+		w := h.do(t, http.MethodPost, "/api/admin/settings/preview", makerToken, map[string]any{
+			"template_html": `<html><body>{{.DonorName}}</body></html>`,
+		})
+		assert.Equal(t, http.StatusForbidden, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("PreviewPDF_ReturnsRealPDFBytesViaSandboxedPipeline", func(t *testing.T) {
+		req := map[string]any{
+			"template_html":        `<html><body>{{.DonorName}} {{.ReceiptNo}}</body></html>`,
+			"template_html_en":     `<html><body>{{.DonorName}} {{.ReceiptNo}}</body></html>`,
+			"section6_text_th":     "ทดสอบ",
+			"deduction_multiplier": "1x",
+			"language":             "th",
+		}
+		w := h.do(t, http.MethodPost, "/api/admin/settings/preview/pdf", adminToken, req)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.Equal(t, "application/pdf", w.Header().Get("Content-Type"))
+		assert.True(t, bytes.HasPrefix(w.Body.Bytes(), []byte("%PDF")),
+			"response body must be real PDF bytes (starts with %%PDF magic), got %d bytes", w.Body.Len())
+		assert.Greater(t, w.Body.Len(), 100, "rendered PDF must be non-trivially sized")
+	})
+
+	t.Run("UploadImage_MagicByteValidatedAdminOnly", func(t *testing.T) {
+		// Non-admin rejected before any validation runs.
+		w := h.doMultipart(t, "/api/admin/settings/images/letterhead", makerToken, "letterhead.png", settingsPNGBytes())
+		assert.Equal(t, http.StatusForbidden, w.Code, "body: %s", w.Body.String())
+
+		// Admin + valid PNG -> 200, object_key returned.
+		w = h.doMultipart(t, "/api/admin/settings/images/letterhead", adminToken, "letterhead.png", settingsPNGBytes())
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		var env struct {
+			Data struct {
+				Slot      string `json:"slot"`
+				ObjectKey string `json:"object_key"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &env), "response body: %s", w.Body.String())
+		assert.Equal(t, "letterhead", env.Data.Slot)
+		assert.NotEmpty(t, env.Data.ObjectKey)
+
+		// GET settings now reflects the new letterhead_object_key.
+		w = h.do(t, http.MethodGet, "/api/admin/settings", adminToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		var settingsEnv settingsEnvelope
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &settingsEnv), "response body: %s", w.Body.String())
+		require.NotNil(t, settingsEnv.Data.LetterheadObjectKey)
+		assert.Equal(t, env.Data.ObjectKey, *settingsEnv.Data.LetterheadObjectKey)
+
+		// Admin + a PDF (not an image) -> 415 unsupported_file_type (image-only allowlist,
+		// unlike the slip upload path which DOES accept PDFs).
+		w = h.doMultipart(t, "/api/admin/settings/images/seal", adminToken, "seal.pdf", settingsPDFBytes())
+		assert.Equal(t, http.StatusUnsupportedMediaType, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "unsupported_file_type")
+
+		// Admin + an unknown slot name -> 400 invalid_image_slot.
+		w = h.doMultipart(t, "/api/admin/settings/images/not-a-slot", adminToken, "x.png", settingsPNGBytes())
+		assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "invalid_image_slot")
 	})
 }
