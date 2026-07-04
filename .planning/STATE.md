@@ -5,16 +5,16 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: receipt-pdf-email-delivery-outbox-worker
 status: executing
-stopped_at: Completed 04-04-PLAN.md
-last_updated: "2026-07-04T07:31:59.748Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-07-04T07:56:21.164Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 30
-  completed_plans: 25
-  percent: 50
+  completed_plans: 26
+  percent: 87
 ---
 
 # Project State
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 04 (receipt-pdf-email-delivery-outbox-worker) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
 Status: Ready to execute
 Last activity: 2026-07-04 — Phase 04 execution started
@@ -69,6 +69,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 04 P01 | 15min | 3 tasks | 19 files |
 | Phase 04 P02 | 12min | 2 tasks | 6 files |
 | Phase 04 P04 | 3min | 1 tasks | 6 files |
+| Phase 04 P03 | 18min | 1 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,8 @@ Recent decisions affecting current work:
 - [Phase 04]: [Phase 04] 04-02: testutil.StartChrome builds the same docker/chrome.Dockerfile via testcontainers FromDockerfile and resolves the real CDP webSocketDebuggerUrl from /json/version, mirroring StartPostgres/NewKeycloakTestServer's t.Helper/cleanup shape
 - [Phase ?]: [Phase 04] 04-04: EmailSender interface + DevSender capture-to-disk built per RESEARCH.md's pre-vetted code (D-60); no self-hosted SMTP/provider SDK import
 - [Phase ?]: [Phase 04] 04-04: i18n receipt.*/email.* message IDs added to th.json/en.json for FR-23/26; section6_text stays config-store-driven, not part of the i18n catalog, pending accounting/legal sign-off
+- [Phase 04]: 04-03: ReceiptData field names match the 04-01-seeded receipt_template_config placeholders; image/font fields typed template.URL/template.CSS (plain string gets sanitized to #ZgotmplZ by html/template)
+- [Phase 04]: 04-03: renderInSandbox is the single CDP action sequence both production RenderPDF and the security regression tests call — proves tests exercise the exact production sandbox (network-isolated sidecar + fetch.Enable/FailRequest-all + emulation.SetScriptExecutionDisabled)
 
 ### Pending Todos
 
@@ -136,6 +139,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T07:31:59.736Z
-Stopped at: Completed 04-04-PLAN.md
+Last session: 2026-07-04T07:56:21.154Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
