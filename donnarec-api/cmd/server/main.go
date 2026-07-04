@@ -24,6 +24,7 @@ import (
 	"github.com/donnarec/donnarec-api/internal/mailer"
 	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/settings"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/users"
 	"github.com/donnarec/donnarec-api/internal/worker"
@@ -190,6 +191,12 @@ func main() {
 		},
 	})
 
+	// Settings service (Phase 4, plan 04-07): Admin-only receipt template/compliance
+	// config store (D-58/D-59/NFR-09). Reuses the SAME receiptsStore the worker (above)
+	// reads branding images from, and the SAME pdfRenderer for the real-PDF preview path
+	// (D-61 — preview must go through the identical sandboxed pipeline as production).
+	settingsSvc := settings.NewSettingsService(queries, receiptsStore, logger)
+
 	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
 	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
 	// (not in internal/auth) so the auth package stays DB-agnostic; pgx.ErrNoRows is
@@ -211,11 +218,12 @@ func main() {
 	userHandler := users.NewUserHandler(userSvc, logger)
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
 	slipHandler := donation.NewSlipHandler(slipSvc, logger)
+	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
 
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -265,8 +273,8 @@ func main() {
 //  3. AuditMiddleware — BEFORE RequireAuth to capture auth-failure events too (D-15)
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
-//  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin)
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, logger *zap.Logger) *gin.Engine {
+//  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin) + ResolveAppUser
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -295,9 +303,23 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// ---- Admin /api/admin group (requires admin role — D-01) ----
 	adminGroup := api.Group("/admin")
 	adminGroup.Use(auth.RequireRoles(auth.RoleAdmin))
+	// Resolve Keycloak sub -> users.id for admin routes that need updated_by (Phase 4,
+	// plan 04-07 settings save/image-upload) — mirrors donationGroup's ResolveAppUser
+	// wiring (bug: created-by-fk-mismatch). POST /users does not consume app_user_id
+	// today but requiring the calling admin to be a provisioned users row here too is
+	// consistent with every other *_by-writing route in this API.
+	adminGroup.Use(auth.ResolveAppUser(appUserResolver, logger))
 
 	// POST /api/admin/users — create user (Admin-only, D-01)
 	adminGroup.POST("/users", userHandler.CreateUser)
+
+	// ---- Settings: Admin-only receipt template/compliance config store (Phase 4,
+	// plan 04-07, D-58/D-59/D-61, NFR-09) ----
+	adminGroup.GET("/settings", settingsHandler.Get)
+	adminGroup.PUT("/settings", settingsHandler.Save)
+	adminGroup.POST("/settings/images/:slot", settingsHandler.UploadImage)
+	adminGroup.POST("/settings/preview", settingsHandler.Preview)
+	adminGroup.POST("/settings/preview/pdf", settingsHandler.PreviewPDF)
 
 	// ---- Maker/Checker/Admin — /api/donations (all staff) ----
 	// Pattern E: RequireRoles after RequireAuth — claims must already exist in context.
