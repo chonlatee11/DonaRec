@@ -13,3 +13,49 @@
 -- payload:  e.g. {"donation_id": "uuid-string"} as JSON bytes
 INSERT INTO outbox_jobs (job_type, payload, status)
 VALUES (@job_type, @payload, 'pending');
+
+-- name: ClaimNextOutboxJob :one
+-- Atomically claim exactly one pending/failed job that is due for (re)processing,
+-- race-free across N worker instances/goroutines (04-RESEARCH Pattern 1, verified).
+-- Single round-trip UPDATE...WHERE id=(SELECT...FOR UPDATE SKIP LOCKED) — no
+-- separate SELECT-then-UPDATE step that could race between two workers.
+-- next_attempt_at <= now() excludes jobs still in their backoff window (D-57).
+-- attempts < @max_attempts excludes jobs that have already exhausted retries
+-- (those become 'failed' via MarkOutboxJobFailed and stop being claimable).
+-- Returns pgx.ErrNoRows when there is no eligible job — caller treats this as
+-- "nothing to do this tick", not an error.
+UPDATE outbox_jobs AS o
+SET status = 'processing',
+    updated_at = now()
+WHERE o.id = (
+    SELECT j.id FROM outbox_jobs AS j
+    WHERE j.status IN ('pending', 'failed')
+      AND j.next_attempt_at <= now()
+      AND j.attempts < @max_attempts
+    ORDER BY j.created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING o.id, o.job_type, o.payload, o.attempts;
+
+-- name: MarkOutboxJobDone :exec
+-- Mark a claimed job as successfully processed (render + store + email all
+-- completed). Terminal state — a done job is never reclaimed.
+UPDATE outbox_jobs
+SET status = 'done',
+    updated_at = now()
+WHERE id = @id;
+
+-- name: MarkOutboxJobFailed :exec
+-- Record a failed processing attempt and either re-arm the job for retry
+-- (status stays 'pending', next_attempt_at pushed out per the caller's backoff
+-- schedule — D-57 Pitfall 5: 1m/5m/15m/1h/4h) or, once attempts reaches
+-- @max_attempts, transition to the terminal 'failed' state (dead-letter — no
+-- further auto-retry; staff see the failure and can resend manually, FR-27).
+UPDATE outbox_jobs
+SET status = CASE WHEN attempts + 1 >= @max_attempts THEN 'failed' ELSE 'pending' END,
+    attempts = attempts + 1,
+    last_error = @last_error,
+    next_attempt_at = @next_attempt_at,
+    updated_at = now()
+WHERE id = @id;

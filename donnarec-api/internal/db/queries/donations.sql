@@ -97,7 +97,9 @@ SELECT
     cancel_reason,
     edonation_keyed,
     replaces,
-    replaced_by
+    replaced_by,
+    donor_language,
+    receipt_pdf_object_key
 FROM donations
 WHERE id = @id;
 
@@ -277,6 +279,17 @@ WHERE
 -- which also does not filter on is_active).
 SELECT display_name
 FROM users
+WHERE id = @id;
+
+-- name: SetReceiptPDFObjectKey :exec
+-- Record the frozen receipt PDF's MinIO object key after the worker (04-05)
+-- renders and stores it (D-56, FR-24 immutability). Called exactly once per
+-- donation, outside the issuance transaction (worker's own commit) — resend
+-- (04-06) reads this same key and never re-renders.
+UPDATE donations
+SET
+    receipt_pdf_object_key = @receipt_pdf_object_key,
+    updated_at              = now()
 WHERE id = @id;
 
 -- name: GetReceiptRefByID :one

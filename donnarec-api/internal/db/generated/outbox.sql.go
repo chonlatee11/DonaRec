@@ -7,7 +7,53 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const claimNextOutboxJob = `-- name: ClaimNextOutboxJob :one
+UPDATE outbox_jobs AS o
+SET status = 'processing',
+    updated_at = now()
+WHERE o.id = (
+    SELECT j.id FROM outbox_jobs AS j
+    WHERE j.status IN ('pending', 'failed')
+      AND j.next_attempt_at <= now()
+      AND j.attempts < $1
+    ORDER BY j.created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+RETURNING o.id, o.job_type, o.payload, o.attempts
+`
+
+type ClaimNextOutboxJobRow struct {
+	ID       int64  `db:"id" json:"id"`
+	JobType  string `db:"job_type" json:"job_type"`
+	Payload  []byte `db:"payload" json:"payload"`
+	Attempts int32  `db:"attempts" json:"attempts"`
+}
+
+// Atomically claim exactly one pending/failed job that is due for (re)processing,
+// race-free across N worker instances/goroutines (04-RESEARCH Pattern 1, verified).
+// Single round-trip UPDATE...WHERE id=(SELECT...FOR UPDATE SKIP LOCKED) — no
+// separate SELECT-then-UPDATE step that could race between two workers.
+// next_attempt_at <= now() excludes jobs still in their backoff window (D-57).
+// attempts < @max_attempts excludes jobs that have already exhausted retries
+// (those become 'failed' via MarkOutboxJobFailed and stop being claimable).
+// Returns pgx.ErrNoRows when there is no eligible job — caller treats this as
+// "nothing to do this tick", not an error.
+func (q *Queries) ClaimNextOutboxJob(ctx context.Context, maxAttempts int32) (ClaimNextOutboxJobRow, error) {
+	row := q.db.QueryRow(ctx, claimNextOutboxJob, maxAttempts)
+	var i ClaimNextOutboxJobRow
+	err := row.Scan(
+		&i.ID,
+		&i.JobType,
+		&i.Payload,
+		&i.Attempts,
+	)
+	return i, err
+}
 
 const enqueueOutboxJob = `-- name: EnqueueOutboxJob :exec
 
@@ -33,5 +79,51 @@ type EnqueueOutboxJobParams struct {
 // payload:  e.g. {"donation_id": "uuid-string"} as JSON bytes
 func (q *Queries) EnqueueOutboxJob(ctx context.Context, arg EnqueueOutboxJobParams) error {
 	_, err := q.db.Exec(ctx, enqueueOutboxJob, arg.JobType, arg.Payload)
+	return err
+}
+
+const markOutboxJobDone = `-- name: MarkOutboxJobDone :exec
+UPDATE outbox_jobs
+SET status = 'done',
+    updated_at = now()
+WHERE id = $1
+`
+
+// Mark a claimed job as successfully processed (render + store + email all
+// completed). Terminal state — a done job is never reclaimed.
+func (q *Queries) MarkOutboxJobDone(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markOutboxJobDone, id)
+	return err
+}
+
+const markOutboxJobFailed = `-- name: MarkOutboxJobFailed :exec
+UPDATE outbox_jobs
+SET status = CASE WHEN attempts + 1 >= $1 THEN 'failed' ELSE 'pending' END,
+    attempts = attempts + 1,
+    last_error = $2,
+    next_attempt_at = $3,
+    updated_at = now()
+WHERE id = $4
+`
+
+type MarkOutboxJobFailedParams struct {
+	MaxAttempts   int32              `db:"max_attempts" json:"max_attempts"`
+	LastError     *string            `db:"last_error" json:"last_error"`
+	NextAttemptAt pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+	ID            int64              `db:"id" json:"id"`
+}
+
+// Record a failed processing attempt and either re-arm the job for retry
+// (status stays 'pending', next_attempt_at pushed out per the caller's backoff
+// schedule — D-57 Pitfall 5: 1m/5m/15m/1h/4h) or, once attempts reaches
+// @max_attempts, transition to the terminal 'failed' state (dead-letter — no
+// further auto-retry; staff see the failure and can resend manually, FR-27).
+func (q *Queries) MarkOutboxJobFailed(ctx context.Context, arg MarkOutboxJobFailedParams) error {
+	_, err := q.db.Exec(ctx, markOutboxJobFailed,
+		arg.MaxAttempts,
+		arg.LastError,
+		arg.NextAttemptAt,
+		arg.ID,
+	)
 	return err
 }
