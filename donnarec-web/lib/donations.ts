@@ -153,9 +153,33 @@ export async function fetchDonations(
     throw new Error(message);
   }
 
-  const body = (await res.json()) as { data?: DonationListResponse };
-  // BFF returns the Go envelope { data: { items, total, page, per_page } }.
-  return (body.data ?? (body as unknown as DonationListResponse));
+  const raw = (await res.json()) as unknown;
+  // BFF passes the Go `{data:...}` envelope through; unwrap `.data` when present.
+  const payload =
+    raw && typeof raw === "object" && "data" in (raw as Record<string, unknown>)
+      ? (raw as { data: unknown }).data
+      : raw;
+
+  // Defense-in-depth (Phase 3 UAT bug): DonationTable reads `items.length`, so a
+  // non-array `items` crashes the page. A stale API serving the legacy bare-array
+  // contract `{data:[...]}` is coerced into the paginated shape; any other
+  // unexpected shape surfaces as an error state instead of a runtime TypeError.
+  if (Array.isArray(payload)) {
+    return {
+      items: payload as DonationSummary[],
+      total: payload.length,
+      page: filter.page ?? 1,
+      per_page: payload.length,
+    };
+  }
+  if (
+    payload &&
+    typeof payload === "object" &&
+    Array.isArray((payload as DonationListResponse).items)
+  ) {
+    return payload as DonationListResponse;
+  }
+  throw new Error("รูปแบบข้อมูลรายการบริจาคไม่ถูกต้อง — กรุณาลองอีกครั้ง");
 }
 
 /**

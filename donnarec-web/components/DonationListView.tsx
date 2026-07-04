@@ -74,13 +74,18 @@ export function DonationListView({ filter, viewerId }: DonationListViewProps) {
   }
 
   const result = data ?? { items: [], total: 0, page: 1, per_page: 20 };
+  // Defense-in-depth (Phase 3 UAT bug): never hand a non-array `items` to
+  // DonationTable — it reads `items.length` and crashes. fetchDonations already
+  // normalizes the shape, but guard here too so any upstream contract drift
+  // degrades to an empty table instead of a runtime TypeError.
+  const items = Array.isArray(result.items) ? result.items : [];
 
   return (
     <DonationTable
-      items={result.items}
-      total={result.total}
-      page={result.page}
-      perPage={result.per_page}
+      items={items}
+      total={result.total ?? 0}
+      page={result.page ?? 1}
+      perPage={result.per_page ?? 20}
       currentFilter={currentFilter}
       viewerId={viewerId}
     />
