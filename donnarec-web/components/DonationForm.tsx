@@ -18,6 +18,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Form,
   FormControl,
   FormDescription,
@@ -85,6 +92,7 @@ function buildSchema() {
       }),
     note: z.string().optional(),
     consent: z.boolean().optional(),
+    donor_language: z.enum(["th", "en"]),
   });
 }
 
@@ -97,6 +105,8 @@ type FormValues = {
   donated_at: Date;
   note?: string;
   consent?: boolean;
+  /** D-55/FR-23: document language driving PDF/email rendering, default "th" */
+  donor_language: "th" | "en";
 };
 
 // ---------------------------------------------------------------------------
@@ -116,6 +126,8 @@ interface DonationFormProps {
     note?: string | null;
     slip_url?: string | null;
     review_history?: Array<{ action: string; reason: string }>;
+    /** D-55/FR-23: pre-populates the edit-mode Select; defaults to "th" if absent */
+    donor_language?: "th" | "en";
   };
 }
 
@@ -176,6 +188,7 @@ export function DonationForm({
       donated_at: initialDate,
       note: initialData?.note ?? "",
       consent: false,
+      donor_language: initialData?.donor_language ?? "th",
     },
     mode: "onTouched",
   });
@@ -330,6 +343,7 @@ export function DonationForm({
       ...(values.note ? { note: values.note } : {}),
       consent_given: consentGiven,
       consent_text_version: CONSENT_TEXT_VERSION,
+      donor_language: values.donor_language,
     };
 
     try {
@@ -669,6 +683,34 @@ export function DonationForm({
                         placeholder="หมายเหตุเพิ่มเติม (ไม่บังคับ)"
                       />
                     </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              {/* ภาษาของเอกสาร — D-55/FR-23, frozen at create-time into the snapshot */}
+              <FormField
+                control={control}
+                name="donor_language"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel className="text-[14px] text-slate-700">
+                      {t("fields.donorLanguage")}
+                    </FormLabel>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger className="min-h-[44px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="th">{t("fields.donorLanguageTh")}</SelectItem>
+                        <SelectItem value="en">{t("fields.donorLanguageEn")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription className="text-[13px] text-slate-500">
+                      {t("form.donorLanguageHelper")}
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

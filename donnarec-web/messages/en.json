@@ -138,7 +138,10 @@
     "receiptNumber": "Receipt Number",
     "createdBy": "Created By",
     "status": "Status",
-    "managedAt": "Manage"
+    "managedAt": "Manage",
+    "donorLanguage": "Document Language",
+    "donorLanguageTh": "Thai",
+    "donorLanguageEn": "English"
   },
   "placeholders": {
     "donorNameSearch": "Type name...",
@@ -164,7 +167,8 @@
     "savedSuccess": "Draft saved successfully",
     "submitSuccess": "Submitted for review successfully",
     "unsavedChanges": "You have unsaved changes — leave this page?",
-    "backToList": "Back to list"
+    "backToList": "Back to list",
+    "donorLanguageHelper": "Sets the language of the receipt PDF and email sent to the donor"
   },
   "slip": {
     "zoneLabel": "Attach Payment Slip (optional)",
@@ -182,5 +186,23 @@
   "pii": {
     "revealTooltip": "Revealed data will be hidden when you reload the page",
     "revealAuditNote": "This reveal has been recorded in the audit log"
+  },
+  "emailDelivery": {
+    "heading": "Email Delivery",
+    "noEmailHeading": "No donor email on file",
+    "noEmailBody": "Please download the PDF to deliver it to the donor another way",
+    "notProcessedHeading": "Email not yet sent",
+    "notProcessedBody": "The system is preparing the receipt PDF and email. Please wait a moment.",
+    "recipientLabel": "Recipient",
+    "lastSentLabel": "Last sent",
+    "attemptLabel": "Attempt #{n}",
+    "providerMsgIdLabel": "Provider reference ID",
+    "sendFailed": "Email delivery failed{errorSuffix} Please check the donor's email and try again",
+    "download": "Download PDF",
+    "downloadDisabledTooltip": "The PDF is not ready to download yet",
+    "resend": "Resend Email",
+    "resending": "Sending...",
+    "resendSuccessToast": "Email resent successfully",
+    "resendErrorToast": "Failed to resend the email — please try again later or download the PDF instead"
   }
 }

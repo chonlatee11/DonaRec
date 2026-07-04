@@ -175,6 +175,8 @@ export interface FeDonorFields {
   consent_given: boolean;
   consent_text_version?: string | null;
   consent_purpose?: string | null;
+  /** D-55/FR-23: document language for PDF/email; omitted defaults to "th" server-side */
+  donor_language?: "th" | "en" | null;
 }
 
 /**
@@ -199,5 +201,6 @@ export function mapFeDonorFieldsToGo(
     consent_given: fields.consent_given,
     consent_text_version: fields.consent_text_version ?? "",
     consent_purpose: fields.consent_purpose ?? "tax-receipt",
+    ...(fields.donor_language ? { donor_language: fields.donor_language } : {}),
   };
 }

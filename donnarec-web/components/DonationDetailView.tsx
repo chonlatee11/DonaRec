@@ -12,13 +12,18 @@ import {
   revealPII,
   cancelDonation,
   reissueDonation,
+  resendReceipt,
+  downloadReceipt,
+  apiErrorMessage,
 } from "@/lib/donations";
 import { DonnaRecApiError } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { MaskedIdField } from "@/components/MaskedIdField";
 import { ReviewActionPanel } from "@/components/ReviewActionPanel";
+import { EmailDeliveryPanel } from "@/components/EmailDeliveryPanel";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
 import type { CancelDonationRequest } from "@/lib/donations";
 
 interface DonationDetailViewProps {
@@ -51,6 +56,7 @@ export function DonationDetailView({
   const t = useTranslations();
   const locale = useLocale() as "th" | "en";
   const queryClient = useQueryClient();
+  const { toast } = useToast();
 
   const {
     data: donation,
@@ -93,6 +99,38 @@ export function DonationDetailView({
       queryClient.invalidateQueries({ queryKey: ["donations"] });
     },
   });
+
+  // ── Resend / Download (Screen 3b, D-56/D-57, FR-27/28, plan 04-06) ───────
+  const resendMutation = useMutation({
+    mutationFn: () => resendReceipt(id),
+    onSuccess: () => {
+      invalidate();
+      toast({ description: t("emailDelivery.resendSuccessToast") });
+    },
+    onError: (err) => {
+      toast({
+        variant: "destructive",
+        description: `${t("emailDelivery.resendErrorToast")} (${apiErrorMessage(err)})`,
+      });
+    },
+  });
+  const downloadMutation = useMutation({
+    mutationFn: () => downloadReceipt(id),
+    onSuccess: (result) => {
+      window.open(result.url, "_blank", "noopener,noreferrer");
+    },
+    onError: (err) => {
+      toast({ variant: "destructive", description: apiErrorMessage(err) });
+    },
+  });
+
+  function handleResend() {
+    resendMutation.mutate();
+  }
+
+  function handleDownload() {
+    downloadMutation.mutate();
+  }
 
   // ── ReviewActionPanel-compatible wrappers ────────────────────────────────
   // ReviewActionPanel expects Promise<{error:string}|null> (its original
@@ -304,6 +342,25 @@ export function DonationDetailView({
                     {t("detail.cancelledSuffix")}
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Email Delivery panel (Screen 3b, D-56/D-57, FR-27/28) — directly
+                below the receipt-number block, issued/cancelled only. */}
+            {(donation.status === "issued" || donation.status === "cancelled") && (
+              <div className="mb-6">
+                <EmailDeliveryPanel
+                  status={donation.status}
+                  emailDelivery={donation.email_delivery}
+                  hasPdf={!!donation.receipt_pdf_object_key}
+                  canResend={donation.can_reveal_pii}
+                  onDownload={handleDownload}
+                  onResend={handleResend}
+                  isDownloading={downloadMutation.isPending}
+                  isResending={resendMutation.isPending}
+                  locale={locale}
+                  formatDateTime={formatDateTime}
+                />
               </div>
             )}
 

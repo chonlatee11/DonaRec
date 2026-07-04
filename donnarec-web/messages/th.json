@@ -138,7 +138,10 @@
     "receiptNumber": "เลขที่ใบเสร็จ",
     "createdBy": "ผู้สร้าง",
     "status": "สถานะ",
-    "managedAt": "จัดการ"
+    "managedAt": "จัดการ",
+    "donorLanguage": "ภาษาของเอกสาร",
+    "donorLanguageTh": "ไทย",
+    "donorLanguageEn": "English"
   },
   "placeholders": {
     "donorNameSearch": "พิมพ์ชื่อ...",
@@ -164,7 +167,8 @@
     "savedSuccess": "บันทึกร่างเรียบร้อยแล้ว",
     "submitSuccess": "ส่งรอตรวจสอบเรียบร้อยแล้ว",
     "unsavedChanges": "มีการเปลี่ยนแปลงที่ยังไม่ได้บันทึก — ต้องการออกจากหน้านี้?",
-    "backToList": "กลับรายการ"
+    "backToList": "กลับรายการ",
+    "donorLanguageHelper": "ใช้กำหนดภาษาของใบเสร็จ PDF และอีเมลที่ส่งให้ผู้บริจาค"
   },
   "slip": {
     "zoneLabel": "แนบสลิปการโอนเงิน (ไม่บังคับ)",
@@ -182,5 +186,23 @@
   "pii": {
     "revealTooltip": "ข้อมูลที่เปิดเผยจะถูกซ่อนเมื่อรีโหลดหน้า",
     "revealAuditNote": "การเปิดเผยข้อมูลถูกบันทึกในระบบ audit"
+  },
+  "emailDelivery": {
+    "heading": "การส่งอีเมล",
+    "noEmailHeading": "ผู้บริจาคไม่มีอีเมล",
+    "noEmailBody": "กรุณาดาวน์โหลด PDF เพื่อส่งให้ผู้บริจาคด้วยวิธีอื่น",
+    "notProcessedHeading": "ยังไม่ได้ส่งอีเมล",
+    "notProcessedBody": "ระบบกำลังเตรียมสร้างใบเสร็จ PDF และส่งอีเมล กรุณารอสักครู่",
+    "recipientLabel": "ผู้รับ",
+    "lastSentLabel": "ส่งล่าสุด",
+    "attemptLabel": "ครั้งที่ {n}",
+    "providerMsgIdLabel": "รหัสอ้างอิงผู้ให้บริการ",
+    "sendFailed": "ส่งอีเมลไม่สำเร็จ{errorSuffix} กรุณาตรวจสอบอีเมลผู้บริจาคแล้วลองส่งอีกครั้ง",
+    "download": "ดาวน์โหลด PDF",
+    "downloadDisabledTooltip": "ยังไม่มีไฟล์ PDF ให้ดาวน์โหลด",
+    "resend": "ส่งอีเมลอีกครั้ง",
+    "resending": "กำลังส่ง...",
+    "resendSuccessToast": "ส่งอีเมลอีกครั้งเรียบร้อยแล้ว",
+    "resendErrorToast": "ส่งอีเมลอีกครั้งไม่สำเร็จ — กรุณาลองใหม่ภายหลังหรือดาวน์โหลด PDF แทน"
   }
 }
