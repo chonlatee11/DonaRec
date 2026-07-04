@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { debounce } from "@/lib/debounce";
+import { createLatestGuard } from "@/lib/latest-response";
 import {
   buildPreviewRequest,
   fetchPreviewHTML,
@@ -144,6 +145,12 @@ export function TemplateLivePreview({ formValues, disabled }: TemplateLivePrevie
     (((req: PreviewRequest) => void) & { cancel: () => void }) | null
   >(null);
 
+  // WR-04 fix (04-REVIEW.md): guards against an out-of-order response — the
+  // network gives no guarantee responses resolve in request order, so
+  // without this an OLDER in-flight fetch that resolves LAST could silently
+  // overwrite a newer, still-current preview with stale HTML.
+  const previewGuardRef = useRef(createLatestGuard());
+
   // Stable dependency key so the debounced fetch re-fires only when a value
   // that actually affects the rendered receipt changes (D-61 "no heavy
   // re-render every keystroke" — the debounce utility itself coalesces
@@ -164,15 +171,22 @@ export function TemplateLivePreview({ formValues, disabled }: TemplateLivePrevie
   useEffect(() => {
     if (!debouncedFetchRef.current) {
       debouncedFetchRef.current = debounce((req: PreviewRequest) => {
+        const requestId = previewGuardRef.current.next();
         setHtmlLoading(true);
         setHtmlError(null);
         fetchPreviewHTML(req)
           .then((result) => {
+            if (!previewGuardRef.current.isCurrent(requestId)) return; // stale — a newer request superseded this one
             setHtml(result);
             setHasFetchedOnce(true);
           })
-          .catch((err) => setHtmlError(settingsErrorMessage(err)))
-          .finally(() => setHtmlLoading(false));
+          .catch((err) => {
+            if (!previewGuardRef.current.isCurrent(requestId)) return;
+            setHtmlError(settingsErrorMessage(err));
+          })
+          .finally(() => {
+            if (previewGuardRef.current.isCurrent(requestId)) setHtmlLoading(false);
+          });
       }, 400);
     }
     return () => {
