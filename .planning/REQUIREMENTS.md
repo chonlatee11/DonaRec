@@ -51,7 +51,7 @@
 
 - [x] **FR-25**: ส่งใบเสร็จ PDF แนบอีเมลถึงผู้บริจาคหลังอนุมัติ [M]
 - [x] **FR-27**: บันทึกสถานะการส่ง (สำเร็จ/ล้มเหลว) และส่งซ้ำได้กรณีล้มเหลว [M]
-- [ ] **FR-28**: เจ้าหน้าที่ดาวน์โหลดไฟล์ PDF เองได้ กรณีผู้บริจาคไม่มีอีเมล [S]
+- [x] **FR-28**: เจ้าหน้าที่ดาวน์โหลดไฟล์ PDF เองได้ กรณีผู้บริจาคไม่มีอีเมล [S]
 - [x] **FR-26**: เทมเพลตอีเมลรองรับ 2 ภาษา ตามภาษาผู้บริจาค [S]
 
 ### Donor Data & e-Donation (ข้อมูลผู้บริจาคและ e-Donation)
@@ -153,7 +153,7 @@ Which phases cover which requirements.
 | FR-25 | Phase 4 | Complete |
 | FR-26 | Phase 4 | Complete |
 | FR-27 | Phase 4 | Complete |
-| FR-28 | Phase 4 | Pending |
+| FR-28 | Phase 4 | Complete |
 | FR-33 | Phase 4 | Pending |
 | NFR-09 | Phase 4 | Pending |
 | FR-30 | Phase 5 | Pending |
