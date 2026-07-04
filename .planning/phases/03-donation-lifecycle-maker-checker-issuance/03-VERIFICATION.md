@@ -1,9 +1,17 @@
 ---
 phase: 03-donation-lifecycle-maker-checker-issuance
 verified: 2026-07-04T00:00:00Z
-status: human_needed
-score: 6/6 must-haves verified (automated half of criterion 6 now met; human UI walkthrough still outstanding)
+status: passed
+score: 6/6 must-haves verified; criterion 6 fully met (automated E2E + human UI walkthrough 7/7 passed 2026-07-04)
 overrides_applied: 0
+human_walkthrough:
+  completed: 2026-07-04
+  result: "7/7 checkpoints passed (03-UAT.md). Criterion 6b satisfied."
+  issues_found_and_fixed_in_session:
+    - "stale api container served pre-03-09 bare-array list contract → /donations crash; rebuilt container + list hardening (commit 3b3aeda)"
+    - "NextAuth-only logout left Keycloak SSO alive → could not switch users; federated logout via id_token_hint (commit 78b04f1)"
+    - "RevealPIIDialog rendered a <div> Skeleton inside a <p> → hydration console error (cosmetic); inline <span> skeleton (commit 88e82ff)"
+  remaining_gate: "/gsd:secure-phase 3 (threat-mitigation review) recommended before advancing to Phase 4 — security_enforcement=true, no SECURITY.md yet."
 re_verification:
   previous_status: gaps_found (addendum reopened 2026-07-02; criterion 6 not met)
   previous_score: "5/5 (criteria 1-5); criterion 6 unmet (2 of 3 seam bugs open)"
