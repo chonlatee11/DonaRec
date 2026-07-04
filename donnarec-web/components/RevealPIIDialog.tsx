@@ -11,7 +11,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 
 interface RevealPIIDialogProps {
   open: boolean;
@@ -57,7 +56,12 @@ export function RevealPIIDialog({
           </AlertDialogTitle>
           <AlertDialogDescription>
             {isLoading ? (
-              <Skeleton className="h-4 w-3/4" aria-busy="true" />
+              // Inline skeleton (span, not the block <div> Skeleton): AlertDialogDescription
+              // renders a <p>, and a <div> descendant is invalid HTML → hydration error.
+              <span
+                className="inline-block h-4 w-3/4 animate-pulse rounded-md bg-muted align-middle"
+                aria-busy="true"
+              />
             ) : (
               t("dialogs.revealPii.body")
             )}
