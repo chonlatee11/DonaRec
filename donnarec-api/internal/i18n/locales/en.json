@@ -37,5 +37,32 @@
     },
     "error.internal": {
         "other": "Internal server error. Please try again."
+    },
+    "receipt.header": {
+        "other": "Donation Receipt"
+    },
+    "receipt.donor_label": {
+        "other": "Donor"
+    },
+    "receipt.amount_label": {
+        "other": "Amount (THB)"
+    },
+    "receipt.receipt_no_label": {
+        "other": "Receipt No."
+    },
+    "receipt.date_label": {
+        "other": "Issue Date"
+    },
+    "email.subject": {
+        "other": "Your Donation Receipt from the Hospital"
+    },
+    "email.greeting": {
+        "other": "Dear Valued Donor"
+    },
+    "email.body": {
+        "other": "Thank you for your donation. Please find your donation receipt attached."
+    },
+    "email.footer": {
+        "other": "This is an automated email. Please do not reply."
     }
 }
