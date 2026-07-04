@@ -173,6 +173,10 @@ Data-layer foundation for the entire phase is in place and verified:
 
 No blockers. Note for 04-05/04-07: `section6_text_th`/`section6_text_en` are intentionally empty pending the accounting/legal stakeholder sign-off already tracked in STATE.md — this does not block building the worker or settings UI, only the final production wording.
 
+## Self-Check: PASSED
+
+All created files verified present on disk (10 migration files, 2 new query files, config.go); all 4 commit hashes (1f1ee07, 8e6a255, bd04fb7, dd7911f) verified present in git log.
+
 ---
 *Phase: 04-receipt-pdf-email-delivery-outbox-worker*
 *Completed: 2026-07-04*
