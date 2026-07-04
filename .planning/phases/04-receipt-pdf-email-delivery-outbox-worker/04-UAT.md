@@ -26,8 +26,9 @@ prerequisites: |
   - สร้าง `donnarec-web/.env.local` (ดู `.env.example`): KEYCLOAK_CLIENT_SECRET, NEXTAUTH_SECRET, ฯลฯ
   - รหัสผ่านบัญชีทดสอบ: maker-test@donnarec.local (Maker), checker-test@donnarec.local (Checker), admin-test@donnarec.local (Admin)
   - Stack ครบ: postgres + keycloak + migrate + api + worker + minio + chrome sidecar (docker compose up -d --build), web: npm run dev (:3000)
-result: |
-  [2026-07-04] PASS — เดินจริงผ่าน Chrome (donation 1a46914e). Maker สร้าง donor_language=English + PDPA →
+result: pass
+evidence: |
+  [2026-07-04] เดินจริงผ่าน Chrome (donation 1a46914e). Maker สร้าง donor_language=English + PDPA →
   ส่งรอตรวจสอบ; SoD ที่ขั้นอนุมัติ (Maker เห็น warning อนุมัติเองไม่ได้), PII masked สำหรับ Maker (x-xxxx-xxxxx-x0708).
   Checker (คนละคน) เห็นปุ่มอนุมัติ + reveal PII → อนุมัติ → เลข gap-less 2569/000001, worker async render+ส่งอีเมล
   (NFR-07: approve return ทันที). DeliveryStatusBadge/EmailDeliveryPanel = ส่งสำเร็จ. Resend → re-enqueue
@@ -45,8 +46,9 @@ expected: |
 prerequisites: |
   - เหมือนข้อ 1 (Keycloak confidential client + .env.local + admin-test password + stack ครบ)
   - ล็อกอินด้วย admin-test@donnarec.local (role admin)
-result: |
-  [2026-07-04] PASS — เดินจริงผ่าน Chrome. Negative case: Maker เข้า /admin/settings ถูก redirect กลับ
+result: pass
+evidence: |
+  [2026-07-04] เดินจริงผ่าน Chrome. Negative case: Maker เข้า /admin/settings ถูก redirect กลับ
   /donations (Admin-only gate, sidebar ไม่มีเมนู admin). Admin: /admin/settings โหลด 4 tabs (เทมเพลตใบเสร็จ/
   รูปภาพ/ข้อความลดหย่อนภาษี/รูปแบบเลขที่ใบเสร็จ). Live HTML preview sandboxed (มี note "ไม่รัน JS ไม่โหลดเน็ต")
   ใช้ sample data (นาย ตัวอย่าง ใจบุญ / Jane Sample Donor — ไม่ใช่ donor จริง); toggle ไทย↔อังกฤษ สลับ template จริง.
