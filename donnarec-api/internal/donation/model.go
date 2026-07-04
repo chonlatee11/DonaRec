@@ -93,6 +93,20 @@ type ReceiptRef struct {
 	ReceiptFormatted string `json:"receipt_formatted"`
 }
 
+// EmailDeliveryInfo is the most recent email send attempt for an issued/cancelled
+// donation's receipt PDF (Screen 3b, FR-27) — sourced from the email_delivery table
+// (one row per attempt, worker auto-retry AND staff resend both insert new rows).
+// Nil on DonationDetailResponse when no attempt has been recorded yet (the worker
+// (04-05) has not finished processing the issue_receipt outbox job).
+type EmailDeliveryInfo struct {
+	Status            string    `json:"status"` // "sent" | "failed" | "no_email"
+	SentTo            *string   `json:"sent_to,omitempty"`
+	Attempts          int32     `json:"attempts"`
+	ProviderMessageID *string   `json:"provider_message_id,omitempty"`
+	LastError         *string   `json:"last_error,omitempty"`
+	LastAttemptAt     time.Time `json:"last_attempt_at"`
+}
+
 // ReviewHistoryEntry is one return/reject event in a donation's review history,
 // sourced from the immutable audit_log (D-R3 detail contract, FR-12).
 // Action is normalized to "return" or "reject" (never the raw "donation.return" audit action string).
@@ -165,6 +179,9 @@ type DonationDetailResponse struct {
 	// PDF to object storage (D-56). Used by the FE to gate download/resend button
 	// enablement without a separate round-trip.
 	ReceiptPDFObjectKey *string `json:"receipt_pdf_object_key,omitempty"`
+	// EmailDelivery is the latest send attempt (Screen 3b) — see EmailDeliveryInfo
+	// doc comment. Only ever populated for status issued|cancelled.
+	EmailDelivery *EmailDeliveryInfo `json:"email_delivery,omitempty"`
 	// Server-computed authorization flags (T-03-31) — see type doc comment above.
 	ViewerIsCreator bool `json:"viewer_is_creator"`
 	CanApprove      bool `json:"can_approve"`

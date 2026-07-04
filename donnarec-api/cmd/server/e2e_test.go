@@ -491,6 +491,12 @@ func TestE2E_MakerCheckerIssuancePipeline(t *testing.T) {
 		require.NotNil(t, issued.ReceiptFormatted)
 		originalReceipt := *issued.ReceiptFormatted
 
+		// EmailDelivery must be nil until the worker (04-05) has processed the
+		// issue_receipt job — GetLatestEmailDeliveryForDonation's pgx.ErrNoRows path
+		// must be treated as "not yet", not a 500.
+		assert.Nil(t, issued.EmailDelivery,
+			"email_delivery must be nil before the worker has recorded any send attempt")
+
 		// --- Download before freeze: the worker has not run yet → not-ready error ---
 		w = h.do(t, http.MethodGet, "/api/donations/"+targetID+"/receipt-pdf", makerToken, nil)
 		assert.Equal(t, http.StatusConflict, w.Code,

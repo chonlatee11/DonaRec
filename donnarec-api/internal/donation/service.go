@@ -1497,6 +1497,33 @@ func (s *DonationService) buildDetailResponse(ctx context.Context, row db.Donati
 		})
 	}
 
+	// Screen 3b (Rule 2 — missing critical functionality, plan 04-06 Task 3): the
+	// FE's EmailDeliveryPanel has no other endpoint to source status/recipient/
+	// attempts from, so the latest email_delivery row is surfaced on the detail
+	// response itself. Only fetched for issued/cancelled (draft/pending_review/
+	// rejected never have an issue_receipt outbox job, so email_delivery could
+	// never contain rows for them). ErrNoRows means the worker (04-05) has not
+	// finished processing the issue_receipt job yet — NOT a failure — so
+	// EmailDelivery simply stays nil (FE shows the "not yet processed" empty state).
+	var emailDelivery *EmailDeliveryInfo
+	if row.Status == db.DonationStatusIssued || row.Status == db.DonationStatusCancelled {
+		ed, edErr := s.queries.GetLatestEmailDeliveryForDonation(ctx, row.ID)
+		if edErr != nil {
+			if !errors.Is(edErr, pgx.ErrNoRows) {
+				return nil, fmt.Errorf("get latest email delivery: %w", edErr)
+			}
+		} else {
+			emailDelivery = &EmailDeliveryInfo{
+				Status:            ed.Status,
+				SentTo:            ed.SentTo,
+				Attempts:          ed.Attempts,
+				ProviderMessageID: ed.ProviderMessageID,
+				LastError:         ed.LastError,
+				LastAttemptAt:     ed.CreatedAt.Time,
+			}
+		}
+	}
+
 	resp := &DonationDetailResponse{
 		ID:                  row.ID.String(),
 		Status:              string(row.Status),
@@ -1522,6 +1549,7 @@ func (s *DonationService) buildDetailResponse(ctx context.Context, row db.Donati
 		ReviewHistory:       reviewHistory,
 		DonorLanguage:       row.DonorLanguage,
 		ReceiptPDFObjectKey: row.ReceiptPdfObjectKey,
+		EmailDelivery:       emailDelivery,
 		ViewerIsCreator:     viewerIsCreator,
 		CanApprove:          canReview,
 		CanReturn:           canReview,
