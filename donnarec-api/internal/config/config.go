@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // MinIOConfig holds object storage configuration for MinIO/S3-compatible backends.
@@ -22,8 +23,56 @@ type MinIOConfig struct {
 	SecretKey string
 	// Bucket is the target bucket name for slip files (default: "donnarec-slips").
 	Bucket string
+	// ReceiptsBucket is the target bucket for frozen receipt PDFs (default:
+	// "donnarec-receipts") — kept separate from Bucket (slips) per D-56.
+	ReceiptsBucket string
 	// Secure enables HTTPS for the MinIO connection (false in dev, true in prod).
 	Secure bool
+}
+
+// backoffSchedule is the fixed retry-delay schedule for outbox job auto-retry
+// (D-57, 04-RESEARCH Pitfall 5): 1m -> 5m -> 15m -> 1h -> 4h, then terminal
+// 'failed' (dead-letter — no further auto-retry; staff resend manually, FR-27).
+// Deliberately short relative to generic job-queue advice: staff already have
+// an always-available manual resend + download fallback, so long automated
+// retry windows mostly just delay staff noticing a real problem.
+var backoffSchedule = []time.Duration{
+	1 * time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+	1 * time.Hour,
+	4 * time.Hour,
+}
+
+// WorkerConfig holds configuration for the outbox worker (Phase 4): the
+// headless-Chromium sidecar's CDP endpoint, poll cadence, and retry/backoff
+// knobs (D-57).
+type WorkerConfig struct {
+	// ChromeWSURL is the CDP WebSocket endpoint of the chrome sidecar container
+	// (e.g. "ws://chrome:9222" in Docker) — internal/pdf dials this via
+	// chromedp.NewRemoteAllocator (04-RESEARCH Pattern 2).
+	ChromeWSURL string
+	// PollInterval is how often the worker checks outbox_jobs for claimable work.
+	PollInterval time.Duration
+	// MaxAttempts is the number of send attempts before a job becomes terminally
+	// 'failed' (dead-letter) — matches len(backoffSchedule)+1 attempts total.
+	MaxAttempts int
+}
+
+// ComputeBackoff returns the delay to wait before the next retry, given the
+// number of attempts already made (0-indexed: attempts=0 is the delay before
+// the FIRST retry, i.e. after the initial attempt failed). Once attempts
+// exceeds the schedule's length, the last (longest) delay is reused — this
+// only matters transiently since MarkOutboxJobFailed transitions the job to
+// the terminal 'failed' state once attempts reaches MaxAttempts.
+func (w WorkerConfig) ComputeBackoff(attempts int) time.Duration {
+	if attempts < 0 {
+		attempts = 0
+	}
+	if attempts >= len(backoffSchedule) {
+		return backoffSchedule[len(backoffSchedule)-1]
+	}
+	return backoffSchedule[attempts]
 }
 
 // Config holds the full application configuration loaded from environment variables.
@@ -59,6 +108,9 @@ type Config struct {
 
 	// MinIO (D-48, Plan 03-04) — object storage for donation slip files
 	MinIO MinIOConfig
+
+	// Worker (Phase 4) — outbox worker poll/retry knobs + chrome sidecar CDP URL
+	Worker WorkerConfig
 }
 
 // RetentionConfig holds data-retention policy defaults loaded from environment.
@@ -99,11 +151,17 @@ func Load() (*Config, error) {
 			DefaultLegalBasis:  getEnvStr("RETENTION_DEFAULT_LEGAL_BASIS", "tax_obligation"),
 		},
 		MinIO: MinIOConfig{
-			Endpoint:  os.Getenv("MINIO_ENDPOINT"),
-			AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
-			SecretKey: os.Getenv("MINIO_SECRET_KEY"),
-			Bucket:    getEnvStr("MINIO_BUCKET", "donnarec-slips"),
-			Secure:    getEnvBool("MINIO_SECURE", false),
+			Endpoint:       os.Getenv("MINIO_ENDPOINT"),
+			AccessKey:      os.Getenv("MINIO_ACCESS_KEY"),
+			SecretKey:      os.Getenv("MINIO_SECRET_KEY"),
+			Bucket:         getEnvStr("MINIO_BUCKET", "donnarec-slips"),
+			ReceiptsBucket: getEnvStr("MINIO_RECEIPTS_BUCKET", "donnarec-receipts"),
+			Secure:         getEnvBool("MINIO_SECURE", false),
+		},
+		Worker: WorkerConfig{
+			ChromeWSURL:  getEnvStr("CHROME_WS_URL", "ws://chrome:9222"),
+			PollInterval: getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
+			MaxAttempts:  getEnvInt("WORKER_MAX_ATTEMPTS", 5),
 		},
 	}
 
@@ -184,6 +242,15 @@ func getEnvBool(key string, fallback bool) bool {
 	if v := os.Getenv(key); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
+		}
+	}
+	return fallback
+}
+
+func getEnvDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
 		}
 	}
 	return fallback
