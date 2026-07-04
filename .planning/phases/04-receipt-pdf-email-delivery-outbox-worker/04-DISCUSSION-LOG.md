@@ -56,8 +56,9 @@
 | Full: แก้ HTML ได้ด้วย | config store + Admin HTML template editor เต็มรูป | ✓ |
 | You decide | ให้ planner ชั่งขอบเขต UI | |
 
-**User's choice:** Full: แก้ HTML ได้ด้วย (D-58)
+**User's choice:** Full: แก้ HTML ได้ด้วย (D-58) — **ยืนยันซ้ำ ไม่ถอย Lean**
 **Notes:** ยอมงานใหญ่ขึ้นเพื่อความยืดหยุ่น no-deploy. **Claude flag:** เพิ่ม security surface (template-injection/XSS/SSRF ใน headless Chromium) — CONTEXT บันทึกให้ downstream ออกแบบ sandbox (ปิด JS + network isolation, whitelist placeholder, sanitize upload, Admin-only + audit)
+**Follow-up (รอบทบทวน):** ผู้ใช้เพิ่มความต้องการ → **live preview ตอนแก้ template** + **performance สมูทที่สุด** → บันทึกเป็น **D-61**. Claude flag จุดตึง fidelity: PDF จริง = Chromium (Thai shaping), preview HTML ล้วนอาจไม่ตรง 100% → เสนอ strategy ผสม (live HTML preview + ปุ่มเรนเดอร์ PDF จริง, debounced) ให้ planner ตัดสิน
 
 ---
 
