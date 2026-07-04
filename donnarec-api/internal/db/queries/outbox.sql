@@ -15,13 +15,23 @@ INSERT INTO outbox_jobs (job_type, payload, status)
 VALUES (@job_type, @payload, 'pending');
 
 -- name: ClaimNextOutboxJob :one
--- Atomically claim exactly one pending/failed job that is due for (re)processing,
+-- Atomically claim exactly one pending job that is due for (re)processing,
 -- race-free across N worker instances/goroutines (04-RESEARCH Pattern 1, verified).
 -- Single round-trip UPDATE...WHERE id=(SELECT...FOR UPDATE SKIP LOCKED) — no
 -- separate SELECT-then-UPDATE step that could race between two workers.
 -- next_attempt_at <= now() excludes jobs still in their backoff window (D-57).
--- attempts < @max_attempts excludes jobs that have already exhausted retries
--- (those become 'failed' via MarkOutboxJobFailed and stop being claimable).
+--
+-- WR-05 fix (04-REVIEW.md): status = 'pending' ONLY — 'failed' is NEVER
+-- claimable here. MarkOutboxJobFailed's own CASE logic already treats
+-- 'failed' as terminal (a retriable failure with attempts remaining stays
+-- 'pending'; only a truly exhausted job becomes 'failed'), so a job that
+-- reaches 'failed' must stay dead-lettered forever — staff-triggered resend
+-- (which enqueues a brand-new outbox_jobs row, internal/donation/service.go
+-- Resend) is the only way to retry it. Previously this WHERE also matched
+-- 'failed' (relying solely on attempts < @max_attempts to keep it
+-- unclaimable), which silently "resurrected" a dead-lettered job the moment
+-- an operator raised WORKER_MAX_ATTEMPTS after the fact.
+--
 -- Returns pgx.ErrNoRows when there is no eligible job — caller treats this as
 -- "nothing to do this tick", not an error.
 UPDATE outbox_jobs AS o
@@ -29,7 +39,7 @@ SET status = 'processing',
     updated_at = now()
 WHERE o.id = (
     SELECT j.id FROM outbox_jobs AS j
-    WHERE j.status IN ('pending', 'failed')
+    WHERE j.status = 'pending'
       AND j.next_attempt_at <= now()
       AND j.attempts < @max_attempts
     ORDER BY j.created_at
@@ -43,10 +53,10 @@ RETURNING o.id, o.job_type, o.payload, o.attempts;
 -- never reached MarkOutboxJobDone/MarkOutboxJobFailed — because the worker
 -- process was killed, panicked (see CR-02), OOM-killed, or evicted between
 -- the claim and the completion write — would otherwise stay 'processing'
--- forever: ClaimNextOutboxJob's own filter (status IN ('pending','failed'))
--- deliberately excludes 'processing' rows so two workers never double-process
--- the same job, but that same exclusion means a truly abandoned job had no
--- way back into the claimable set.
+-- forever: ClaimNextOutboxJob's own filter (status = 'pending') deliberately
+-- excludes 'processing' rows so two workers never double-process the same
+-- job, but that same exclusion means a truly abandoned job had no way back
+-- into the claimable set.
 --
 -- Any row whose updated_at is older than @cutoff (now() - StuckJobTimeout,
 -- computed in Go so the threshold is configurable via WORKER_STUCK_JOB_TIMEOUT)
