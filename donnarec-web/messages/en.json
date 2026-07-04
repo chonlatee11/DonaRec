@@ -204,5 +204,71 @@
     "resending": "Sending...",
     "resendSuccessToast": "Email resent successfully",
     "resendErrorToast": "Failed to resend the email — please try again later or download the PDF instead"
+  },
+  "settings": {
+    "pageTitle": "Receipt & Email Settings",
+    "tabs": {
+      "template": "Receipt Template",
+      "images": "Images",
+      "taxText": "Tax Deduction Text",
+      "numberFormat": "Number Format"
+    },
+    "save": "Save Settings",
+    "saving": "Saving...",
+    "saveSuccessToast": "Settings saved — takes effect immediately for new receipts (already-issued receipts are unchanged)",
+    "saveValidationError": "Save failed — the template has an error. Please check variables/HTML syntax",
+    "saveNetworkError": "Failed to save settings — please check your connection and try again",
+    "loadError": "Could not load settings — please try again",
+    "template": {
+      "labelTh": "HTML Template (Thai)",
+      "labelEn": "HTML Template (English)",
+      "helperText": "Edit the receipt template HTML. Use variables such as {{.DonorName}}, {{.Amount}}, {{.ReceiptNo}}",
+      "infoBanner": "This preview renders in a restricted sandbox — no JavaScript runs and no data is loaded from the internet",
+      "previewEmptyHeading": "Preview will appear here",
+      "previewEmptyBody": "Edit the template on the left to see a live preview",
+      "previewModeHtml": "Quick Preview (HTML)",
+      "previewModePdf": "Render Real PDF",
+      "renderingPdf": "Generating PDF preview...",
+      "renderPdfFailed": "Failed to generate PDF preview — please try again or use the HTML preview instead",
+      "previewFailed": "Preview failed — please check the template HTML",
+      "iframeTitle": "Receipt preview (sandboxed)",
+      "previewLanguageTh": "Thai sample",
+      "previewLanguageEn": "English sample"
+    },
+    "images": {
+      "letterhead": "Letterhead/Seal",
+      "seal": "Seal",
+      "signature": "Signature",
+      "watermark": "Watermark",
+      "upload": "Upload Image",
+      "replace": "Replace Image",
+      "remove": "Remove Image",
+      "uploading": "Uploading...",
+      "hasImage": "Image on file",
+      "empty": "No image yet",
+      "rejected": "File not supported — only JPG, PNG up to 2 MB",
+      "ariaLetterhead": "Upload letterhead/seal image",
+      "ariaSeal": "Upload seal image",
+      "ariaSignature": "Upload signature image",
+      "ariaWatermark": "Upload watermark image"
+    },
+    "taxText": {
+      "labelTh": "Tax Deduction Text (Thai)",
+      "labelEn": "Tax Deduction Text (English)",
+      "multiplierLabel": "Section 6 Deduction Eligibility",
+      "multiplier1x": "1x deduction",
+      "multiplier2x": "2x deduction",
+      "helperText": "This text must be confirmed with accounting/legal before publishing"
+    },
+    "numberFormat": {
+      "separatorLabel": "Separator",
+      "paddingLabel": "Digit padding (zero-fill)",
+      "yearFormatLabel": "Year format",
+      "yearFormatBE": "Buddhist Era (4 digits)",
+      "yearFormatCE": "Christian Era (4 digits)",
+      "prefixLabel": "Prefix (optional)",
+      "exampleLabel": "Example",
+      "freezeNote": "Changing the format only affects new receipts — already-issued receipts keep their original format"
+    }
   }
 }

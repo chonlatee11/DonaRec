@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { getTranslations } from "next-intl/server";
+import { Settings } from "lucide-react";
 import { LocaleSwitcher } from "./LocaleSwitcher";
 import { SignOutButton } from "./SignOutButton";
 import { Toaster } from "@/components/ui/toaster";
+import { isAdminViewer } from "@/lib/session-role";
 
 /**
  * AppShell — root layout shell for all back-office pages.
@@ -27,6 +29,10 @@ export async function AppShell({
 }) {
   const t = await getTranslations("nav");
   const tApp = await getTranslations("app");
+  // T-04-25: UX-layer hint only — Go's adminGroup RequireRoles(RoleAdmin)
+  // (04-07) is the real authority. A stale/forged client hint here can, at
+  // worst, show the link to a non-Admin, who then gets a 403 on /admin/settings.
+  const isAdmin = await isAdminViewer();
 
   return (
     <div className="flex min-h-screen bg-slate-50">
@@ -66,6 +72,26 @@ export async function AppShell({
           >
             {t("queue")}
           </Link>
+          {/*
+           * Settings nav item — Admin-only (Screen 6, D-58, plan 04-08).
+           * UI-SPEC Screen 6: "Add a new nav link in AppShell's sidebar ...
+           * rendered only when the signed-in user's role is Admin."
+           */}
+          {isAdmin && (
+            <Link
+              href="/admin/settings"
+              className={[
+                "flex items-center gap-2 rounded-md px-3 py-2",
+                "text-sm text-slate-700",
+                "hover:bg-slate-200 hover:text-slate-900",
+                "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600",
+                "min-h-[44px]",
+              ].join(" ")}
+            >
+              <Settings className="h-4 w-4" />
+              {t("settings")}
+            </Link>
+          )}
         </nav>
       </aside>
 
