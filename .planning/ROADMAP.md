@@ -121,7 +121,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. The donor receives a bilingual email with the PDF attached; send status (success/failure) is recorded, failures are retryable, and resending never allocates a new number.
   5. When a donor has no email, staff can download the receipt PDF directly, and an admin can edit templates, watermark, signature, and number format without a deploy.
 
-**Plans**: 4/8 plans executed
+**Plans**: 5/8 plans executed
 **Wave 1**
 
 - [x] 04-01-PLAN.md — Data-layer & config foundation: migrations 000008–000012 + sqlc worker/email/settings queries + config knobs
@@ -134,7 +134,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-05-PLAN.md — Outbox worker pipeline (TDD): poll→render→freeze PDF→email→record + retry/backoff dead-letter
+- [x] 04-05-PLAN.md — Outbox worker pipeline (TDD): poll→render→freeze PDF→email→record + retry/backoff dead-letter
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -201,6 +201,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
-| 4. Receipt PDF + Email Delivery (Outbox Worker) | 4/8 | In Progress|  |
+| 4. Receipt PDF + Email Delivery (Outbox Worker) | 5/8 | In Progress|  |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
