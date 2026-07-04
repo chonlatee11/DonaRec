@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchFormData, DonnaRecApiError } from "@/lib/api";
+import { apiFetch, DonnaRecApiError } from "@/lib/api";
 import type { ApiError } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
@@ -213,6 +213,22 @@ function mapBffError(status: number, body: Record<string, unknown>): ApiError {
         message: (body.message as string) ?? "กรุณาระบุเหตุผลก่อนดำเนินการ",
         details: body,
       };
+    case 413:
+      // Slip upload — file exceeds the 10 MB server limit (T-03-15).
+      return {
+        type: "validation",
+        status: 413,
+        message: (body.message as string) ?? "ขนาดไฟล์เกิน 10 MB",
+        details: body,
+      };
+    case 415:
+      // Slip upload — magic-byte check rejected the file type (T-03-14).
+      return {
+        type: "validation",
+        status: 415,
+        message: (body.message as string) ?? "ประเภทไฟล์ไม่รองรับ (รองรับ JPG/PNG/PDF เท่านั้น)",
+        details: body,
+      };
     default:
       return {
         type: "network",
@@ -264,6 +280,64 @@ async function bffClientFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
   const body = parsed as { data?: T } | null;
   return (body?.data ?? (parsed as T)) as T;
+}
+
+/**
+ * bffClientFetchFormData — like bffClientFetch but for multipart uploads
+ * (03-13 slip). Does NOT set Content-Type — the browser generates the
+ * multipart boundary from the FormData body (T-03-35 client-side; the slip
+ * BFF route re-posts a fresh FormData to Go the same way).
+ */
+async function bffClientFetchFormData<T>(
+  path: string,
+  formData: FormData,
+  method: "POST" = "POST"
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      body: formData,
+    });
+  } catch (err) {
+    throw new DonnaRecApiError({
+      type: "network",
+      status: 0,
+      message: "บันทึกไม่สำเร็จ — กรุณาตรวจสอบการเชื่อมต่อและลองอีกครั้ง",
+      details: err,
+    });
+  }
+
+  const text = await res.text();
+  let parsed: unknown = null;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (!res.ok) {
+    const body = (parsed ?? {}) as Record<string, unknown>;
+    throw new DonnaRecApiError(mapBffError(res.status, body));
+  }
+
+  if (res.status === 204) return undefined as T;
+
+  const body = parsed as { data?: T } | null;
+  return (body?.data ?? (parsed as T)) as T;
+}
+
+/**
+ * apiErrorMessage — extracts a user-facing Thai message from any error thrown
+ * by a client BFF call. Shared by DonationForm/DonationDetailView (03-13) so
+ * both surfaces render the same message shape for the same server error.
+ */
+export function apiErrorMessage(err: unknown): string {
+  if (err instanceof DonnaRecApiError) return err.error.message;
+  if (err instanceof Error) return err.message;
+  return "เกิดข้อผิดพลาด";
 }
 
 /**
@@ -339,17 +413,26 @@ export interface CreateDonationRequest {
   consent_text_version?: string;
 }
 
-/** Body for PUT /api/donations/:id (update draft) — all fields optional */
+/**
+ * Body for PUT /api/donations/:id (update draft).
+ *
+ * national_id is REQUIRED here (matches CreateDonationRequest) — the Go
+ * UpdateDraftRequest re-encrypts the tax ID on EVERY update and its validator
+ * rejects an empty value (`ErrMissingTaxID` / 422 `missing_tax_id`); there is
+ * no "leave blank to keep existing" path server-side. Because GetByID only
+ * ever returns the masked value (T-03-09 — plaintext is never returned, even
+ * to the creating Maker), the edit form must have the Maker RE-ENTER the full
+ * 13-digit ID on every save (D-R3 contract-alignment fix).
+ */
 export interface UpdateDraftRequest {
-  donor_name?: string;
-  /** If provided, re-encrypted by Go service. If absent, existing value preserved. */
-  national_id?: string;
-  address?: string;
+  donor_name: string;
+  national_id: string;
+  address: string;
   email?: string;
-  amount?: number;
-  donated_at?: string;
+  amount: number;
+  donated_at: string;
   note?: string;
-  consent_given?: boolean;
+  consent_given: boolean;
   consent_text_version?: string;
 }
 
@@ -367,86 +450,95 @@ export interface CancelDonationRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Mutation functions (server-side — require getServerSession via apiFetch)
+// Mutation functions (CLIENT-side via the BFF — D-R1, 03-13)
+//
+// All of these now call the same-origin `/api/bff/donations/**` routes added
+// in 03-13 instead of talking to the Go API directly — the Keycloak access
+// token stays server-side inside the BFF route handler and never reaches the
+// browser. The BFF also maps FE field names (national_id/address/email/note)
+// to the Go contract (donor_tax_id/donor_address/donor_email/notes) for
+// create/update/reissue, so these functions keep the FE field names.
 // ---------------------------------------------------------------------------
 
 /**
- * POST /api/donations — create a new draft.
+ * POST /api/bff/donations — create a new draft (FR-07).
  * Maker role required. national_id encrypted server-side (T-03-08 / D-44).
  */
 export async function createDonation(
   body: CreateDonationRequest
 ): Promise<DonationDetail> {
-  return apiFetch<DonationDetail>("/api/donations", {
+  return bffClientFetch<DonationDetail>("/api/bff/donations", {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 /**
- * PUT /api/donations/:id — update an existing draft.
+ * PUT /api/bff/donations/:id — update an existing draft (FR-09).
  * Only allowed in draft status (ErrInvalidTransition→409 otherwise).
- * national_id re-encrypted if provided; existing value kept if absent.
+ * national_id is always re-encrypted (see UpdateDraftRequest doc comment).
  */
 export async function updateDraft(
   id: string,
   body: UpdateDraftRequest
 ): Promise<DonationDetail> {
-  return apiFetch<DonationDetail>(`/api/donations/${id}`, {
+  return bffClientFetch<DonationDetail>(`/api/bff/donations/${id}`, {
     method: "PUT",
     body: JSON.stringify(body),
   });
 }
 
 /**
- * POST /api/donations/:id/submit — transition draft → pending_review.
+ * POST /api/bff/donations/:id/submit — transition draft → pending_review.
  * Row-level lock ensures gap-less counter safety (D-45).
  */
 export async function submitDonation(id: string): Promise<DonationDetail> {
-  return apiFetch<DonationDetail>(`/api/donations/${id}/submit`, {
+  return bffClientFetch<DonationDetail>(`/api/bff/donations/${id}/submit`, {
     method: "POST",
   });
 }
 
 // ---------------------------------------------------------------------------
-// Slip functions
+// Slip functions (CLIENT-side via the BFF — D-R1, 03-13)
 // ---------------------------------------------------------------------------
 
 /**
- * POST /api/donations/:id/slip (multipart/form-data, field "file").
+ * POST /api/bff/donations/:id/slip (multipart/form-data, field "file").
  * Server performs magic-byte validation (T-03-14/T-03-15).
- * 413 → file too large; 415/422 → unsupported type.
+ * 413 → file too large; 415/422 → unsupported type (see mapBffError).
  */
 export async function uploadSlip(
   id: string,
   formData: FormData
 ): Promise<void> {
-  return apiFetchFormData<void>(`/api/donations/${id}/slip`, formData);
+  return bffClientFetchFormData<void>(`/api/bff/donations/${id}/slip`, formData);
 }
 
 /**
- * GET /api/donations/:id/slip — returns a 15-min presigned URL (T-03-16).
+ * GET /api/bff/donations/:id/slip — returns a 15-min presigned URL (T-03-16).
  * 404 if no active slip (D-48 — cash donations may have none).
  */
 export async function viewSlip(id: string): Promise<SlipViewResponse> {
-  return apiFetch<SlipViewResponse>(`/api/donations/${id}/slip`);
+  return bffClientFetch<SlipViewResponse>(`/api/bff/donations/${id}/slip`);
 }
 
 /**
- * DELETE /api/donations/:id/slip — soft-delete (D-54).
+ * DELETE /api/bff/donations/:id/slip — soft-delete (D-54).
  * The file is NEVER hard-deleted; DB record retains the object key.
  * Returns 204 No Content on success.
  */
 export async function removeSlip(id: string): Promise<void> {
-  return apiFetch<void>(`/api/donations/${id}/slip`, { method: "DELETE" });
+  return bffClientFetch<void>(`/api/bff/donations/${id}/slip`, {
+    method: "DELETE",
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Cancel / Reissue functions (Checker + Admin — 03-06 backend)
+// Cancel / Reissue functions (Checker + Admin, CLIENT-side via the BFF — 03-13)
 // ---------------------------------------------------------------------------
 
 /**
- * POST /api/donations/:id/cancel — void a receipt (Checker + Admin only).
+ * POST /api/bff/donations/:id/cancel — void a receipt (Checker + Admin only).
  * Receipt number is RETAINED for audit trail (no gap created).
  * If edonation_keyed=true, rd_confirmation_reason is mandatory (D-51).
  * ErrEDonationKeyedCancel → 409 when rd_confirmation_reason is missing.
@@ -455,23 +547,25 @@ export async function cancelDonation(
   id: string,
   body: CancelDonationRequest
 ): Promise<DonationDetail> {
-  return apiFetch<DonationDetail>(`/api/donations/${id}/cancel`, {
+  return bffClientFetch<DonationDetail>(`/api/bff/donations/${id}/cancel`, {
     method: "POST",
     body: JSON.stringify(body),
   });
 }
 
 /**
- * POST /api/donations/:id/reissue — void + create replacement draft (D-50).
+ * POST /api/bff/donations/:id/reissue — void + create replacement draft (D-50).
  * New draft requires normal Submit → Approve flow; gets a NEW receipt number.
  * If edonation_keyed=true, rd_confirmation_reason is mandatory (D-51).
- * Returns 201 with the new replacement donation.
+ * The BFF composes the Go request's donor fields server-side from the
+ * original record (see app/api/bff/donations/[id]/reissue/route.ts) — this
+ * client body only ever carries the cancellation reason fields.
  */
 export async function reissueDonation(
   id: string,
   body: CancelDonationRequest
 ): Promise<DonationDetail> {
-  return apiFetch<DonationDetail>(`/api/donations/${id}/reissue`, {
+  return bffClientFetch<DonationDetail>(`/api/bff/donations/${id}/reissue`, {
     method: "POST",
     body: JSON.stringify(body),
   });

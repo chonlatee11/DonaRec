@@ -1,15 +1,7 @@
 import { notFound } from "next/navigation";
-import { revalidatePath } from "next/cache";
-import {
-  getDonation,
-  updateDraft,
-  submitDonation,
-  uploadSlip,
-  removeSlip,
-} from "@/lib/donations";
+import { getDonation } from "@/lib/donations";
 import { DonnaRecApiError } from "@/lib/api";
 import { DonationForm } from "@/components/DonationForm";
-import type { UpdateDraftRequest } from "@/lib/donations";
 
 interface EditDonationPageProps {
   params: Promise<{ id: string }>;
@@ -17,7 +9,9 @@ interface EditDonationPageProps {
 
 /**
  * Edit donation page — Screen 2 (edit mode).
- * Server Component: fetches draft data, defines server actions, passes to DonationForm.
+ * Server Component: fetches draft data server-side, then hands off to the
+ * client DonationForm which owns its own create/update/submit/slip mutations
+ * via useMutation against the BFF (D-R1, 03-13) — no Server Action props.
  *
  * FR-09: Maker edits an existing draft (must be in "draft" status).
  * Server enforces status guard — ErrInvalidTransition → 409 if not draft.
@@ -50,67 +44,6 @@ export default async function EditDonationPage({
     notFound();
   }
 
-  // ── Server actions ────────────────────────────────────────────────────────
-
-  async function handleSaveDraft(
-    data: UpdateDraftRequest
-  ): Promise<{ id?: string; error?: string } | null> {
-    "use server";
-    try {
-      await updateDraft(id, data);
-      revalidatePath(`/donations/${id}`);
-      revalidatePath("/donations");
-      return { id };
-    } catch (err) {
-      const e = err as { error?: { message?: string }; message?: string };
-      return { error: e?.error?.message ?? e?.message ?? "บันทึกไม่สำเร็จ" };
-    }
-  }
-
-  async function handleSubmitForReview(
-    donationId: string
-  ): Promise<{ error?: string } | null> {
-    "use server";
-    try {
-      await submitDonation(donationId);
-      revalidatePath(`/donations/${donationId}`);
-      revalidatePath("/donations");
-      return null;
-    } catch (err) {
-      const e = err as { error?: { message?: string }; message?: string };
-      return { error: e?.error?.message ?? e?.message ?? "ส่งรอตรวจสอบไม่สำเร็จ" };
-    }
-  }
-
-  async function handleUploadSlip(
-    donationId: string,
-    formData: FormData
-  ): Promise<{ error?: string } | null> {
-    "use server";
-    try {
-      await uploadSlip(donationId, formData);
-      revalidatePath(`/donations/${donationId}`);
-      return null;
-    } catch (err) {
-      const e = err as { error?: { message?: string }; message?: string };
-      return { error: e?.error?.message ?? e?.message ?? "อัปโหลดไฟล์ไม่สำเร็จ" };
-    }
-  }
-
-  async function handleRemoveSlip(
-    donationId: string
-  ): Promise<{ error?: string } | null> {
-    "use server";
-    try {
-      await removeSlip(donationId);
-      revalidatePath(`/donations/${donationId}`);
-      return null;
-    } catch (err) {
-      const e = err as { error?: { message?: string }; message?: string };
-      return { error: e?.error?.message ?? e?.message ?? "ลบสลิปไม่สำเร็จ" };
-    }
-  }
-
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -130,10 +63,6 @@ export default async function EditDonationPage({
           slip_url: donation.slip_url,
           review_history: donation.review_history,
         }}
-        onSaveDraft={handleSaveDraft}
-        onSubmitForReview={handleSubmitForReview}
-        onUploadSlip={handleUploadSlip}
-        onRemoveSlip={handleRemoveSlip}
       />
     </div>
   );

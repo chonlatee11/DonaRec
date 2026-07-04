@@ -10,6 +10,8 @@ import {
   returnForEdit,
   reject,
   revealPII,
+  cancelDonation,
+  reissueDonation,
 } from "@/lib/donations";
 import { DonnaRecApiError } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -21,16 +23,6 @@ import type { CancelDonationRequest } from "@/lib/donations";
 
 interface DonationDetailViewProps {
   id: string;
-  /**
-   * Cancel / void-and-reissue (issued-receipt actions) still run as inline
-   * Server Actions passed down from the (server) page shell — they migrate to
-   * the BFF + TanStack pattern in 03-13. Detail fetch + approve/return/reject
-   * already run through the BFF here (03-12).
-   */
-  onCancel?: (body: CancelDonationRequest) => Promise<{ error?: string } | null>;
-  onReissue?: (
-    body: CancelDonationRequest
-  ) => Promise<{ error?: string; newId?: string } | null>;
 }
 
 function errorMessage(err: unknown): string {
@@ -41,22 +33,20 @@ function errorMessage(err: unknown): string {
 
 /**
  * DonationDetailView — client detail/review view for Screen 3 + Screen 4 PII
- * reveal (03-12).
+ * reveal (03-12; cancel/reissue migrated to client mutations in 03-13).
  *
  * Fetches the record via useQuery against the BFF (D-R1: the Keycloak access
  * token stays server-side, obtained inside the BFF route via getServerSession
  * — this component only ever calls the same-origin `/api/bff/donations/:id`).
- * Approve/return/reject run as useMutation calls through the BFF and
- * invalidate the detail query on success so the panel updates without a full
- * page reload. ReviewActionPanel's branching (role x status matrix, SoD
- * DOM-removal) and MaskedIdField's session-only reveal state are unchanged —
- * this view only supplies data + BFF-backed callbacks matching their existing
- * prop contracts.
+ * Approve/return/reject/cancel/reissue all run as useMutation calls through
+ * the BFF and invalidate the detail query on success so the panel updates
+ * without a full page reload. ReviewActionPanel's branching (role x status
+ * matrix, SoD DOM-removal) and MaskedIdField's session-only reveal state are
+ * unchanged — this view only supplies data + BFF-backed callbacks matching
+ * their existing prop contracts.
  */
 export function DonationDetailView({
   id,
-  onCancel,
-  onReissue,
 }: DonationDetailViewProps) {
   const t = useTranslations();
   const locale = useLocale() as "th" | "en";
@@ -87,6 +77,21 @@ export function DonationDetailView({
   const rejectMutation = useMutation({
     mutationFn: (reason: string) => reject(id, reason),
     onSuccess: invalidate,
+  });
+  const cancelMutation = useMutation({
+    mutationFn: (body: CancelDonationRequest) => cancelDonation(id, body),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["donations"] });
+    },
+  });
+  const reissueMutation = useMutation({
+    mutationFn: (body: CancelDonationRequest) => reissueDonation(id, body),
+    onSuccess: (result) => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["donation", result.id] });
+      queryClient.invalidateQueries({ queryKey: ["donations"] });
+    },
   });
 
   // ── ReviewActionPanel-compatible wrappers ────────────────────────────────
@@ -133,6 +138,37 @@ export function DonationDetailView({
     try {
       const result = await revealPII(id);
       return { national_id: result.national_id };
+    } catch (err) {
+      return { error: errorMessage(err) };
+    }
+  }
+
+  /**
+   * Void (cancel) an issued receipt (D-R1, 03-13: client BFF mutation).
+   * T-03-36: rd_confirmation_reason required when edonation_keyed=true.
+   * Server returns 409 ErrEDonationKeyedConfirmation if missing.
+   */
+  async function handleCancel(
+    body: CancelDonationRequest
+  ): Promise<{ error?: string } | null> {
+    try {
+      await cancelMutation.mutateAsync(body);
+      return null;
+    } catch (err) {
+      return { error: errorMessage(err) };
+    }
+  }
+
+  /**
+   * Void & Reissue — cancel original + create replacement draft (D-50).
+   * New draft earns a receipt number only via the normal Submit → Approve path.
+   */
+  async function handleReissue(
+    body: CancelDonationRequest
+  ): Promise<{ error?: string; newId?: string } | null> {
+    try {
+      const result = await reissueMutation.mutateAsync(body);
+      return { newId: result.id };
     } catch (err) {
       return { error: errorMessage(err) };
     }
@@ -487,8 +523,8 @@ export function DonationDetailView({
               onApprove={handleApprove}
               onReturn={handleReturn}
               onReject={handleReject}
-              onCancel={onCancel}
-              onReissue={onReissue}
+              onCancel={handleCancel}
+              onReissue={handleReissue}
             />
           </div>
         </div>

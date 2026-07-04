@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations, useLocale } from "next-intl";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -30,6 +31,14 @@ import { SlipUploadZone } from "@/components/SlipUploadZone";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
+import {
+  createDonation,
+  updateDraft,
+  submitDonation,
+  uploadSlip,
+  removeSlip,
+  apiErrorMessage,
+} from "@/lib/donations";
 import type { CreateDonationRequest, UpdateDraftRequest } from "@/lib/donations";
 
 // ---------------------------------------------------------------------------
@@ -37,32 +46,27 @@ import type { CreateDonationRequest, UpdateDraftRequest } from "@/lib/donations"
 // ---------------------------------------------------------------------------
 
 /**
- * Build the zod schema dynamically based on form mode.
- * - create: national_id required (13 digits numeric)
- * - edit: national_id optional (leave blank to keep existing encrypted value)
+ * Zod schema for both create and edit modes.
+ *
+ * national_id is REQUIRED in BOTH modes (D-R3 contract-alignment fix, 03-13):
+ * the Go UpdateDraftRequest re-encrypts the tax ID on every PUT and rejects
+ * an empty value (missing_tax_id, 422) — there is no server-side "leave blank
+ * to keep existing" path. Because GetByID only ever returns the masked value
+ * (T-03-09 — plaintext is never returned, even to the creating Maker), the
+ * Maker must re-enter the full 13-digit ID on every save, in both modes.
  */
-function buildSchema(mode: "create" | "edit") {
-  const nationalIdCreate = z
+function buildSchema() {
+  const nationalId = z
     .string()
     .min(1, "กรุณากรอก เลขประจำตัวผู้เสียภาษี / เลขบัตรประชาชน")
     .length(13, "เลขประจำตัว/เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก")
     .regex(/^\d+$/, "เลขประจำตัว/เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก");
 
-  // Edit mode: empty string keeps the existing encrypted value; if provided it
-  // must be 13 numeric digits. Kept as a required `string` (never undefined) so
-  // the resolver output type matches FormValues (national_id is mandatory, D-44).
-  const nationalIdEdit = z
-    .string()
-    .refine(
-      (val) => val === "" || (val.length === 13 && /^\d+$/.test(val)),
-      { message: "เลขประจำตัว/เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก" }
-    );
-
   return z.object({
     donor_name: z
       .string()
       .min(1, "กรุณากรอก ชื่อ-นามสกุลผู้บริจาค"),
-    national_id: mode === "create" ? nationalIdCreate : nationalIdEdit,
+    national_id: nationalId,
     address: z.string().min(1, "กรุณากรอก ที่อยู่ผู้บริจาค"),
     email: z
       .string()
@@ -86,7 +90,6 @@ function buildSchema(mode: "create" | "edit") {
 
 type FormValues = {
   donor_name: string;
-  /** Mandatory per D-44. In edit mode "" means "keep existing encrypted value". */
   national_id: string;
   address: string;
   email?: string;
@@ -103,7 +106,7 @@ type FormValues = {
 interface DonationFormProps {
   mode: "create" | "edit";
   donationId?: string;
-  /** Pre-populated values for edit mode */
+  /** Pre-populated values for edit mode (from a server-side getDonation fetch) */
   initialData?: {
     donor_name?: string;
     address?: string;
@@ -114,32 +117,6 @@ interface DonationFormProps {
     slip_url?: string | null;
     review_history?: Array<{ action: string; reason: string }>;
   };
-  /**
-   * Server action: create a new draft or update an existing one.
-   * Returns { id } on success or { error } on failure.
-   */
-  onSaveDraft: (
-    data: CreateDonationRequest | UpdateDraftRequest
-  ) => Promise<{ id?: string; error?: string } | null>;
-  /**
-   * Server action: transition draft → pending_review.
-   * Returns null on success or { error } on failure.
-   */
-  onSubmitForReview: (
-    id: string
-  ) => Promise<{ error?: string } | null>;
-  /**
-   * Server action: upload the slip file (multipart).
-   * Returns null on success or { error } on failure.
-   */
-  onUploadSlip: (
-    id: string,
-    formData: FormData
-  ) => Promise<{ error?: string } | null>;
-  /**
-   * Server action: soft-delete the existing server-side slip (D-54).
-   */
-  onRemoveSlip?: (id: string) => Promise<{ error?: string } | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +134,11 @@ const CONSENT_TEXT_VERSION =
 /**
  * DonationForm — create/edit form for donor details (Screen 2).
  *
+ * 03-13: create/update/submit/slip mutations now run CLIENT-side via
+ * useMutation against lib/donations.ts's BFF-backed functions (D-R1) instead
+ * of Server Action props — the Keycloak token stays server-side inside the
+ * BFF route handlers.
+ *
  * UI-SPEC §Screen 2:
  *   - 4 Card sections: Donor Info / Donation Details / Slip / Consent
  *   - Max-width 680px, single column
@@ -164,25 +146,19 @@ const CONSENT_TEXT_VERSION =
  *   - "ส่งรอตรวจสอบ": full validation incl consent; disabled until consent checked
  *   - Return-from-checker amber alert shown when review_history has a "return" entry
  *   - beforeunload dirty guard
- *
- * T-03-34: PII (national_id) shown as plaintext only while editing the Maker's own draft.
- *   After submit the server returns masked value (handled at detail page level).
  */
 export function DonationForm({
   mode,
   donationId,
   initialData,
-  onSaveDraft,
-  onSubmitForReview,
-  onUploadSlip,
-  onRemoveSlip,
 }: DonationFormProps) {
   const t = useTranslations();
   const locale = useLocale() as "th" | "en";
   const router = useRouter();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const schema = buildSchema(mode);
+  const schema = buildSchema();
 
   // Parse initial date for edit mode
   const initialDate = initialData?.donated_at
@@ -208,25 +184,55 @@ export function DonationForm({
     control,
     handleSubmit,
     watch,
-    formState: { isDirty, isSubmitting },
+    formState: { isDirty },
   } = form;
 
   const consentChecked = watch("consent") ?? false;
+
+  // ── Current record id — starts from the prop, updated after the first
+  //    successful create so a subsequent "save"/"submit" click updates the
+  //    same draft instead of creating a duplicate. ─────────────────────────
+
+  const [currentId, setCurrentId] = useState<string | undefined>(donationId);
+
+  // ── Which top-level action is currently in flight ──────────────────────────
+  // Distinguishes "save draft" from "submit for review" even though both share
+  // the same create/update mutations underneath (persistDraft).
+  const [activeAction, setActiveAction] = useState<"save" | "submit" | null>(
+    null
+  );
 
   // ── Pending slip state ────────────────────────────────────────────────────
 
   const [pendingSlipFile, setPendingSlipFile] = useState<File | null>(null);
   const [slipServerError, setSlipServerError] = useState<string | undefined>();
-  const [slipUploading, setSlipUploading] = useState(false);
   const [existingSlipUrl, setExistingSlipUrl] = useState<string | null>(
     initialData?.slip_url ?? null
   );
 
-  // ── Submission state ──────────────────────────────────────────────────────
+  // ── Mutations (D-R1: client BFF calls, 03-13) ─────────────────────────────
 
-  const [isSaving, setIsSaving] = useState(false);
-  const [isSubmittingForReview, setIsSubmittingForReview] = useState(false);
-  const isAnyPending = isSaving || isSubmittingForReview || isSubmitting;
+  const createMutation = useMutation({
+    mutationFn: (body: CreateDonationRequest) => createDonation(body),
+  });
+  const updateMutation = useMutation({
+    mutationFn: (vars: { id: string; body: UpdateDraftRequest }) =>
+      updateDraft(vars.id, vars.body),
+  });
+  const submitMutation = useMutation({
+    mutationFn: (id: string) => submitDonation(id),
+  });
+  const uploadSlipMutation = useMutation({
+    mutationFn: (vars: { id: string; formData: FormData }) =>
+      uploadSlip(vars.id, vars.formData),
+  });
+  const removeSlipMutation = useMutation({
+    mutationFn: (id: string) => removeSlip(id),
+  });
+
+  const isSaving = activeAction === "save";
+  const isSubmittingForReview = activeAction === "submit";
+  const isAnyPending = activeAction !== null || removeSlipMutation.isPending;
 
   // ── Return-from-checker alert ─────────────────────────────────────────────
 
@@ -267,102 +273,111 @@ export function DonationForm({
     }).format(date);
   }
 
+  // ── Invalidate cached queries after a successful write ────────────────────
+
+  function invalidateDonationQueries(id: string) {
+    queryClient.invalidateQueries({ queryKey: ["donation", id] });
+    queryClient.invalidateQueries({ queryKey: ["donations"] });
+  }
+
   // ── Upload slip helper (called after draft save) ──────────────────────────
 
   async function uploadPendingSlip(id: string): Promise<string | null> {
     if (!pendingSlipFile) return null;
-    setSlipUploading(true);
     setSlipServerError(undefined);
     const fd = new FormData();
     fd.append("file", pendingSlipFile);
-    const result = await onUploadSlip(id, fd);
-    setSlipUploading(false);
-    if (result?.error) {
-      // Map server error to locked i18n copy
-      if (result.error.includes("10 MB") || result.error.includes("size")) {
-        setSlipServerError(t("errors.fileTooLarge"));
-      } else {
-        setSlipServerError(t("errors.fileTypeRejected"));
-      }
-      return result.error;
+    try {
+      await uploadSlipMutation.mutateAsync({ id, formData: fd });
+      setPendingSlipFile(null);
+      return null;
+    } catch (err) {
+      const message = apiErrorMessage(err);
+      setSlipServerError(message);
+      return message;
     }
-    setPendingSlipFile(null);
-    return null;
   }
 
   // ── Remove existing slip ──────────────────────────────────────────────────
 
   const handleRemoveExistingSlip = useCallback(async () => {
-    const id = donationId;
-    if (!id || !onRemoveSlip) return;
-    const result = await onRemoveSlip(id);
-    if (result?.error) {
-      toast({ variant: "destructive", description: result.error });
-    } else {
+    const id = currentId;
+    if (!id) return;
+    try {
+      await removeSlipMutation.mutateAsync(id);
       setExistingSlipUrl(null);
+      invalidateDonationQueries(id);
       toast({ description: "ลบสลิปเรียบร้อยแล้ว" });
+    } catch (err) {
+      toast({ variant: "destructive", description: apiErrorMessage(err) });
     }
-  }, [donationId, onRemoveSlip, toast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentId, removeSlipMutation, toast]);
 
-  // ── Save draft ────────────────────────────────────────────────────────────
+  // ── Save (create or update) the draft; returns the record id or null ──────
 
-  async function saveDraft(values: FormValues) {
-    setIsSaving(true);
-    setSlipServerError(undefined);
-
-    const body: CreateDonationRequest | UpdateDraftRequest = {
+  async function persistDraft(
+    values: FormValues,
+    consentGiven: boolean
+  ): Promise<string | null> {
+    const donorFields = {
       donor_name: values.donor_name,
-      ...(values.national_id ? { national_id: values.national_id } : {}),
+      national_id: values.national_id,
       address: values.address,
       ...(values.email ? { email: values.email } : {}),
       amount: values.amount,
       donated_at: format(values.donated_at, "yyyy-MM-dd"),
       ...(values.note ? { note: values.note } : {}),
-      consent_given: values.consent ?? false,
+      consent_given: consentGiven,
       consent_text_version: CONSENT_TEXT_VERSION,
     };
 
-    const result = await onSaveDraft(body);
-    if (!result || result.error) {
-      setIsSaving(false);
+    try {
+      if (currentId) {
+        const updated = await updateMutation.mutateAsync({
+          id: currentId,
+          body: donorFields as UpdateDraftRequest,
+        });
+        invalidateDonationQueries(currentId);
+        return updated.id;
+      }
+      const created = await createMutation.mutateAsync(
+        donorFields as CreateDonationRequest
+      );
+      setCurrentId(created.id);
+      return created.id;
+    } catch (err) {
       toast({
         variant: "destructive",
         title: "เกิดข้อผิดพลาด",
-        description: result?.error ?? t("errors.network"),
+        description: apiErrorMessage(err),
       });
       return null;
     }
-
-    const savedId = result.id ?? donationId;
-    if (!savedId) {
-      setIsSaving(false);
-      toast({ variant: "destructive", description: t("errors.network") });
-      return null;
-    }
-
-    // Upload pending slip if any
-    if (pendingSlipFile) {
-      const slipErr = await uploadPendingSlip(savedId);
-      if (slipErr) {
-        setIsSaving(false);
-        return null; // slip error displayed inline
-      }
-    }
-
-    setIsSaving(false);
-    return savedId;
   }
 
   // ── Handle "บันทึกร่าง" ───────────────────────────────────────────────────
 
   const handleSaveDraftClick = handleSubmit(async (values) => {
-    const savedId = await saveDraft(values);
-    if (!savedId) return;
-    toast({ description: t("form.savedSuccess") });
-    if (mode === "create") {
-      router.push(`/donations/${savedId}/edit`);
-    } else {
-      router.refresh();
+    setActiveAction("save");
+    try {
+      const savedId = await persistDraft(values, values.consent ?? false);
+      if (!savedId) return;
+
+      if (pendingSlipFile) {
+        const slipErr = await uploadPendingSlip(savedId);
+        if (slipErr) return; // slip error displayed inline
+      }
+
+      invalidateDonationQueries(savedId);
+      toast({ description: t("form.savedSuccess") });
+      if (mode === "create") {
+        router.push(`/donations/${savedId}/edit`);
+      } else {
+        router.refresh();
+      }
+    } finally {
+      setActiveAction(null);
     }
   });
 
@@ -377,61 +392,33 @@ export function DonationForm({
       return;
     }
 
-    setIsSubmittingForReview(true);
-    setSlipServerError(undefined);
+    setActiveAction("submit");
+    try {
+      const savedId = await persistDraft(values, true);
+      if (!savedId) return;
 
-    // Save/update draft first
-    const body: CreateDonationRequest | UpdateDraftRequest = {
-      donor_name: values.donor_name,
-      ...(values.national_id ? { national_id: values.national_id } : {}),
-      address: values.address,
-      ...(values.email ? { email: values.email } : {}),
-      amount: values.amount,
-      donated_at: format(values.donated_at, "yyyy-MM-dd"),
-      ...(values.note ? { note: values.note } : {}),
-      consent_given: true,
-      consent_text_version: CONSENT_TEXT_VERSION,
-    };
+      if (pendingSlipFile) {
+        const slipErr = await uploadPendingSlip(savedId);
+        if (slipErr) return;
+      }
 
-    const saveResult = await onSaveDraft(body);
-    if (!saveResult || saveResult.error) {
-      setIsSubmittingForReview(false);
-      toast({
-        variant: "destructive",
-        description: saveResult?.error ?? t("errors.network"),
-      });
-      return;
-    }
-
-    const savedId = saveResult.id ?? donationId;
-    if (!savedId) {
-      setIsSubmittingForReview(false);
-      return;
-    }
-
-    // Upload pending slip if any
-    if (pendingSlipFile) {
-      const slipErr = await uploadPendingSlip(savedId);
-      if (slipErr) {
-        setIsSubmittingForReview(false);
+      try {
+        await submitMutation.mutateAsync(savedId);
+      } catch (err) {
+        toast({
+          variant: "destructive",
+          description: apiErrorMessage(err),
+        });
         return;
       }
-    }
 
-    // Submit for review
-    const submitResult = await onSubmitForReview(savedId);
-    if (submitResult?.error) {
-      setIsSubmittingForReview(false);
-      toast({
-        variant: "destructive",
-        description: submitResult.error,
-      });
-      return;
+      invalidateDonationQueries(savedId);
+      queryClient.invalidateQueries({ queryKey: ["donations"] });
+      toast({ description: t("form.submitSuccess") });
+      router.push(`/donations/${savedId}`);
+    } finally {
+      setActiveAction(null);
     }
-
-    setIsSubmittingForReview(false);
-    toast({ description: t("form.submitSuccess") });
-    router.push(`/donations/${savedId}`);
   });
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -506,9 +493,7 @@ export function DonationForm({
                   <FormItem>
                     <FormLabel className="text-[14px] text-slate-700">
                       {t("fields.nationalId")}{" "}
-                      {mode === "create" && (
-                        <span className="text-red-600" aria-hidden="true">*</span>
-                      )}
+                      <span className="text-red-600" aria-hidden="true">*</span>
                     </FormLabel>
                     <FormControl>
                       <Input
@@ -517,13 +502,9 @@ export function DonationForm({
                         type="text"
                         inputMode="numeric"
                         maxLength={13}
-                        aria-required={mode === "create" ? "true" : "false"}
+                        aria-required="true"
                         className="min-h-[44px] font-mono"
-                        placeholder={
-                          mode === "edit"
-                            ? t("form.nationalIdEditPlaceholder")
-                            : "1234567890123"
-                        }
+                        placeholder="1234567890123"
                       />
                     </FormControl>
                     {mode === "edit" && (
@@ -707,11 +688,9 @@ export function DonationForm({
                 existingSlipUrl={existingSlipUrl}
                 onFileChange={setPendingSlipFile}
                 onRemoveExisting={
-                  donationId && onRemoveSlip
-                    ? handleRemoveExistingSlip
-                    : undefined
+                  currentId ? handleRemoveExistingSlip : undefined
                 }
-                uploading={slipUploading}
+                uploading={uploadSlipMutation.isPending}
                 serverError={slipServerError}
                 disabled={isAnyPending}
               />
