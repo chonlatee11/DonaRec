@@ -186,7 +186,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	pdfRenderer, err := pdf.NewRenderer(chromeWSURL)
 	require.NoError(t, err, "pdf renderer must construct against the test chrome sidecar")
 	settingsStore := newFakeSettingsStore()
-	settingsSvc := settings.NewSettingsService(queries, settingsStore, logger)
+	settingsSvc := settings.NewSettingsService(pool, queries, settingsStore, logger)
 	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
 
 	// Handlers.

@@ -8,10 +8,13 @@ import (
 	"io"
 	"regexp"
 
+	dbhelpers "github.com/donnarec/donnarec-api/internal/db"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
 
@@ -70,6 +73,7 @@ type ReceiptsStore interface {
 // (D-58/D-59, Phase 2 receipt_number_config) and builds sample-data preview HTML (D-61).
 // Mirrors internal/receiptno/allocator.go's config-row read/format-service shape.
 type SettingsService struct {
+	pool          *pgxpool.Pool
 	queries       *db.Queries
 	receiptsStore ReceiptsStore
 	logger        *zap.Logger
@@ -80,11 +84,15 @@ type SettingsService struct {
 // receiptno.NewAllocator's constructor style. receiptsStore may be nil for callers that
 // only need GetSettings/SaveSettings (which never touch it) — SaveTemplateImage and
 // BuildPreviewHTML (when an image object key is set) require a non-nil receiptsStore.
-func NewSettingsService(queries *db.Queries, receiptsStore ReceiptsStore, logger *zap.Logger) *SettingsService {
+// pool may be nil for tests that only exercise the pre-DB-write validation paths of
+// SaveSettings/SaveTemplateImage (mirrors donation.NewDonationService's constructor
+// style) — SaveSettings's transactional write (WR-07, 04-REVIEW.md) requires a non-nil
+// pool.
+func NewSettingsService(pool *pgxpool.Pool, queries *db.Queries, receiptsStore ReceiptsStore, logger *zap.Logger) *SettingsService {
 	if queries == nil {
 		panic("settings.NewSettingsService: queries must not be nil")
 	}
-	return &SettingsService{queries: queries, receiptsStore: receiptsStore, logger: logger}
+	return &SettingsService{pool: pool, queries: queries, receiptsStore: receiptsStore, logger: logger}
 }
 
 // GetSettings returns the merged config: the template/branding config joined with the
@@ -142,32 +150,41 @@ func (s *SettingsService) SaveSettings(ctx context.Context, input ReceiptSetting
 		return ErrInvalidNumberFormat
 	}
 
-	if err := s.queries.UpdateReceiptTemplateConfig(ctx, db.UpdateReceiptTemplateConfigParams{
-		TemplateHtml:        input.TemplateHTML,
-		TemplateHtmlEn:      input.TemplateHTMLEn,
-		Section6TextTh:      input.Section6TextTh,
-		Section6TextEn:      input.Section6TextEn,
-		DeductionMultiplier: input.DeductionMultiplier,
-		LetterheadObjectKey: input.LetterheadObjectKey,
-		SealObjectKey:       input.SealObjectKey,
-		SignatureObjectKey:  input.SignatureObjectKey,
-		WatermarkObjectKey:  input.WatermarkObjectKey,
-		UpdatedBy:           updatedBy,
-	}); err != nil {
-		return fmt.Errorf("settings: update template config: %w", err)
-	}
+	// WR-07 fix (04-REVIEW.md): both writes share ONE transaction (Pattern B,
+	// dbhelpers.WithTx — the same helper every other service's atomic mutation
+	// uses, e.g. internal/donation/service.go) so a failure on either write
+	// rolls back BOTH — no partial save, matching what this method's own doc
+	// comment already promised.
+	return dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
 
-	if err := s.queries.UpdateReceiptNumberConfig(ctx, db.UpdateReceiptNumberConfigParams{
-		Separator:        input.Separator,
-		RunningNoPadding: int32(input.RunningNoPadding),
-		YearFormat:       input.YearFormat,
-		Prefix:           input.Prefix,
-		UpdatedBy:        updatedBy,
-	}); err != nil {
-		return fmt.Errorf("settings: update number format config: %w", err)
-	}
+		if err := qtx.UpdateReceiptTemplateConfig(ctx, db.UpdateReceiptTemplateConfigParams{
+			TemplateHtml:        input.TemplateHTML,
+			TemplateHtmlEn:      input.TemplateHTMLEn,
+			Section6TextTh:      input.Section6TextTh,
+			Section6TextEn:      input.Section6TextEn,
+			DeductionMultiplier: input.DeductionMultiplier,
+			LetterheadObjectKey: input.LetterheadObjectKey,
+			SealObjectKey:       input.SealObjectKey,
+			SignatureObjectKey:  input.SignatureObjectKey,
+			WatermarkObjectKey:  input.WatermarkObjectKey,
+			UpdatedBy:           updatedBy,
+		}); err != nil {
+			return fmt.Errorf("settings: update template config: %w", err)
+		}
 
-	return nil
+		if err := qtx.UpdateReceiptNumberConfig(ctx, db.UpdateReceiptNumberConfigParams{
+			Separator:        input.Separator,
+			RunningNoPadding: int32(input.RunningNoPadding),
+			YearFormat:       input.YearFormat,
+			Prefix:           input.Prefix,
+			UpdatedBy:        updatedBy,
+		}); err != nil {
+			return fmt.Errorf("settings: update number format config: %w", err)
+		}
+
+		return nil
+	})
 }
 
 // SaveTemplateImage validates (magic-byte + 2 MB cap, via receiptsStore.PutTemplateImage)

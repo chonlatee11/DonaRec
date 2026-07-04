@@ -198,7 +198,7 @@ func main() {
 	// config store (D-58/D-59/NFR-09). Reuses the SAME receiptsStore the worker (above)
 	// reads branding images from, and the SAME pdfRenderer for the real-PDF preview path
 	// (D-61 — preview must go through the identical sandboxed pipeline as production).
-	settingsSvc := settings.NewSettingsService(queries, receiptsStore, logger)
+	settingsSvc := settings.NewSettingsService(pool, queries, receiptsStore, logger)
 
 	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
 	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
