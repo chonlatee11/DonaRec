@@ -383,4 +383,45 @@ func TestE2E_MakerCheckerIssuancePipeline(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, w.Code, "body: %s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "invalid_token")
 	})
+
+	t.Run("Cancel_RetainsReceiptNumber_RealPath", func(t *testing.T) {
+		// Create → submit → approve a fresh donation over the real router so this
+		// subtest owns its own record (independent of HappyPath's donationID).
+		w := h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาง ทดสอบ ยกเลิก"))
+		require.Equal(t, http.StatusCreated, w.Code, "create body: %s", w.Body.String())
+		cancelTargetID := decodeDonation(t, w).ID
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+cancelTargetID+"/submit", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "submit body: %s", w.Body.String())
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+cancelTargetID+"/approve", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "approve body: %s", w.Body.String())
+		issuedForCancel := decodeDonation(t, w)
+		require.NotNil(t, issuedForCancel.ReceiptFormatted, "receipt_formatted must be set after issuance")
+		originalReceipt := *issuedForCancel.ReceiptFormatted
+		require.NotEmpty(t, originalReceipt)
+
+		// A maker-only token must be rejected from the checker-only cancel route
+		// (RequireAnyRole(checker,admin) route guard) — 403, before the service layer.
+		w = h.do(t, http.MethodPost, "/api/donations/"+cancelTargetID+"/cancel", makerToken,
+			map[string]any{"reason": "e2e cancel — maker attempt"})
+		require.Equal(t, http.StatusForbidden, w.Code,
+			"maker token must be rejected from the checker-only cancel route; body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "insufficient_role")
+
+		// POST /api/donations/{id}/cancel (checker) → 200, status=cancelled, and the
+		// receipt number is RETAINED — cancelling must never create a gap in the
+		// gap-less counter (FR-19, D-47, the load-bearing invariant of the project).
+		w = h.do(t, http.MethodPost, "/api/donations/"+cancelTargetID+"/cancel", checkerToken,
+			map[string]any{"reason": "e2e cancel"})
+		require.Equal(t, http.StatusOK, w.Code, "cancel body: %s", w.Body.String())
+		cancelled := decodeDonation(t, w)
+		assert.Equal(t, "cancelled", cancelled.Status)
+		require.NotNil(t, cancelled.ReceiptFormatted,
+			"receipt_formatted must still be set after cancellation — the number is retained, never cleared")
+		assert.NotEmpty(t, *cancelled.ReceiptFormatted,
+			"receipt number must be retained on cancel (gap-less invariant — cancelled records keep their number)")
+		assert.Equal(t, originalReceipt, *cancelled.ReceiptFormatted,
+			"the cancelled record's receipt number must be identical to the pre-cancel issued number")
+	})
 }
