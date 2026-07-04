@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: receipt-pdf-email-delivery-outbox-worker
 status: verifying
-stopped_at: "Completed 04-07-PLAN.md (Admin settings API: config store + preview)"
-last_updated: "2026-07-04T12:00:08.567Z"
+stopped_at: "Completed Phase 04 code-review fixes (04-REVIEW.md): CR-01, CR-02, WR-01, WR-02, WR-04, WR-05, WR-06, WR-07 fixed; WR-03 documented as known limitation"
+last_updated: "2026-07-04T13:06:47.293Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 30
-  completed_plans: 30
+  completed_plans: 31
   percent: 67
 ---
 
@@ -122,6 +122,7 @@ Recent decisions affecting current work:
 - [Phase ?]: 04-08: Admin settings route is /admin/settings (plan's file path); Admin gating is a client UX hint only, Go RequireRoles(RoleAdmin) remains the real authority
 - [Phase 04]: 04-08: TemplateEditor.tsx split into TemplateEditorFields + TemplateLivePreview so the live preview persists across all four tabs, not just the template tab
 - [Phase 04]: 04-08: TH Sarabun New font remains unsourced (same open licensing item as backend) — preview iframe falls back to Google-Fonts Sarabun until public/fonts/THSarabunNew.woff2 is provided
+- [Phase 04]: [Phase 04] Code-review fixes (04-REVIEW.md): CR-01/CR-02 (blockers) and WR-01/02/04/05/06/07 fixed with RED/GREEN tests; WR-03 (deduction_multiplier frozen-at-approval) documented as a known limitation rather than reworking the Approve transaction — see 04-REVIEW-FIXES-SUMMARY.md
 
 ### Pending Todos
 
@@ -159,7 +160,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T11:58:37.211Z
-Stopped at: Completed 04-07-PLAN.md (Admin settings API: config store + preview)
+Last session: 2026-07-04T13:06:47.282Z
+Stopped at: Completed Phase 04 code-review fixes (04-REVIEW.md): CR-01, CR-02, WR-01, WR-02, WR-04, WR-05, WR-06, WR-07 fixed; WR-03 documented as known limitation
 Resume file: 
 None
