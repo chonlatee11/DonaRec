@@ -1,74 +1,100 @@
 ---
 phase: 03-donation-lifecycle-maker-checker-issuance
-verified: 2026-07-01T00:00:00Z
+verified: 2026-07-04T00:00:00Z
 status: human_needed
-score: 5/5 must-haves verified
+score: 6/6 must-haves verified (automated half of criterion 6 now met; human UI walkthrough still outstanding)
 overrides_applied: 0
+re_verification:
+  previous_status: gaps_found (addendum reopened 2026-07-02; criterion 6 not met)
+  previous_score: "5/5 (criteria 1-5); criterion 6 unmet (2 of 3 seam bugs open)"
+  gaps_closed:
+    - "created-by-fk-mismatch (bug #1) — fixed pre-remediation, reconfirmed still fixed"
+    - "fe-be-audience-mismatch (bug #2) — audience mapper + confidential client committed to keycloak/realm-donnarec.json; donnarec-web/.env.example added"
+    - "RBAC AND-bug (bug #3) — RequireAnyRole (OR semantics) now used for donationGroup and checkerGroup in cmd/server/main.go (commit b10fae8)"
+    - "D-R2 pagination envelope {data:{items,total,page,per_page}} implemented in handler.go List + service.go Search with real COUNT (03-09)"
+    - "D-R1 BFF proxy pattern implemented: all 11 donation BFF routes under app/api/bff/donations/** obtain the Keycloak token server-side via getServerSession/bffForward — token never reaches the browser (03-10/03-12/03-13)"
+    - "D-R3 all screens migrated: list, detail, PII reveal, approve/return/reject, cancel/reissue, create/update/submit, slip — all via TanStack Query/Table + BFF (03-10..03-13)"
+    - "bug #5 (apiFetch does not unwrap `data`, causing `result.donations` crash) — root-fixed; apiFetch now unwraps the envelope; zero remaining `result.donations` property-access call sites"
+    - "Automated E2E integration test covering the critical Maker/Checker flows over the REAL HTTP path with a real minted Keycloak token now exists and passes (cmd/server/e2e_test.go: TestE2E_MakerCheckerIssuancePipeline, 7 subtests)"
+  gaps_remaining:
+    - "Human UI walkthrough (criterion 6, part b) has not yet been performed against a live full stack with a real Keycloak session — every remediation plan's final checkpoint (03-10, 03-12, 03-13) explicitly defers this to a dedicated human pass"
+  regressions: []
 human_verification:
-  - test: "Run integration tests with Docker available"
-    expected: "All tests in internal/donation/service_integration_test.go pass including TestConcurrentApproval_ExactlyOneSucceeds (N=5, -race), TestIssuanceTransaction_RollbackOnError, TestSoD_DBCheckConstraint, TestCancelRetainsReceiptNumber, TestVoidAndReissue, TestPII_RevealRequiresCheckerOrAdmin"
-    why_human: "Tests require Docker/testcontainers (skip with -short). Cannot verify without live Postgres container."
-  - test: "View donation list page in browser at /donations"
-    expected: "Table shows donations with Thai text, masked national IDs, status badges, date ranges. Filter bar with name/status/date/receipt_no works. Pagination works."
-    why_human: "Visual rendering and i18n (Thai/English) cannot be verified programmatically."
-  - test: "View donation detail page as Checker for a record created by a different Maker"
-    expected: "Review action panel shows: Approve, Return (ตีกลับแก้ไข), Reject (ปฏิเสธถาวร) buttons. Reason dialog appears with textarea before confirm."
-    why_human: "Role-based UI branching via viewer_is_creator requires live Keycloak session."
-  - test: "View donation detail page as Checker for a record they created (SoD)"
-    expected: "SoDBlockedAlert renders. Approve/Return/Reject buttons are absent from DOM (not just disabled)."
-    why_human: "SoD blocked state requires live Keycloak session with matching created_by."
-  - test: "PII reveal flow in browser"
-    expected: "Masked ID shows (e.g. x-xxxx-xxxxx-x0123). Clicking reveal button shows full national ID. Reloading the page re-masks it."
-    why_human: "Session-only reveal state and audit write require live session."
-  - test: "Cancel issued receipt with edonation_keyed=true via UI"
-    expected: "Cancel dialog shows rd_confirmation_reason field with warning text. Submit without filling in rd_confirmation_reason is blocked. Filling in the field and submitting sets status=cancelled."
-    why_human: "Dialog interaction and warning display requires manual browser testing."
+  - test: "Full-stack human UI walkthrough: bring up Go API + Postgres + Keycloak + MinIO + Next.js web app; sign in as two distinct Keycloak users (Maker A, Checker B)"
+    expected: "Maker A can create -> edit (draft) -> upload slip -> submit a donation at /donations/new and /donations/[id]/edit. Checker B opens the pending_review record at /donations/[id] and sees Approve/Return/Reject buttons; approving issues a receipt number visible in the UI."
+    why_human: "Requires a live Keycloak session (real login flow), real browser rendering, and real cross-user handoff — cannot be verified by grep or by the automated E2E test's httptest-only requests."
+  - test: "DevTools Network tab check: confirm the Keycloak access token never appears in any response body sent to the browser"
+    expected: "Inspect responses from /api/bff/donations, /api/bff/donations/[id], and all mutation routes — no access_token/Bearer string present anywhere in the JSON payloads returned to the client (D-R1 posture)."
+    why_human: "Requires live browser DevTools inspection of real network traffic; cannot be grepped from source."
+  - test: "SoD blocked state: log in as a Checker who is also the creator of a record (or reuse the dual-role E2E fixture pattern in the browser) and open that record's detail page"
+    expected: "SoDBlockedAlert renders; Approve/Return/Reject buttons are absent from the DOM entirely (not merely disabled)."
+    why_human: "Requires a live Keycloak session where `viewer_is_creator` is server-computed and reflected in real DOM output; the E2E test asserts the JSON flag but not the rendered DOM."
+  - test: "PII reveal UX in the browser: open a donation as Checker/Admin, confirm the masked national ID displays, click reveal, confirm plaintext replaces it, then reload and confirm it re-masks"
+    expected: "Masked ID shown by default; reveal button fetches plaintext via /api/bff/donations/[id]/pii; audit_log gains one pii.reveal row; reload re-masks (session-only reveal state)."
+    why_human: "Session-only client state and a live audit-log side effect require a real browser + live backend, not just the BFF unit test's mocked assertions."
+  - test: "Filter/pagination interaction on /donations: filter by name/status/date-range/receipt_no, and page through results"
+    expected: "TanStack Table re-fetches via /api/bff/donations with updated query params; rows update; masked national IDs never appear in list rows (PII-free per D-53); Thai/English i18n renders correctly."
+    why_human: "Visual rendering, i18n, and interactive client-state behavior cannot be verified programmatically."
+  - test: "Cancel / Void & Reissue dialogs in the browser, including edonation_keyed=true guard"
+    expected: "Cancel dialog requires a reason; when edonation_keyed=true, rd_confirmation_reason is required and blocks submit until filled; Void & Reissue creates a new draft, cancels the original, and the receipt number is retained on the original (matches the E2E-proven backend invariant)."
+    why_human: "Dialog interaction, conditional field rendering, and multi-step UI flow require manual browser testing."
 ---
 
-# Phase 3: Donation Lifecycle & Maker-Checker Issuance — Verification Report
+# Phase 3: Donation Lifecycle & Maker-Checker Issuance — Verification Report (Remediation Re-Verification)
 
-**Phase Goal:** A Maker can create and submit a donation record with encrypted donor details, a Checker (who is never the Maker) can approve or return it with a reason, and approval issues a numbered receipt in one atomic transaction.
+**Phase Goal:** A Maker can create/submit a donation with encrypted donor PII; a Checker (never the Maker) can approve/return; approval issues a gap-less numbered receipt in one atomic transaction. Criterion 6 (added on reopen): an automated E2E test drives the REAL HTTP path (router → RequireAuth → RequireRoles/ResolveAppUser → handler → service → DB) with a realistic Keycloak token for the critical flows, AND the human UI walkthrough passes.
 
-**Verified:** 2026-07-01
+**Verified:** 2026-07-04
 
-**Status:** HUMAN_NEEDED — all 5 success criteria pass automated checks. 6 items require human/Docker verification (integration tests + visual/session-dependent UI flows).
+**Status:** HUMAN_NEEDED — the remediation slice (03-09..03-13) closes the integration gate's *automated* half (criterion 6a) and re-confirms criteria 1-5 are not regressed. Criterion 6's *human* half (6b, the UI walkthrough) has not been performed by any of the remediation plans — each one's final checkpoint explicitly defers it. This is not a code gap; it is the one remaining required gate before the phase can be marked Complete.
 
-**Re-verification:** No — initial verification.
+**Re-verification:** Yes — after remediation of the 2026-07-02 reopen (bugs #1-#3 + the D-R1/D-R2/D-R3 frontend contract migration).
 
 ---
 
-## Goal Achievement
+## Goal Achievement — Remediation Focus
 
-### Observable Truths
+### Observable Truths (remediation scope)
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Maker can create draft, edit while draft, view attached slip, submit; lifecycle draft → pending_review → issued/rejected/cancelled is explicit and enforced | VERIFIED | `service.go:81-98` canTransition() is single source of truth; `UpdateDraft` guards with `canTransition("update")`; `Submit` guards with `canTransition("submit")`; `slip_handler.go` + `storage/client.go` implement MinIO upload with presigned URL; migration `000005` defines `donation_status` enum with 5 values + REVOKE DELETE |
-| 2 | Checker can approve or return with a mandatory reason on return; server blocks a user approving a record they created (SoD) in service code AND DB CHECK constraint | VERIFIED | `service.go:564-567` `locked.CreatedBy == approverUUID → ErrSoDViolation`; `migrations/000005_donations.up.sql:101-103` `CONSTRAINT chk_sod_approver CHECK (approved_by IS NULL OR approved_by != created_by)`; `Return()` and `Reject()` both check `strings.TrimSpace(reason) == "" → ErrMissingReason`; integration tests `TestSoD_ApproverCannotBeCreator` and `TestSoD_DBCheckConstraint` |
-| 3 | On approval, a SINGLE DB transaction sets status=issued, allocates gap-less number (via Phase 2 allocator, not SEQUENCE), writes audit row, and enqueues outbox job; receipt number exists ONLY for issued/cancelled records; no PDF/email in the tx | VERIFIED | `service.go:543-623` Approve() is a single `dbhelpers.WithTx` closure with 7 ordered steps (lock, status check, SoD, `s.allocator.Allocate(ctx, tx, ...)`, `qtx.IssueDonation`, `auditSvc.AppendAuditEntryTx`, `qtx.EnqueueOutboxJob`); `migrations/000005:104-110` `CONSTRAINT chk_receipt_only_on_issued_or_cancelled` enforces receipt_number_id IS NOT NULL IFF status IN ('issued','cancelled'); outbox comment: "Do NOT render PDF or send email here" (`service.go:610`); integration test `TestIssuanceTransaction_RollbackOnError` (3 scenarios) + `TestOutboxAtomicity` |
-| 4 | Cancelling an issued receipt sets status "ยกเลิก"/cancelled and RETAINS its number (no gap, never deleted); action audited | VERIFIED | `service.go:812-919` Cancel() does NOT null out receipt_number_id or receipt_formatted; `CancelDonation` SQL only updates status/cancelled_by/cancelled_at/cancel_reason; `chk_receipt_only_on_issued_or_cancelled` CHECK allows non-null receipt on cancelled; `AppendAuditEntryTx` called in same TX; `D-51` e-Donation keyed guard enforced; integration test `TestCancelRetainsReceiptNumber` asserts receipt_number_id stays non-null + B.running_no = A.running_no + 1 |
-| 5 | Donor national/tax ID encrypted at rest (AES-256-GCM); masked everywhere except authorized audited reveals; staff can search/filter by name, date range, status, receipt number (NOT tax ID) | VERIFIED | `service.go:123-125` `crypto.EncryptField` called before any DB write; `migrations/000005:57-58` `donor_tax_id_enc BYTEA NOT NULL, donor_tax_id_dek BYTEA NOT NULL`; all responses use `pii.MaskNationalID`; `RevealPII()` checks `pii.CanRevealFull(claims)` + audits before returning plaintext; `Search()` excludes tax ID filter (D-53, `model.go:88-98`); `List` handler calls `svc.Search()` with name/status/from_date/to_date/receipt_no params (`handler.go:435-483`); integration tests `TestPII_TaxIDStoredEncrypted`, `TestPII_RevealRequiresCheckerOrAdmin`, `TestPII_MaskDefault`, `TestSearchDonations` |
+| 1 | D-R2 pagination envelope `{data:{items,total,page,per_page}}` is actually implemented in the backend list contract, with a real `COUNT`, not `len(items)` | VERIFIED | `donnarec-api/internal/donation/handler.go:559-566` (`List`) builds `gin.H{"data": gin.H{"items":items,"total":total,"page":...,"per_page":...}}`; `service.go:Search` calls both `SearchDonations` and a dedicated `CountDonations` sqlc query sharing the identical 5-predicate WHERE clause (03-09-SUMMARY.md); independently re-ran `TestE2E_MakerCheckerIssuancePipeline` which asserts `list.Data.Total >= 1` on a real Postgres COUNT — PASS |
+| 2 | D-R1 honored: the BFF obtains the Keycloak token server-side; the browser never receives it | VERIFIED | `donnarec-web/lib/bff.ts:bffForward` calls `getServerSession(authOptions)` and attaches `Authorization: Bearer` only on the outbound server-side fetch; `donnarec-web/lib/donations.ts` — every client-facing fetcher (`fetchDonations`, `fetchDonation`, `approve`, `returnForEdit`, `reject`, `revealPII`, `createDonation`, `updateDonation`, `submitDonation`, `uploadSlip`, `viewSlip`, `removeSlip`, `cancelDonation`, `reissueDonation`) calls only same-origin `/api/bff/donations/**` paths — no Go API URL or token ever appears client-side; 8/8 Vitest BFF route tests (including an explicit no-token-leak test) independently re-run and PASS |
+| 3 | D-R3 scope: every Phase-3 screen + mutation is migrated and contract-aligned | VERIFIED | 11 BFF route files confirmed on disk under `app/api/bff/donations/**`: list (`route.ts` GET+POST), detail (`[id]/route.ts` GET+PUT, composes `slip_url`), pii, approve, return, reject, cancel, reissue (composes original detail + audited PII reveal before forwarding), submit, slip (POST/GET/DELETE with raw multipart passthrough). `DonationForm.tsx` owns create/update/submit/slip via `useMutation`; `DonationDetailView.tsx` owns approve/return/reject/cancel/reissue via `useMutation`; `DonationListView.tsx`/`DonationTable.tsx` own list via `useQuery`+`@tanstack/react-table`. `[id]/page.tsx` and `new/page.tsx` are thin server shells with zero Server Actions remaining for donation mutations |
+| 4 | bug #5 root fix present: `apiFetch` unwraps `data`; list no longer crashes on `undefined.length` | VERIFIED | `lib/api.ts:169-183` — explicit `D-R2` comment + unwrap logic (`if "data" in body: return body.data`); `grep -rn "result.donations"` across `app/`, `components/`, `lib/` returns only two comment references (bug-history documentation), zero property-access call sites |
+| 5 | Integration gate 6a: automated E2E test drives the real HTTP path with a realistic Keycloak token, covering create/submit/approve/return + cancel, and PASSES | VERIFIED (independently re-run) | `cmd/server/e2e_test.go:TestE2E_MakerCheckerIssuancePipeline` builds the router via the production `setupRouter` (not a test-only router), mints tokens via a real local OIDC/JWKS test server (`testutil.KeycloakTestServer` + `MintTokenForSubject`), and drives every step via `httptest.NewRecorder()` + `router.ServeHTTP` (genuine HTTP request/response cycle) — NOT a hand-constructed-claims unit test. 7 subtests: `HappyPath_CreateSubmitApproveList`, `UnprovisionedSubject_403`, `RBAC_MakerRejectedFromCheckerOnlyRoute`, `SoD_SelfApprove_403`, `Audience_WrongClient_401`, `Cancel_RetainsReceiptNumber_RealPath`. Independently re-ran: **7/7 PASS** (`go test -run TestE2E_MakerCheckerIssuancePipeline ./cmd/server/...`, Docker/testcontainers) |
+| 6 | No regression to gap-less numbering / SoD / issuance invariants under the retyped `DonationDetailResponse` contract | VERIFIED | Independently re-ran `go test ./internal/donation/...` (Docker) — **31/31 PASS**, including `TestConcurrentApproval_ExactlyOneSucceeds`, `TestIssuanceTransaction_RollbackOnError`, `TestSoD_DBCheckConstraint`, `TestCancelRetainsReceiptNumber`, `TestVoidAndReissue`, `TestPII_RevealRequiresCheckerOrAdmin` — all retyped to `DonationDetailResponse` (03-11) and still green |
 
-**Score:** 5/5 truths verified
+**Score:** 6/6 remediation truths verified (all automated). Criterion 6's human-UI-walkthrough half remains outstanding (see Human Verification below) — this is the reason overall status is `human_needed`, not `passed`.
 
 ---
 
-### Required Artifacts
+### Seam-bug closure verification (2026-07-02 addendum bugs #1-#3)
+
+| Bug | Status at reopen | Status now | Evidence |
+|-----|------------------|------------|----------|
+| #1 `created-by-fk-mismatch` | FIXED + committed (ef7ede6, a1e348e) | STILL FIXED (regression-tested) | `auth.ResolveAppUser` middleware present in `cmd/server/main.go`; E2E `HappyPath` step asserts `created.CreatedByID == makerID.String()` and `created.CreatedByID != subMaker` — PASS |
+| #2 `fe-be-audience-mismatch` | FIXED, uncommitted | FIXED + COMMITTED | `keycloak/realm-donnarec.json:96-101` defines an `audience-donnarec-backend` protocol mapper with `included.client.audience: donnarec-backend`; `donnarec-web/.env.example` present on disk; E2E `Audience_WrongClient_401` subtest independently re-run — PASS (401 `invalid_token` for a token minted with the wrong audience) |
+| #3 RBAC AND-bug | OPEN | FIXED + COMMITTED | `git log -S"RequireAnyRole"` shows commit `b10fae8` ("fix(03): add RequireAnyRole (OR) for multi-role route guards — RBAC AND-bug"); `cmd/server/main.go:236` uses `auth.RequireAnyRole(auth.RoleMaker, auth.RoleChecker, auth.RoleAdmin)` for `donationGroup` and `main.go:270` uses `auth.RequireAnyRole(auth.RoleChecker, auth.RoleAdmin)` for `checkerGroup`; E2E `HappyPath` explicitly regression-tests both (maker-only token accepted on create; checker-only token accepted on approve) — PASS |
+
+All three seam bugs identified at reopen are closed, committed, and covered by the real-router E2E test (not just unit tests) — satisfying the Conventions.md Integration-test gate's intent that these bug classes be caught by tests that exercise the real seam.
+
+---
+
+### Required Artifacts (remediation-added/modified)
 
 | Artifact | Expected | Status | Details |
 |----------|----------|--------|---------|
-| `internal/donation/service.go` | Core lifecycle + issuance TX | VERIFIED | 1375 lines; Create, UpdateDraft, Submit, Approve (7-step TX), Return, Reject, Cancel, Reissue, RevealPII, Search all implemented substantively |
-| `internal/donation/model.go` | Request/response types + ListFilter | VERIFIED | DonationResponse never exposes plaintext tax ID (only DonorTaxIDMasked); ListFilter excludes TaxID; PIIRevealResponse separate type |
-| `internal/donation/handler.go` | HTTP handlers wired | VERIFIED | All endpoints present; `List` delegates to `svc.Search` with query params; error sentinel → HTTP status mapping correct |
-| `internal/donation/errors.go` | Sentinel errors | VERIFIED | ErrMissingTaxID, ErrInvalidTransition, ErrSoDViolation, ErrMissingReason, ErrNotFound, ErrForbidden, ErrEDonationKeyedCancel defined |
-| `migrations/000005_donations.up.sql` | Donations table + DB constraints | VERIFIED | `donation_status` enum; 5-state lifecycle; `chk_sod_approver` CHECK; `chk_receipt_only_on_issued_or_cancelled` CHECK; REVOKE DELETE; FR-10 search indexes |
-| `migrations/000006_slip_attachments.up.sql` | Slip attachments table | VERIFIED | SlipAttachment table with soft-delete (deleted_at) per D-54 |
-| `migrations/000007_outbox_jobs.up.sql` | Outbox jobs table | VERIFIED | `outbox_jobs` with status CHECK + partial index for Phase 4 worker polling |
-| `internal/storage/client.go` | MinIO storage + magic-byte validation | VERIFIED | `validateSlip()` uses `gabriel-vasile/mimetype` magic bytes; size limit 10MB; presigned URLs 15-min TTL; `ErrUnsupportedFileType`, `ErrFileTooLarge` |
-| `internal/donation/service_integration_test.go` | Integration tests for all 7 hardest invariants | VERIFIED | 1576 lines; TestIssuanceTransaction_RollbackOnError (3 scenarios), TestOutboxAtomicity, TestSoD_ApproverCannotBeCreator, TestSoD_DBCheckConstraint, TestConcurrentApproval_ExactlyOneSucceeds (N=5), TestReturnToDraft, TestRejectTerminal, TestCancelRetainsReceiptNumber, TestVoidAndReissue, TestPII_TaxIDStoredEncrypted, TestPII_RevealRequiresCheckerOrAdmin, TestPII_MaskDefault, TestSearchDonations, TestEDonationKeyedGuard_Integration — all skip with `-short` (require Docker) |
-| `donnarec-web/app/donations/page.tsx` | Donation list with search/filter | VERIFIED (build passes) | Next.js build successful; 13.6 kB bundle |
-| `donnarec-web/app/donations/[id]/page.tsx` | Donation detail + review actions | VERIFIED (build passes) | 479-line Server Component with all 5 server actions (approve, return, reject, cancel, reissue); slip view; PII reveal; replace chain |
-| `donnarec-web/components/ReviewActionPanel.tsx` | Checker action buttons + SoD blocked state | VERIFIED (build passes) | 4 cases: Maker's draft, SoD blocked, Checker review, Cancel/Reissue; buttons absent from DOM (not disabled) when SoD blocked |
+| `donnarec-api/internal/donation/handler.go` (`List`) | D-R2 envelope | VERIFIED | Builds nested `{"data":{"items","total","page","per_page"}}`; explicit anti-bug-#5 comment |
+| `donnarec-api/internal/donation/service.go` (`Search`, `buildDetailResponse`) | Real COUNT + FE-aligned detail contract | VERIFIED | `Search` returns `(items, total, err)`; `buildDetailResponse` shared by `GetByID` + all 8 mutations, computing `viewer_is_creator`/`can_approve`/`can_return`/`can_reject`/`can_reveal_pii` server-side |
+| `donnarec-web/lib/api.ts` | Envelope unwrap | VERIFIED | `apiFetch` unwraps `data`; used by server-side callers (edit-page seed data) |
+| `donnarec-web/lib/bff.ts` | BFF proxy helpers | VERIFIED | `bffForward`, `goFetch`, `passthroughGoResponse`, `mapFeDonorFieldsToGo` — token obtained via `getServerSession` only |
+| `donnarec-web/app/api/bff/donations/**` (11 route files) | All D-R3 screens/mutations | VERIFIED | list, detail(+slip_url compose), pii, approve, return, reject, cancel, reissue(+2-step compose), submit, slip(POST/GET/DELETE) all present and substantive (no stubs) |
+| `donnarec-web/components/DonationListView.tsx`, `DonationTable.tsx` | List screen (TanStack Query/Table) | VERIFIED | `useQuery` + `useReactTable`; renders `items`/`total`/`page`/`perPage` from the BFF |
+| `donnarec-web/components/DonationDetailView.tsx` | Detail/review/PII/cancel/reissue screen | VERIFIED | `useQuery` for the record; `useMutation` for approve/return/reject/cancel/reissue; SoD/branching logic ported verbatim |
+| `donnarec-web/components/DonationForm.tsx` | Create/edit/slip screen | VERIFIED | `useMutation` for create/update/submit/uploadSlip/removeSlip |
+| `donnarec-api/cmd/server/e2e_test.go` | Real HTTP-path E2E | VERIFIED | 7 subtests over `setupRouter` + real minted tokens; independently re-run, 7/7 PASS |
+| `donnarec-web/app/api/bff/donations/__tests__/bff-routes.test.ts` | BFF trust-boundary test | VERIFIED | 8 hermetic tests (token forwarding, 401 gate, field mapping, slip_url composition, no-token-leak); independently re-run, 8/8 PASS |
 
 ---
 
@@ -76,191 +102,94 @@ human_verification:
 
 | From | To | Via | Status | Details |
 |------|----|-----|--------|---------|
-| `service.go:Approve` | `receiptno.Allocator.Allocate` | `s.allocator.Allocate(ctx, tx, approvedAt.Time)` — passes live `tx` | WIRED | `service.go:573-575`; only call site in codebase (D-35) |
-| `service.go:Approve` | `audit.AppendAuditEntryTx` | inside same `WithTx` closure | WIRED | `service.go:595-607`; failure rolls back entire TX (not best-effort) |
-| `service.go:Approve` | `outbox_jobs` (INSERT) | `qtx.EnqueueOutboxJob` inside `WithTx` | WIRED | `service.go:609-616`; job_type="issue_receipt" with donation_id payload |
-| `handler.go:List` | `service.go:Search` | `h.svc.Search(ctx, filter, claims)` with parsed query params | WIRED | `handler.go:479`; name/status/from_date/to_date/receipt_no parsed from query |
-| `service.go:RevealPII` | `audit.AppendAuditEntryTx` | inside `WithTx` closure before plaintext returned | WIRED | `service.go:1168-1181`; D-13 enforced — audit before reveal |
-| `main.go:checkerGroup` | `donation.Handler` reviewer endpoints | `checkerGroup.Use(auth.RequireRoles(checker, admin))` | WIRED | `main.go:247-253`; approve/return/reject/cancel/reissue all require Checker+Admin |
-| `donations/[id]/page.tsx` | Go API `/api/donations/:id` | `getDonation(id)` → server action → fetch | WIRED | `[id]/page.tsx:46-53`; all 5 server actions (`approve`, `returnForEdit`, `reject`, `cancelDonation`, `reissueDonation`) wired |
+| `DonationListView.tsx` | `/api/bff/donations` | `useQuery(["donations",filter], fetchDonations)` | WIRED | Confirmed by grep + build output (`ƒ /api/bff/donations` route registered) |
+| `DonationDetailView.tsx` | `/api/bff/donations/[id]`, `/approve`, `/return`, `/reject`, `/cancel`, `/reissue` | `useQuery` + 5×`useMutation` | WIRED | All 6 endpoints present in build output; mutations invalidate the detail query on success |
+| `DonationForm.tsx` | `/api/bff/donations` (POST), `/api/bff/donations/[id]` (PUT), `/submit`, `/slip` | 4×`useMutation` | WIRED | Confirmed via grep of `createDonation`/`submitDonation` usage |
+| `bffForward` | `getServerSession(authOptions)` | direct call inside every proxy route (except create/update/reissue/slip, which use `getBffToken`/`goFetch` for composition) | WIRED | Token never returned to caller; confirmed via source read + Vitest no-token-leak test |
+| `cmd/server/main.go:donationGroup/checkerGroup` | `auth.RequireAnyRole` | route-guard middleware | WIRED | Confirmed via source read + E2E RBAC subtests |
+| `e2e_test.go:newE2EHarness` | production `setupRouter` | `setupRouter(authMW, auditSvc, appUserResolver, ...)` | WIRED | Same function used in `cmd/server/main.go`'s real boot path — this is not a parallel/simplified test router |
 
 ---
 
 ### Data-Flow Trace (Level 4)
 
 | Artifact | Data Variable | Source | Produces Real Data | Status |
-|----------|---------------|--------|--------------------|--------|
-| `service.go:Approve` | `issuedRow` | `qtx.GetDonationByID` inside TX after IssueDonation | DB query, returns committed state | FLOWING |
-| `service.go:Search` | `rows` | `s.queries.SearchDonations(ctx, params)` — sqlc generated query | DB query with ILIKE/date/status/receipt filters | FLOWING |
-| `service.go:RevealPII` | `plaintext` | `crypto.DecryptField(ctx, s.keyProvider, row.DonorTaxIDEnc, row.DonorTaxIDDek)` | AES-256-GCM decryption of real ciphertext from DB | FLOWING |
-| `storage/client.go:PutSlip` | `objectKey` | MinIO `client.PutObject` with `io.MultiReader` reassembly | Real object storage write after magic-byte validation | FLOWING |
+|----------|---------------|--------|---------------------|--------|
+| `handler.go:List` | `items`, `total` | `svc.Search` → `SearchDonations` + `CountDonations` (sqlc, real SQL) | Real Postgres query, not static/empty | FLOWING |
+| `DonationListView.tsx` | `items`/`total`/`page`/`perPage` | `useQuery` → `fetchDonations` → `/api/bff/donations` → Go `List` | End-to-end real data (verified via independent E2E re-run asserting `total>=1` and item fields) | FLOWING |
+| `DonationDetailView.tsx` | detail record + auth flags | `useQuery` → `fetchDonation` → BFF → Go `GetByID`/`buildDetailResponse` | Server-computed flags from real `users`/`donations` join, not client-trusted | FLOWING |
+| BFF reissue route | composed `goBody` | 2 sequential real Go calls (`GET /:id` detail + `GET /:id/pii`) before forwarding | Real donor data + real audited PII reveal, not hardcoded | FLOWING |
 
 ---
 
-### Behavioral Spot-Checks
+### Behavioral Spot-Checks (independently re-run by this verifier, not trusted from SUMMARY)
 
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
 | Go backend compiles | `cd donnarec-api && go build ./...` | exit 0 | PASS |
-| Unit tests (no Docker) | `cd donnarec-api && go test -short ./internal/donation/...` | 5 passed | PASS |
-| Frontend build | `cd donnarec-web && npm run build` | exit 0; 6 routes generated | PASS |
-| Integration tests (Docker required) | `go test ./internal/donation/...` without `-short` | SKIP — requires Docker/testcontainers | SKIP (human verification item #1) |
+| Go vet clean | `cd donnarec-api && go vet ./...` | no issues | PASS |
+| Real-router E2E (Docker) | `go test -run TestE2E_MakerCheckerIssuancePipeline -v ./cmd/server/...` | 7 passed | PASS |
+| Donation integration suite (Docker) | `go test ./internal/donation/...` | 31 passed | PASS |
+| Frontend type-check | `cd donnarec-web && npx tsc --noEmit` | No errors found | PASS |
+| Frontend production build | `cd donnarec-web && npm run build` | Compiled successfully; all 11 BFF routes + 4 donation pages registered | PASS |
+| BFF route-handler tests (Vitest) | `npx vitest run app/api/bff/donations/__tests__/bff-routes.test.ts` | 8 passed, 0 failed | PASS |
+| Grep for bug #5 residue | `grep -rn "result.donations" app components lib` | 2 comment-only matches, 0 property access | PASS |
+
+All 8 checks were executed fresh by this verifier (not copied from SUMMARY.md), using Docker (confirmed available: `docker info` succeeded).
 
 ---
 
 ### Probe Execution
 
-No probe scripts found under `scripts/*/tests/probe-*.sh`. Step 7c: SKIPPED (no probe scripts).
+No `scripts/*/tests/probe-*.sh` files found. Step 7c: SKIPPED (no probe scripts).
 
 ---
 
 ### Requirements Coverage
 
-| Requirement | Description (from context) | Status | Evidence |
-|-------------|---------------------------|--------|----------|
-| FR-07 | Maker creates donation record | SATISFIED | `service.go:Create()` + `handler.go:Create` + `POST /api/donations` |
-| FR-09 | Maker edits while draft | SATISFIED | `service.go:UpdateDraft()` + `canTransition("update")` guard + `PUT /api/donations/:id` |
-| FR-10 | Search/filter by name, date, status, receipt no | SATISFIED | `service.go:Search()` + `handler.go:List` parses query params; tax ID excluded per D-53 |
-| FR-11 | Lifecycle state machine enforced | SATISFIED | `canTransition()` single source of truth; 5-state enum; `LockDonationForUpdate` in each TX |
-| FR-12 | Return (non-terminal) and Reject (terminal) with mandatory reason | SATISFIED | `service.go:Return()` + `Reject()`; both require non-empty reason; Reject has `canTransition("reject")` guard preventing further transitions |
-| FR-14 | Checker approval; SoD approver != creator | SATISFIED | `service.go:Approve():564-567` code guard + `migrations/000005:101-103` DB CHECK `chk_sod_approver` |
-| FR-19 | Cancel issued receipt: retains number, audited; no hard-delete | SATISFIED | `service.go:Cancel()` does not null receipt fields; `chk_receipt_only_on_issued_or_cancelled` allows non-null on cancelled; REVOKE DELETE on donations table |
-| FR-29 | PII encrypted at rest, masked by default, role-gated reveal, audited | SATISFIED | `crypto.EncryptField` before DB write; `pii.MaskNationalID` on all responses; `pii.CanRevealFull` gate; `AppendAuditEntryTx` for `pii.reveal` |
+| Requirement | Description | Status | Evidence |
+|---|---|---|---|
+| FR-07 | Maker creates donation record | SATISFIED | `POST /api/bff/donations` → Go `Create`; E2E `HappyPath` step 1 PASS |
+| FR-09 | Maker edits while draft | SATISFIED | `PUT /api/bff/donations/[id]` → Go `Update`; `DonationForm` update mutation |
+| FR-10 | Search/filter by name, date, status, receipt no | SATISFIED | D-R2 envelope + `Search`/`CountDonations`; E2E list assertions PASS |
+| FR-11 | Lifecycle state machine enforced | SATISFIED | Unchanged from original verification; not regressed (31/31 integration tests still green) |
+| FR-12 | Return/Reject with mandatory reason | SATISFIED | `return`/`reject` BFF routes pass through Go 422 `missing_reason` unchanged |
+| FR-14 | Checker approval; SoD | SATISFIED | E2E `SoD_SelfApprove_403` independently re-run — PASS |
+| FR-19 | Cancel retains receipt number, audited | SATISFIED | E2E `Cancel_RetainsReceiptNumber_RealPath` independently re-run — PASS (receipt number identical pre/post cancel) |
+| FR-29 | PII encrypted, masked, audited reveal | SATISFIED | `pii` BFF route field-maps `donor_tax_id`→`national_id`; Go-side masking/audit unchanged and still tested (31/31) |
 
----
-
-### Load-Bearing Invariant Confirmation
-
-| Invariant | Verified | Evidence |
-|-----------|----------|----------|
-| Issuance TX is atomic (all-or-nothing) | YES | `service.go:543-623` single `WithTx` closure; 3 rollback scenarios tested in `TestIssuanceTransaction_RollbackOnError` |
-| Concurrency test exists + fires N parallel approvals asserting zero gaps / exactly one issued | YES (exists; Docker-gated) | `service_integration_test.go:492-579` `TestConcurrentApproval_ExactlyOneSucceeds` N=5 goroutines via `errgroup`, asserts exactly 1 success + exactly 1 `receipt_numbers` row; runs under `-race`; skips without Docker |
-| SoD: approver_id != created_by in service code | YES | `service.go:565`: `if locked.CreatedBy == approverUUID { return ErrSoDViolation }` |
-| SoD: approver_id != created_by as DB CHECK | YES | `migrations/000005:101-103`: `CONSTRAINT chk_sod_approver CHECK (approved_by IS NULL OR approved_by != created_by)` |
-| Receipt number null on draft/pending/rejected; non-null only on issued/cancelled | YES | `migrations/000005:104-110`: `CONSTRAINT chk_receipt_only_on_issued_or_cancelled` |
-| national/tax ID stored as ciphertext (never plaintext to DB) | YES | `service.go:123-125`: `crypto.EncryptField` before `CreateDonation`; columns `donor_tax_id_enc BYTEA NOT NULL, donor_tax_id_dek BYTEA NOT NULL` |
-| Blind index NOT used this phase (D-43 snapshot-only) | YES | No blind index in migrations 000005–000007; `ListFilter` has no TaxID field; `Search()` excludes tax ID |
-| Outbox ONLY enqueued this phase (no PDF/email in issuance TX) | YES | `service.go:610`: comment "Do NOT render PDF or send email here"; `EnqueueOutboxJob` only inserts a row with `job_type="issue_receipt"` |
-| Every action audited (audit in TX, not best-effort) | YES | All TX closures call `auditSvc.AppendAuditEntryTx` inside `WithTx`; failure rolls back entire TX |
+REQUIREMENTS.md tracking table now shows all 8 requirements as "Complete" (previously flagged as a stale "Pending" snapshot in the prior verification) — confirmed via direct read of `.planning/REQUIREMENTS.md:139-146`.
 
 ---
 
 ### Anti-Patterns Found
 
-No blockers found in phase-modified files:
-- No `TBD`, `FIXME`, or `XXX` markers in `internal/donation/`, `internal/storage/`, migrations 000005–000007, or frontend components.
-- No `return nil` / `return []` stub returns in service or handler.
-- `service.go:List` method uses a raw query for the basic list (03-03 plan) while `Search` uses the sqlc `SearchDonations` query — both are substantive and the handler always calls `Search`. The `List` raw-query code is dead code since the handler delegates to `Search`, but it is not a stub (it implements the same logic). This is a minor code smell (INFO) but does not block the goal.
-
-| File | Line | Pattern | Severity | Impact |
-|------|------|---------|----------|--------|
-| `internal/donation/service.go` | 437–514 | `List()` method uses raw query but handler calls `Search()` — `List()` is effectively dead code | INFO | None on goal; `Search()` is called by handler |
+No blockers in remediation-modified files:
+- No `TBD`/`FIXME`/`XXX`/`TODO`/`HACK`/`PLACEHOLDER` markers found across `donnarec-api/internal/donation/{model,service,handler}.go`, `donnarec-api/cmd/server/e2e_test.go`, `donnarec-api/internal/db/queries/donations.sql`, `donnarec-web/lib/{bff,api,donations}.ts`, all 11 BFF route files, and the 4 migrated components/pages.
+- One incidental match for the string "placeholder" in `DonationTable.tsx:289` — this is `header.isPlaceholder`, a legitimate `@tanstack/react-table` API property, not a stub marker.
+- No hardcoded empty-array/empty-object returns found in the migrated BFF routes or components; all routes forward real Go responses or compose real multi-step data.
 
 ---
 
 ### Human Verification Required
 
-#### 1. Integration Tests (Docker)
-
-**Test:** Run `cd donnarec-api && go test ./internal/donation/... -v -race` with Docker available (removes `-short` flag).
-
-**Expected:** All 14 integration tests pass including:
-- `TestConcurrentApproval_ExactlyOneSucceeds` (N=5, -race): exactly 1 success, 4 ErrInvalidTransition, 1 receipt_numbers row
-- `TestIssuanceTransaction_RollbackOnError` (Scenarios A, B, C): rollbacks leave 0 ledger rows; happy path commits all 7 effects
-- `TestSoD_DBCheckConstraint`: raw UPDATE with approved_by = created_by triggers SQLSTATE 23514 on `chk_sod_approver`
-- `TestCancelRetainsReceiptNumber`: B.running_no = A.running_no + 1 after cancel of A
-- `TestVoidAndReissue`: replacement starts at draft, original retains receipt number, 2 ledger rows total
-
-**Why human:** Requires Docker daemon to start Postgres testcontainer. Tests skip with `-short`.
-
----
-
-#### 2. Donation List Page Visual
-
-**Test:** Open `/donations` in browser as any staff role.
-
-**Expected:** Table renders with Thai column headers, status badges (colour-coded), masked national ID format `x-xxxx-xxxxx-xNNNN`, pagination. Filter bar allows filtering by donor name, status, date range, receipt number.
-
-**Why human:** Visual rendering, i18n (Thai/English toggle), and layout quality cannot be verified programmatically.
-
----
-
-#### 3. Checker Review Panel (not own record)
-
-**Test:** Log in as Checker B. Open a donation created by Maker A.
-
-**Expected:** Right panel shows three buttons: อนุมัติ (blue), ตีกลับแก้ไข (outline), ปฏิเสธถาวร (destructive). Clicking ตีกลับแก้ไข opens a dialog with a textarea for reason. Reason field is required before confirm.
-
-**Why human:** Requires live Keycloak session with two distinct users and correct `viewer_is_creator` propagation from API.
-
----
-
-#### 4. SoD Blocked State (own record)
-
-**Test:** Log in as Checker. Create a donation yourself (or have it assigned to your user ID as creator). Open the detail page.
-
-**Expected:** Right panel shows `SoDBlockedAlert` warning only. Approve/Return/Reject buttons are absent from the DOM entirely (not just disabled).
-
-**Why human:** `viewer_is_creator` value comes from API comparing `created_by` to `claims.Subject`; requires a live Keycloak session to verify the flag is correctly set.
-
----
-
-#### 5. PII Reveal UX
-
-**Test:** Open a donation detail page as Checker/Admin. National ID shows masked (e.g. `x-xxxx-xxxxx-x0123`). Click reveal button.
-
-**Expected:** Plaintext national ID replaces masked value in the UI. Reloading the page re-masks it. Check audit_log table: one `pii.reveal` row created.
-
-**Why human:** Session-only reveal state and server-side audit write require live browser session.
-
----
-
-#### 6. Cancel with edonation_keyed=true Dialog
-
-**Test:** Set `edonation_keyed = true` on an issued donation via DB. Open detail page as Checker. Click ยกเลิกใบเสร็จ.
-
-**Expected:** CancelDialog shows warning about RD system. The rd_confirmation_reason field is required. Attempting to submit without it should be blocked. With a reason, cancel succeeds and status becomes cancelled.
-
-**Why human:** Dialog interaction and warning rendering require manual browser testing.
+Criterion 6, part (b) — the human UI walkthrough — has explicitly NOT been run by any of the 5 remediation plans. Each plan's final checkpoint (`checkpoint:human-verify`, gate=blocking) was either auto-advanced with only automated evidence (03-10) or explicitly deferred/not-run (03-12: "NOT run in this execution pass... remains outstanding"; 03-13: "Ready for the Task 3 checkpoint... was not part of this executor's remaining work scope"). This is the single remaining gate before Phase 3 can be marked Complete. See the `human_verification` list in the frontmatter above for the precise checklist (6 items): full-stack walkthrough with two distinct Keycloak users, DevTools token-absence check, SoD DOM-removal check, PII reveal UX + audit row, filter/pagination interaction, and cancel/void-reissue dialogs including the `edonation_keyed` guard.
 
 ---
 
 ### Gaps Summary
 
-No gaps found. All 5 success criteria are verified at the code level. The 6 human verification items are UX/visual checks and Docker-dependent integration tests — they are not code gaps but verification completeness requirements.
+No code gaps. All automated evidence for criteria 1-5 (re-confirmed, not regressed) and criterion 6a (integration gate, automated half) was independently re-executed by this verifier — not taken from SUMMARY.md claims — and passed:
+- `go build`/`go vet` clean
+- Real-router E2E: 7/7 subtests pass (Docker/testcontainers, real minted Keycloak-shaped tokens, production `setupRouter`)
+- Donation integration suite: 31/31 pass (gap-less counter, SoD DB constraint, cancel-retains-number, void/reissue, PII encryption/reveal — all retyped to the new `DonationDetailResponse` contract and still green)
+- Frontend: `tsc --noEmit` clean, `npm run build` clean (11 BFF routes + 4 donation pages registered), 8/8 Vitest BFF route tests pass
+- All three seam bugs from the 2026-07-02 reopen (FK mismatch, audience mismatch, RBAC AND-bug) are fixed, committed, and covered by E2E regression subtests
 
-The REQUIREMENTS.md tracking table shows FR-07, FR-09, FR-10, FR-19, FR-29 as "Pending" — this appears to be a pre-completion snapshot of the tracking file that was not updated after the phase completed. All these requirements are substantively implemented in the codebase (verified above).
+The only remaining item is criterion 6, part (b): the live human UI walkthrough against a full running stack (Go API + Postgres + Keycloak + MinIO + Next.js) with two distinct real Keycloak-authenticated users. This was consistently and explicitly deferred by every remediation plan as "requires a live full-stack environment + human verification, out of scope for this automated completion pass" — it is not evidence of a code defect, but it is a required part of the phase's own done-criterion (Conventions.md Integration-test gate: "(a) an automated E2E integration test ... AND (b) the human UI walkthrough ... passing"). Status is therefore `human_needed`, not `passed`, until a human runs the checklist above.
 
 ---
 
-_Verified: 2026-07-01_
+_Verified: 2026-07-04_
 _Verifier: Claude (gsd-verifier)_
-
----
-
-## ⚠️ Addendum — Phase REOPENED 2026-07-02 (integration gate not met)
-
-The 5/5 above was **unit/service-level** verification (artifacts + isolated service tests with
-hand-constructed claims/users). When the human-verification items were driven for real — full
-stack up (docker compose), a real Keycloak token issued to a seeded user — **three runtime
-request-seam bugs surfaced that the unit tests structurally could not catch**:
-
-1. **`created-by-fk-mismatch`** — services wrote `claims.Subject` (Keycloak `sub`) into columns
-   that `REFERENCES users(id)`, but `users.id` is an independent `gen_random_uuid()`. Every real
-   login FK-violated on write. Unit tests masked it by setting `claims.Subject = users.id`.
-   **FIXED + committed** (ef7ede6; refactored into `auth.ResolveAppUser` middleware, a1e348e).
-2. **`fe-be-audience-mismatch`** — Keycloak issued frontend tokens with `aud=account`; the Go
-   verifier requires `aud ∋ donnarec-backend` → **401 on every UI→API call**. Plus the frontend
-   NextAuth config assumes a confidential client while the realm defined a public one, and there
-   was no web env file. **FIXED** (audience mapper + confidential client persisted to
-   `keycloak/realm-donnarec.json`; `donnarec-web/.env.example`); **commit pending**.
-3. **RBAC AND-bug** — `RequireRoles(...)` enforces AND (all listed roles), but
-   `donationGroup RequireRoles(Maker,Checker,Admin)` and `checkerGroup RequireRoles(Checker,Admin)`
-   intended "any of" → **403 for every real user**. **OPEN.**
-
-**Process fix:** a new **Integration-test gate** was added as a phase done-criterion
-(Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6). Phase 3 remains **REOPENED**
-until: bugs #2–#3 fixed + committed, an automated **E2E HTTP integration test** (real router +
-realistic token) covers the critical Maker/Checker flows, and the human UI walkthrough passes.
-
-_Reopened: 2026-07-02 — Claude (orchestrator, human-directed)_
+_Original verification (criteria 1-5, unit/service level) and the 2026-07-02 reopen addendum are preserved in git history of this file; this revision supersedes both with the remediation slice's re-verification._

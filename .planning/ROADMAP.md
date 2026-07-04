@@ -151,7 +151,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
-| 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete   | 2026-07-04 |
+| 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 (auto gate ✓) | ⚠️ Human walkthrough pending | — |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
