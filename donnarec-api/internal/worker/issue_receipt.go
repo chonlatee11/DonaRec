@@ -181,22 +181,17 @@ func (w *Worker) renderReceiptPDF(ctx context.Context, donation db.Donation) ([]
 		section6 = tplCfg.Section6TextEn
 	}
 
-	letterhead, err := w.fetchTemplateImage(ctx, tplCfg.LetterheadObjectKey)
-	if err != nil {
-		return nil, err
-	}
-	seal, err := w.fetchTemplateImage(ctx, tplCfg.SealObjectKey)
-	if err != nil {
-		return nil, err
-	}
-	signature, err := w.fetchTemplateImage(ctx, tplCfg.SignatureObjectKey)
-	if err != nil {
-		return nil, err
-	}
-	watermark, err := w.fetchTemplateImage(ctx, tplCfg.WatermarkObjectKey)
-	if err != nil {
-		return nil, err
-	}
+	// WR-06 fix (04-REVIEW.md): fetch branding images via the SOFT variant —
+	// letterhead/seal/signature/watermark are decorative, not legally-required
+	// receipt content (donor name/amount/receipt number/section6 text always
+	// come from the donation row/config text fields, never from these image
+	// fetches), so a transient object-storage blip on any ONE of them must not
+	// fail the whole render (and burn a D-57 retry/backoff attempt) when the
+	// legally-required content was ready to go.
+	letterhead := w.fetchTemplateImageSoft(ctx, tplCfg.LetterheadObjectKey, "letterhead")
+	seal := w.fetchTemplateImageSoft(ctx, tplCfg.SealObjectKey, "seal")
+	signature := w.fetchTemplateImageSoft(ctx, tplCfg.SignatureObjectKey, "signature")
+	watermark := w.fetchTemplateImageSoft(ctx, tplCfg.WatermarkObjectKey, "watermark")
 
 	receiptNo := ""
 	if donation.ReceiptFormatted != nil {
@@ -250,6 +245,28 @@ func (w *Worker) fetchTemplateImage(ctx context.Context, objectKey *string) (tem
 	}
 	mimeType := mimetype.Detect(data).String()
 	return pdf.DataURI(mimeType, data), nil
+}
+
+// fetchTemplateImageSoft is fetchTemplateImage's fail-OPEN variant for the
+// four decorative branding slots (letterhead/seal/signature/watermark) —
+// WR-06, 04-REVIEW.md. None of them are legally-required receipt content, so
+// a transient object-storage error fetching one is logged (Pattern C:
+// operation + image slot name only, never PII) and treated exactly like an
+// unset object key ("render without this image") rather than failing the
+// entire render and burning a D-57 retry/backoff attempt. An unset
+// (nil/empty) objectKey is the normal steady-state case, not a failure — it
+// is never logged.
+func (w *Worker) fetchTemplateImageSoft(ctx context.Context, objectKey *string, imageName string) template.URL {
+	uri, err := w.fetchTemplateImage(ctx, objectKey)
+	if err != nil {
+		w.logger.Warn("worker: non-critical branding image fetch failed — rendering without it",
+			zap.String("operation", "fetchTemplateImage"),
+			zap.String("image", imageName),
+			zap.Error(err),
+		)
+		return ""
+	}
+	return uri
 }
 
 // composeReceiptEmail builds the bilingual (donor_language-selected) email
