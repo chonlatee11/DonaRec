@@ -154,3 +154,37 @@ func (s *StorageClient) PresignedGet(ctx context.Context, objectKey string, ttl 
 	}
 	return u.String(), nil
 }
+
+// PutObject writes arbitrary bytes to the client's bound bucket under the given
+// object key (Phase 4, D-56 — frozen receipt PDFs). Unlike PutSlip, PutObject
+// performs no magic-byte/size validation: callers are trusted internal callers
+// (the outbox worker), not raw end-user uploads, so the validate-then-upload
+// contract that protects slip uploads does not apply here.
+func (s *StorageClient) PutObject(ctx context.Context, objectKey string, data []byte, contentType string) error {
+	_, err := s.client.PutObject(ctx, s.bucket, objectKey, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+	if err != nil {
+		return fmt.Errorf("storage: put object: %w", err)
+	}
+	return nil
+}
+
+// GetObject reads the full bytes of an object from the client's bound bucket.
+// Used by the outbox worker (04-05) to reuse a previously frozen receipt PDF
+// (D-56 freeze idempotency — resend never re-renders) and to fetch template
+// branding images (letterhead/seal/signature/watermark) referenced by
+// receipt_template_config.
+func (s *StorageClient) GetObject(ctx context.Context, objectKey string) ([]byte, error) {
+	obj, err := s.client.GetObject(ctx, s.bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("storage: get object: %w", err)
+	}
+	defer obj.Close()
+
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, fmt.Errorf("storage: read object: %w", err)
+	}
+	return data, nil
+}
