@@ -29,6 +29,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,6 +38,11 @@ import (
 )
 
 var updateGolden = flag.Bool("update", false, "regenerate golden PNG fixtures instead of comparing against them")
+
+// whitespaceRe matches any run of whitespace (spaces, tabs, newlines, form-feeds) —
+// used to normalize pdftotext output before substring comparison (see
+// assertContainsExtractedText).
+var whitespaceRe = regexp.MustCompile(`\s+`)
 
 // receiptFixtureTemplate is a self-contained receipt HTML template (own fixture, NOT
 // the migration-seeded receipt_template_config.template_html — this file's fixtures
@@ -165,8 +171,13 @@ func assertGoldenPNG(t *testing.T, goldenPath string, pdfBytes []byte) {
 }
 
 // assertContainsExtractedText extracts text from pdfBytes via `pdftotext` and asserts
-// the given substring (the fixture's §6 + deduction-multiplier statement, FR-24)
-// is present in the extracted output.
+// the given substring (the fixture's §6 + deduction-multiplier statement, FR-24) is
+// present in the extracted output. pdftotext hard-wraps long lines at the page width;
+// for Thai text (which has no inter-word spaces) that wrap can land in the MIDDLE of a
+// word with no whitespace inserted at all, so a single-space-collapse normalization is
+// not sufficient. Both the extracted text and the wanted substring therefore have ALL
+// whitespace stripped entirely before comparison — the assertion cares about textual
+// content surviving the render, not pdftotext's incidental line-wrap points.
 func assertContainsExtractedText(t *testing.T, pdfBytes []byte, want string) {
 	t.Helper()
 
@@ -177,7 +188,10 @@ func assertContainsExtractedText(t *testing.T, pdfBytes []byte, want string) {
 	out, err := exec.Command("pdftotext", "-enc", "UTF-8", pdfPath, "-").Output()
 	require.NoError(t, err, "pdftotext extraction failed")
 
-	require.Contains(t, string(out), want, "§6 + deduction-multiplier text must be present in the rendered PDF (FR-24)")
+	got := whitespaceRe.ReplaceAllString(string(out), "")
+	wantNormalized := whitespaceRe.ReplaceAllString(want, "")
+
+	require.Contains(t, got, wantNormalized, "§6 + deduction-multiplier text must be present in the rendered PDF (FR-24)")
 }
 
 // solidPNG generates a deterministic, solid-color PNG of the given size — used as
