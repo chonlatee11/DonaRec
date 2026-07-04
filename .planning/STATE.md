@@ -2,9 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
+current_phase: 03
+current_phase_name: donation-lifecycle-maker-checker-issuance
 status: "Phase 3 shipped — PR #3"
-stopped_at: Completed 03-13-PLAN.md (create/edit/cancel/reissue donation flows migrated to BFF + TanStack; E2E create+cancel over the production router)
-last_updated: "2026-07-04T05:02:42.787Z"
+stopped_at: Phase 4 context gathered
+last_updated: "2026-07-04T05:37:52.522Z"
 last_activity: 2026-07-04
 progress:
   total_phases: 6
@@ -124,6 +126,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T00:07:17.666Z
-Stopped at: Completed 03-13-PLAN.md (create/edit/cancel/reissue donation flows migrated to BFF + TanStack; E2E create+cancel over the production router)
-Resume file: None
+Last session: 2026-07-04T05:37:52.513Z
+Stopped at: Phase 4 context gathered
+Resume file: .planning/phases/04-receipt-pdf-email-delivery-outbox-worker/04-CONTEXT.md
