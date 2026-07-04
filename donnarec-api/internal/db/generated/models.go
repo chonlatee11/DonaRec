@@ -12,6 +12,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type DonationStatus string
+
+const (
+	DonationStatusDraft         DonationStatus = "draft"
+	DonationStatusPendingReview DonationStatus = "pending_review"
+	DonationStatusIssued        DonationStatus = "issued"
+	DonationStatusRejected      DonationStatus = "rejected"
+	DonationStatusCancelled     DonationStatus = "cancelled"
+)
+
+func (e *DonationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DonationStatus(s)
+	case string:
+		*e = DonationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DonationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDonationStatus struct {
+	DonationStatus DonationStatus `json:"donation_status"`
+	Valid          bool           `json:"valid"` // Valid is true if DonationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDonationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DonationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DonationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDonationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DonationStatus), nil
+}
+
 type LegalBasisEnum string
 
 const (
@@ -112,6 +157,53 @@ type AuditLog struct {
 	RowHash    string             `db:"row_hash" json:"row_hash"`
 }
 
+type Donation struct {
+	ID                 pgtype.UUID        `db:"id" json:"id"`
+	CreatedBy          pgtype.UUID        `db:"created_by" json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Status             DonationStatus     `db:"status" json:"status"`
+	DonorName          string             `db:"donor_name" json:"donor_name"`
+	DonorAddress       string             `db:"donor_address" json:"donor_address"`
+	DonorEmail         *string            `db:"donor_email" json:"donor_email"`
+	DonorTaxIDEnc      []byte             `db:"donor_tax_id_enc" json:"donor_tax_id_enc"`
+	DonorTaxIDDek      []byte             `db:"donor_tax_id_dek" json:"donor_tax_id_dek"`
+	Amount             pgtype.Numeric     `db:"amount" json:"amount"`
+	DonatedAt          pgtype.Date        `db:"donated_at" json:"donated_at"`
+	Notes              *string            `db:"notes" json:"notes"`
+	ConsentGiven       bool               `db:"consent_given" json:"consent_given"`
+	ConsentAt          pgtype.Timestamptz `db:"consent_at" json:"consent_at"`
+	ConsentTextVersion *string            `db:"consent_text_version" json:"consent_text_version"`
+	ConsentPurpose     *string            `db:"consent_purpose" json:"consent_purpose"`
+	RetainUntil        pgtype.Date        `db:"retain_until" json:"retain_until"`
+	LegalBasis         string             `db:"legal_basis" json:"legal_basis"`
+	SubmittedAt        pgtype.Timestamptz `db:"submitted_at" json:"submitted_at"`
+	ReviewedBy         pgtype.UUID        `db:"reviewed_by" json:"reviewed_by"`
+	ReviewedAt         pgtype.Timestamptz `db:"reviewed_at" json:"reviewed_at"`
+	ReviewReason       *string            `db:"review_reason" json:"review_reason"`
+	ApprovedBy         pgtype.UUID        `db:"approved_by" json:"approved_by"`
+	ApprovedAt         pgtype.Timestamptz `db:"approved_at" json:"approved_at"`
+	ReceiptNumberID    *int64             `db:"receipt_number_id" json:"receipt_number_id"`
+	ReceiptFormatted   *string            `db:"receipt_formatted" json:"receipt_formatted"`
+	CancelledBy        pgtype.UUID        `db:"cancelled_by" json:"cancelled_by"`
+	CancelledAt        pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
+	CancelReason       *string            `db:"cancel_reason" json:"cancel_reason"`
+	EdonationKeyed     bool               `db:"edonation_keyed" json:"edonation_keyed"`
+	Replaces           pgtype.UUID        `db:"replaces" json:"replaces"`
+	ReplacedBy         pgtype.UUID        `db:"replaced_by" json:"replaced_by"`
+}
+
+type OutboxJob struct {
+	ID        int64              `db:"id" json:"id"`
+	JobType   string             `db:"job_type" json:"job_type"`
+	Payload   []byte             `db:"payload" json:"payload"`
+	Status    string             `db:"status" json:"status"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Attempts  int32              `db:"attempts" json:"attempts"`
+	LastError *string            `db:"last_error" json:"last_error"`
+}
+
 type ReceiptNumber struct {
 	ID          int64              `db:"id" json:"id"`
 	FiscalYear  int32              `db:"fiscal_year" json:"fiscal_year"`
@@ -144,6 +236,18 @@ type RetentionConfig struct {
 	LegalBasis        LegalBasisEnum     `db:"legal_basis" json:"legal_basis"`
 	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	UpdatedBy         pgtype.UUID        `db:"updated_by" json:"updated_by"`
+}
+
+type SlipAttachment struct {
+	ID         pgtype.UUID        `db:"id" json:"id"`
+	DonationID pgtype.UUID        `db:"donation_id" json:"donation_id"`
+	ObjectKey  string             `db:"object_key" json:"object_key"`
+	MimeType   string             `db:"mime_type" json:"mime_type"`
+	SizeBytes  int64              `db:"size_bytes" json:"size_bytes"`
+	UploadedBy pgtype.UUID        `db:"uploaded_by" json:"uploaded_by"`
+	UploadedAt pgtype.Timestamptz `db:"uploaded_at" json:"uploaded_at"`
+	DeletedAt  pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	DeletedBy  pgtype.UUID        `db:"deleted_by" json:"deleted_by"`
 }
 
 type User struct {

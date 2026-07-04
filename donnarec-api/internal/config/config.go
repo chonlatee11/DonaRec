@@ -10,6 +10,22 @@ import (
 	"strings"
 )
 
+// MinIOConfig holds object storage configuration for MinIO/S3-compatible backends.
+// Used by internal/storage.NewStorageClient (Plan 03-04, D-48).
+// Bucket defaults to "donnarec-slips"; Secure defaults to false (dev) / true (prod).
+type MinIOConfig struct {
+	// Endpoint is the host:port of the MinIO server (e.g. "minio:9000" in Docker).
+	Endpoint string
+	// AccessKey maps to MINIO_ACCESS_KEY / MINIO_ROOT_USER.
+	AccessKey string
+	// SecretKey maps to MINIO_SECRET_KEY / MINIO_ROOT_PASSWORD.
+	SecretKey string
+	// Bucket is the target bucket name for slip files (default: "donnarec-slips").
+	Bucket string
+	// Secure enables HTTPS for the MinIO connection (false in dev, true in prod).
+	Secure bool
+}
+
 // Config holds the full application configuration loaded from environment variables.
 type Config struct {
 	// Server
@@ -40,6 +56,9 @@ type Config struct {
 
 	// Retention (D-18)
 	Retention RetentionConfig
+
+	// MinIO (D-48, Plan 03-04) — object storage for donation slip files
+	MinIO MinIOConfig
 }
 
 // RetentionConfig holds data-retention policy defaults loaded from environment.
@@ -79,6 +98,13 @@ func Load() (*Config, error) {
 			AuditLogRetainDays: getEnvInt("RETENTION_AUDIT_DAYS", 3650),
 			DefaultLegalBasis:  getEnvStr("RETENTION_DEFAULT_LEGAL_BASIS", "tax_obligation"),
 		},
+		MinIO: MinIOConfig{
+			Endpoint:  os.Getenv("MINIO_ENDPOINT"),
+			AccessKey: os.Getenv("MINIO_ACCESS_KEY"),
+			SecretKey: os.Getenv("MINIO_SECRET_KEY"),
+			Bucket:    getEnvStr("MINIO_BUCKET", "donnarec-slips"),
+			Secure:    getEnvBool("MINIO_SECURE", false),
+		},
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -94,6 +120,7 @@ func (c *Config) validate() error {
 		"DATABASE_URL":      c.DatabaseURL,
 		"KEYCLOAK_BASE_URL": c.KeycloakBaseURL,
 		"DONAREC_KEK":       c.DonarecKEK,
+		"MINIO_ENDPOINT":    c.MinIO.Endpoint,
 	}
 	for name, val := range required {
 		if val == "" {
@@ -148,6 +175,15 @@ func getEnvInt(key string, fallback int) int {
 	if v := os.Getenv(key); v != "" {
 		if i, err := strconv.Atoi(v); err == nil {
 			return i
+		}
+	}
+	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	if v := os.Getenv(key); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			return b
 		}
 	}
 	return fallback

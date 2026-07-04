@@ -1,0 +1,176 @@
+# Phase 3: Donation Lifecycle & Maker-Checker Issuance - Context
+
+**Gathered:** 2026-06-27
+**Updated:** 2026-06-27 — เพิ่ม consent capture (D-49), Void & Reissue (D-50), e-Donation keyed flag (D-51), approval concurrency (D-52), search scope (D-53), slip retention (D-54)
+**Status:** Ready for planning
+
+<domain>
+## Phase Boundary
+
+สร้าง **donation record entity + maker-checker workflow** ที่จบด้วยการ **ออกใบเสร็จที่มีเลข
+(เรียก allocator ของ Phase 2) ภายใน transaction เดียว** หลังผ่านการอนุมัติโดยมนุษย์ พร้อมจัดเก็บ
+donor PII แบบเข้ารหัส + mask ตามบทบาท นี่คือ flow แกนกลางของระบบ (Flow A — Maker สร้างเอง)
+
+**In scope (Phase 3):**
+- donation record entity + lifecycle state machine: `draft → pending_review → issued / rejected / cancelled`
+- Flow A: Maker สร้าง/แก้รายการ (ขณะ draft), ดูสลิปแนบ, submit เข้า review (FR-07/09/11)
+- Maker-Checker approval: Checker อนุมัติ / ตีกลับ / ปฏิเสธ + เหตุผล; **SoD บังคับ `approver_id != created_by`** ใน code **และ** DB check (FR-12/14)
+- **Issuance transaction เดียว** ตอน approve: set status=issued + `receiptno.Allocate(ctx, tx, approvedAt)` + เขียน audit row + enqueue outbox job (เรียกผ่าน `db.WithTx`, ตรง D-33)
+- donor PII (ชื่อ, เลขภาษี/ปชช., ที่อยู่, อีเมล) จัดเก็บ — **เลขภาษี/ปชช. เข้ารหัส at-rest** ผ่าน `internal/crypto` envelope, **mask ตามบทบาท** ผ่าน `internal/pii` (FR-29, NFR-02 ฝั่ง usage)
+- **snapshot donor fields ลง donation** ตอนสร้าง/ออกใบ (immutable tax doc) — ไม่มี donor master/dedup
+- **consent capture ของ Flow A donor** (consent flag + timestamp + consent text version + purpose) ผูกกับ retention model ของ Phase 1 (`retain_until`/`legal_basis`) (NFR-03, D-49)
+- ยกเลิกใบเสร็จ issued — **2 flow:** Void (ยกเลิกเฉยๆ) และ Void & Reissue (ออกใบแทนเลขใหม่ + link `replaces`/`replaced_by`) → สถานะ "ยกเลิก" (เก็บเลข, ไม่ลบ, audited) (FR-19, D-50)
+- **`edonation_keyed` flag บน donation** (default false; ตั้ง true ตอน export ใน Phase 5) — ตอน cancel ถ้า true → เตือน + บังคับเหตุผลว่าจัดการฝั่ง RD แล้ว (D-51)
+- ค้นหา/กรองรายการตาม ชื่อ, ช่วงวันที่, สถานะ, เลขที่ใบเสร็จ (FR-10)
+- **object storage (MinIO/S3-compatible) + magic-byte validation + size limit** สำหรับสลิป Flow A (optional upload)
+- audit ทุก action สำคัญ (create/submit/return/reject/approve/cancel/pii.reveal) ผ่าน `internal/audit` hash-chain
+
+**Out of scope (เลื่อนไปเฟสอื่น — new capability):**
+- PDF generation / email / outbox **worker** ที่ consume job → Phase 4 (Phase 3 แค่ enqueue)
+- หน้าจอแก้ template/config รูปแบบเลข, ข้อความลดหย่อน 1 เท่า/2 เท่า (FR-24/33) → Phase 4
+- e-Donation export / reports → Phase 5
+- **Flow B (public donation form + slip upload จากผู้บริจาค)** → Phase 6 (เฟสนี้สร้าง object storage seam ให้ Phase 6 reuse)
+- donor master / dedup / blind index / per-donor rollup → future (เพิ่มภายหลังได้โดยไม่ migrate snapshot)
+- คิว "รอตรวจสอบ" จากเว็บ (FR-08) → Phase 6 (Flow B). Phase 3 มี pending_review queue ของ Flow A เท่านั้น
+
+</domain>
+
+<decisions>
+## Implementation Decisions
+
+### Donor data model (FR-29)
+- **D-43:** **Snapshot-only** — แต่ละ donation เก็บ donor fields ของตัวเอง (ชื่อ/ที่อยู่/อีเมล + เลขภาษีเข้ารหัส) **ไม่มี donor master table / ไม่มี blind index** ในเฟสนี้. เหตุผล: ใบเสร็จเป็นเอกสารภาษี ณ จุดเวลา ต้อง freeze donor identity อยู่แล้ว (หลักเดียวกับ D-42 freeze เลข); e-Donation export (Phase 5) และ report ตามช่วงเวลา/ยอดรวมทำงานบน per-donation snapshot ได้ครบ; dedup/auto-fill/per-donor rollup เพิ่มทีหลังได้โดยไม่ migrate snapshot เดิม
+- **D-44:** **เลขภาษี/บัตร ปชช. บังคับกรอกเสมอ** — ไม่มีเลข = ออกใบเสร็จไม่ได้ (validation ที่ขอบ API + DB NOT NULL บน ciphertext). เหตุผล: ต้องมีเลขถึงจะคีย์เข้า e-Donation RD ได้ (FR-30 downstream)
+
+### Approval / rejection workflow (FR-11, FR-12, FR-14)
+- **D-45:** **แยก 2 action ที่ Checker ทำได้เมื่อไม่อนุมัติ:**
+  - **ตีกลับเพื่อแก้ (return)** → record กลับสู่ `draft`, Maker แก้แล้ว resubmit ได้ (loop ได้ไม่จำกัดรอบ) — non-terminal
+  - **ปฏิเสธถาวร (reject)** → `rejected` (terminal, รายการไม่ถูกต้อง/ซ้ำ — ไม่ออกเป็นใบเสร็จ)
+  - **ทั้งสอง action บังคับระบุเหตุผล** (เก็บใน record + audit)
+- **State machine:** `draft —submit→ pending_review`; `pending_review —return+reason→ draft`; `pending_review —reject+reason→ rejected`; `pending_review —approve(approver≠creator)→ issued`; `issued —cancel+reason→ cancelled`. `rejected`/`cancelled` เป็น terminal. **Reissue (D-50):** ใบใหม่เป็น donation record ใหม่ที่เริ่มจาก `draft` ตามปกติ + link `replaces` → ใบเดิม; ใบเดิม `cancelled` + `replaced_by` → ใบใหม่
+- **SoD (locked จาก CLAUDE.md):** Checker ห้าม approve record ที่ตัวเองสร้าง — บังคับ `approver_id != created_by` ทั้งใน guard/service **และ** DB check (defense-in-depth)
+- **Receipt number เกิดเฉพาะตอน issued** — draft/pending/rejected/cancelled ไม่มีเลข (cancelled เก็บเลขที่เคยออก); allocate เป็น code path เดียวตอน issuance commit (D-35)
+
+### PII reveal & masking (FR-29, NFR-02)
+- **D-46:** **reveal เลขเต็ม = Checker + Admin เท่านั้น** (Maker เห็นเลขเต็มเฉพาะตอนกรอก/แก้ draft ของตัวเอง; หลัง submit เห็น mask). ตรงกับ Phase 1 **D-10** (`pii.CanRevealFull`) — **ไม่ต้องสร้างใหม่ reuse ของเดิม**
+- **Mask format (locked Phase 1):** `pii.MaskNationalID` แสดง 4 ตัวท้าย (`x-xxxx-xxxxx-x1234` สำหรับเลข 13 หลัก) — เป็น default ทุกที่
+- **Reveal flow (locked Phase 1, D-13):** `CanRevealFull` gate → 403 ถ้า false → `crypto.DecryptField` → เขียน audit `action="pii.reveal"` → คืน plaintext. ทุก reveal ถูก audit
+
+### Donor consent capture (NFR-03)
+- **D-49:** **บันทึก consent เต็มรูปต่อ donation snapshot** — `consent_given` (flag) + `consent_at` (timestamp) + `consent_text_version` (เวอร์ชันข้อความที่ตกลง) + `consent_purpose` ผูกกับ retention model ของ Phase 1 (`retain_until`, `legal_basis`). Flow A = เจ้าหน้าที่กรอกแทน donor ที่เคาน์เตอร์ → เก็บ consent ระดับ snapshot เดียวกับ donor fields อื่น (immutable). เหตุผล: NFR-03 บังคับ "consent + วันเวลา + เวอร์ชันข้อความ + วัตถุประสงค์"; เก็บต่อ snapshot สอดคล้องหลัก freeze เอกสารภาษี (D-43). สิทธิขอลบถูกจำกัดโดยกฎหมายภาษี → retention ไม่ hard-delete (ตาม D-18 Phase 1)
+
+### Receipt cancellation — Void & Reissue (FR-19)
+- **D-47:** **ยกเลิกใบเสร็จ issued = Checker + Admin** (Maker ยกเลิกไม่ได้), **บังคับระบุเหตุผล + audited**. ยกเลิก = set status "ยกเลิก"/`cancelled` — **เก็บเลขเดิมไว้ ไม่ลบ ไม่เกิด gap** (number ยังครองอยู่ใน ledger ของ Phase 2)
+- **D-50:** **รองรับ 2 flow การยกเลิก:**
+  - **Void (ยกเลิกอย่างเดียว)** — ใบเสร็จไม่ถูกต้อง/ไม่ควรมีอยู่ (สลิปปลอม, บริจาคซ้ำ, ยอดผิดแล้วไม่ต้องออกใหม่) → set `cancelled` + เหตุผล + audit. จบ ไม่ออกใบใหม่
+  - **Void & Reissue (ยกเลิกเพื่อออกใบแทน)** — ข้อมูลผิด (ชื่อ/เลขผู้เสียภาษี/ยอด) ต้องออกใบที่ถูกต้อง → cancel ใบเดิม (set `replaced_by` = id ใบใหม่) **และสร้าง donation record ใหม่ (ข้อมูลแก้แล้ว) เดินผ่าน lifecycle ปกติ draft→pending_review→issued** เพื่อให้ได้ **เลขรันใหม่ผ่าน allocator path เดิม** (D-35 ไม่แตะ) + ตั้ง `replaces` = id ใบเดิม. **ไม่ bypass maker-checker / SoD** — ใบแทนต้องผ่านอนุมัติเหมือนใบปกติ
+  - **link fields:** `replaces` / `replaced_by` (nullable, self-reference) บน donation — ออกแบบตอนนี้ถูกกว่า migrate ภายหลัง
+- **D-51:** **`edonation_keyed` flag บน donation** (boolean default false) — ตั้ง true ตอน export e-Donation (Phase 5 เป็นคนตั้ง). **ตัวชี้ขาดตอน cancel:**
+  - `edonation_keyed = false` → ยกเลิกในระบบได้เลย ตามด้วยแจ้งผู้บริจาค (email worker = Phase 4)
+  - `edonation_keyed = true` → **แสดงคำเตือน + บังคับเหตุผลยืนยันว่าได้แก้ไข/เพิกถอนรายการฝั่ง RD แล้ว** (RD reconciliation เป็น manual operational step นอกระบบ — เราคีย์มือ; บันทึกการยืนยันลง audit). ความเสี่ยงสูงสุด: ถ้าไม่ทำ ผู้บริจาคมีสิทธิลดหย่อนค้างในระบบสรรพากรทั้งที่ใบถูกยกเลิก
+  - Phase 3 = สร้าง column + warning/guard logic; Phase 5 = set flag ตอน export
+
+### Approval concurrency (NFR-04 ฝั่ง issuance)
+- **D-52:** **กัน double-issuance ด้วย row-lock + status precondition** — ตอน approve: `SELECT ... FOR UPDATE` บน donation row ภายใน issuance tx + เช็ค precondition (รับเฉพาะ `pending_review → issued`). ถ้า Checker 2 คน approve record เดียวกันพร้อมกัน คนที่สองจะเห็น status เปลี่ยนแล้ว → reject (ออกเลขครั้งเดียว). เสริมกับ gap-less allocator ของ Phase 2 (คนละ race: allocator กันเลขซ้ำข้าม record, D-52 กัน issue ซ้ำบน record เดียว)
+
+### Search / filter scope (FR-10)
+- **D-53:** **ค้นได้ด้วย ชื่อ / ช่วงวันที่ / สถานะ / เลขที่ใบเสร็จ เท่านั้น** — **ไม่ค้นด้วยเลขภาษี/ปชช.** เพราะ field เข้ารหัส + ไม่มี blind index (ยืนยัน D-43). ตรงกับ FR-10 พอดี (ไม่ได้ระบุค้นด้วยเลขภาษี). ถ้าอนาคตต้องการค้นด้วยเลขภาษี → เพิ่ม blind index ภายหลัง (deferred, ตาม D-43)
+
+### Slip retention (FR-09; seam FR-02 Phase 6)
+- **D-54:** **ไม่ hard-delete ไฟล์สลิป** — เมื่อ record ถูก reject/cancel หรือ Maker ลบแนบใหม่ → **เก็บไฟล์ไว้ใน object storage เพื่อ audit, soft-delete reference (ไม่ลบ row), ทุกการลบถูก audited**. สอดคล้องหลัก immutability ของเอกสารภาษี + audit trail
+
+### Slip upload — Flow A (FR-09; seam ให้ FR-02 Phase 6)
+- **D-48:** **แนบสลิปได้แต่ไม่บังคับ (optional)** ใน Flow A (รองรับเงินสด/ไม่มีสลิป). **สร้าง object storage (MinIO/S3-compatible) + magic-byte validation (ตรวจ content ไม่ใช่ extension) + size limit ในเฟสนี้** เพราะ ROADMAP SC#1 ระบุ "view any attached slip"; Phase 6 (Flow B public upload) **reuse** seam นี้. เก็บไฟล์ใน object storage + เก็บ reference ใน DB (ห้ามเก็บ BLOB ใน DB)
+
+### Claude's Discretion
+- schema รายละเอียดของ donation/receipt entity (ชื่อ column, FK ไป ledger `receipt_numbers` ตาม D-38, index สำหรับ search FR-10) — planner ออกแบบ. **ต้องครอบคลุม column ใหม่จาก decisions นี้:** consent (`consent_given`/`consent_at`/`consent_text_version`/`consent_purpose` + `retain_until`/`legal_basis` ตาม D-49), reissue link (`replaces`/`replaced_by` self-FK ตาม D-50), `edonation_keyed` boolean (D-51)
+- โครงสร้าง package ฝั่ง Go (เช่น `internal/donation/`, `internal/storage/`) ตาม pattern ที่ก่อตัวจาก Phase 1
+- รูปแบบ migration 000005+ (donation tables, FK, SoD CHECK, status enum/constraint)
+- object storage client library (`minio-go` ตาม CLAUDE.md) + endpoint/bucket config — planner/researcher เลือกตาม pattern config เดิม
+- รูปแบบ outbox table + enqueue (transactional outbox ตาม CLAUDE.md) — Phase 3 เขียน enqueue, worker เป็น Phase 4
+- ขอบเขต validation donor fields อื่น (อีเมล/ที่อยู่ format) — ตามมาตรฐานบัญชี
+
+</decisions>
+
+<canonical_refs>
+## Canonical References
+
+**Downstream agents MUST read these before planning or implementing.**
+
+### Project & Requirements
+- `.planning/PROJECT.md` — core value (gap-less เลข + ทุกใบผ่านอนุมัติมนุษย์), constraints (Security/PDPA, Audit, Correctness)
+- `.planning/REQUIREMENTS.md` — FR-07, FR-09, FR-11, FR-10, FR-12, FR-14, FR-19, FR-29 + **NFR-03** (consent capture Flow A — Phase 3 owns การเก็บ consent ของ Flow A ตาม retention model Phase 1) + NFR-02 (PII usage). **Seam ไป Phase 5:** FR-30/FR-32 (e-Donation export/report) เป็นคนตั้ง `edonation_keyed` flag ที่ Phase 3 สร้าง (D-51)
+- `.planning/ROADMAP.md` §"Phase 3" — goal + 5 success criteria (donation lifecycle, SoD, issuance tx, cancel retains number, encrypted+masked PII + search)
+
+### Load-bearing technical guidance (CLAUDE.md)
+- `CLAUDE.md` §"Auth & RBAC" — SoD (`approver_id != created_by` ใน code + DB), audit append-only hash-chain
+- `CLAUDE.md` §"PII Encryption-at-Rest" — envelope AES-256-GCM, blind index (เฉพาะถ้า lookup ด้วย national ID — **เฟสนี้ไม่ต้อง** ตาม D-43), role-based masking, ทุก reveal audit
+- `CLAUDE.md` §"What NOT to Use" — ห้าม render PDF/email ใน issuance transaction (แค่ enqueue outbox), ห้ามเก็บ slip เป็น BLOB ใน DB (ใช้ object storage), ห้ามเชื่อ file extension (magic-byte), ห้าม pre-compute เลข
+- `CLAUDE.md` §"Email Delivery" — transactional outbox + worker (Phase 3 enqueue, Phase 4 consume)
+
+### Prior phase context (สืบทอด)
+- `.planning/phases/02-gap-less-receipt-numbering-core/02-CONTEXT.md` — **D-33** (allocator caller-managed tx, Phase 3 ห่อด้วย `db.WithTx`), **D-34** (allocator คืน fiscal_year/running_no/formatted), **D-35** (code path เดียว, ห้าม pre-compute), **D-36** (bubble error, caller จัดการ rollback), **D-38** (receipts อ้างอิง ledger), **D-42** (freeze formatted snapshot)
+- `.planning/phases/01-foundation-db-auth-rbac-audit-retention-model/01-CONTEXT.md` — D-10..D-14 (PII mask/reveal/audit), auth/RBAC foundation
+
+### No additional ADRs/specs
+- ยังไม่มี SPEC.md แยกสำหรับเฟสนี้ — decisions ครบใน `<decisions>` ข้างบน
+
+</canonical_refs>
+
+<code_context>
+## Existing Code Insights
+
+### Reusable Assets (Phase 1 + Phase 2 — พร้อมใช้)
+- **`internal/receiptno/`** (Phase 2): `Allocator.Allocate(ctx, tx, issueDate)` — เรียกใน issuance tx ของเฟสนี้ (D-33). คืน `AllocatedReceipt{FiscalYear, RunningNo, Formatted}`
+- **`internal/crypto/`** (Phase 1): `EncryptField`/`DecryptField` envelope AES-256-GCM + key provider — ใช้เข้ารหัสเลขภาษี/ปชช. ของ donor (D-44)
+- **`internal/pii/mask.go`** (Phase 1): `MaskNationalID` (last-4) + `CanRevealFull(claims)` (Admin+Checker) — wire เข้า donor record ตรงๆ (D-46), **ห้ามสร้างใหม่**
+- **`internal/audit/`** (Phase 1): service + middleware + hash-chain immutable — เขียน audit row ใน issuance tx + ทุก action (รวม `pii.reveal`)
+- **`internal/auth/`** (Phase 1): Keycloak claims + `HasRole(RoleMaker/RoleChecker/RoleAdmin)` — RBAC guard + SoD
+- **`internal/db/helpers.go`** — `db.WithTx(ctx, pool, fn)` seam ห่อ issuance tx (allocate + status + audit + enqueue ใน commit เดียว)
+- **sqlc + pgx/v5** (`internal/db/`): เพิ่ม query donation/receipt + named params + RETURNING
+- **golang-migrate** (`migrations/`, ล่าสุด 000004) → migration ถัดไป **000005+** (donation tables, SoD CHECK, status constraint, FK→`receipt_numbers`)
+- **testcontainers Postgres** (`internal/testutil/postgres.go`): integration test issuance tx + concurrency (approve พร้อมกัน) + SoD
+
+### Established Patterns
+- data = sqlc + pgx/v5, migration = golang-migrate, Go 1.25.1
+- HTTP layer: ตรวจ router ที่ใช้จริง (02-CONTEXT ระบุ gin ใน go.mod) — เฟสนี้เริ่มแตะ HTTP handler (Flow A back-office API) ครั้งแรกหลัง Phase 1 auth
+- query: named params (`@x`), explicit column list, RETURNING
+
+### Integration Points (ใหม่ในเฟสนี้)
+- donation entity ↔ issuance tx (`db.WithTx`) ↔ `receiptno.Allocate` (Phase 2) ↔ ledger `receipt_numbers` (FK, D-38)
+- donor field encrypt ↔ `crypto.EncryptField`; reveal ↔ `pii.CanRevealFull` + `crypto.DecryptField` + audit
+- approval action ↔ SoD guard (`auth` claims) + DB CHECK
+- slip ↔ object storage client (ใหม่, `internal/storage/`?) + magic-byte validation
+- issuance ↔ outbox table (enqueue เท่านั้น; worker = Phase 4)
+
+</code_context>
+
+<specifics>
+## Specific Ideas
+
+- ผู้ใช้เลือก **simple & safe** ต่อเนื่องจาก Phase 2: snapshot-only (ไม่ over-engineer dedup), บังคับเลขภาษี, role-restrict ทั้ง reveal และ cancel ที่ Checker+Admin
+- ผู้ใช้แยกชัด **"ตีกลับเพื่อแก้" (loop) vs "ปฏิเสธถาวร"** — สะท้อนกระบวนการจริงของ back-office (แก้รอบเล็กน้อย vs รายการใช้ไม่ได้)
+- ผู้ใช้ให้น้ำหนัก **immutability/audit ของเอกสารภาษี** (freeze donor snapshot, ยกเลิกไม่ลบเลข) — ต่อเนื่องจาก D-42
+- ผู้ใช้ยอมรับการ **front-load object storage** ใน Phase 3 เพื่อให้ตรง SC "view attached slip" และ Phase 6 reuse
+- ผู้ใช้แยกชัด **Void (ยกเลิกเฉยๆ) vs Void & Reissue (ออกใบแทน)** โดยมี **"คีย์เข้า e-Donation แล้วหรือยัง" เป็นตัวแปรชี้ขาด** — เคส "ส่งอีเมล/คีย์ RD แล้ว" ยุ่งกว่าปกติเพราะข้อมูลไปไกลกว่ากล่องอีเมล: ถ้าคีย์ RD แล้วต้องไปแก้/เพิกถอนฝั่งสรรพากรด้วย (manual) ไม่งั้นผู้บริจาคมีสิทธิลดหย่อนค้างทั้งที่ใบถูกยกเลิก — ความเสี่ยงสูงสุดที่ระบบต้องเตือน/บังคับยืนยัน (D-51)
+- ผู้ใช้ย้ำว่าใบแทน (reissue) ต้องได้ **เลขรันใหม่** และอ้างอิงว่ามาแทนใบเดิม — สะท้อนความถูกต้องของเอกสารภาษีและ audit trail
+
+</specifics>
+
+<deferred>
+## Deferred Ideas
+
+- **Donor master + dedup + blind index + per-donor rollup/auto-fill** — เพิ่มภายหลังได้โดยไม่ migrate snapshot (D-43); ยังไม่อยู่ใน requirement ของ milestone
+- **Flow B public donation form + slip upload จากผู้บริจาค + pending-review queue จากเว็บ (FR-08, FR-01..06)** — Phase 6; เฟสนี้วาง object storage seam ให้ reuse
+- **PDF/email/outbox worker (FR-20..28, NFR-07)** — Phase 4; เฟสนี้แค่ enqueue
+- **ข้อความลดหย่อน 1 เท่า/2 เท่า + template/config UI (FR-24, FR-33, NFR-09)** — Phase 4
+- **e-Donation export + reports + "คีย์แล้ว" flag (FR-30/31/32)** — Phase 5
+
+None อื่น — discussion อยู่ในขอบเขตเฟส
+
+</deferred>
+
+---
+
+*Phase: 3-donation-lifecycle-maker-checker-issuance*
+*Context gathered: 2026-06-27*

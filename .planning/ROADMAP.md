@@ -14,7 +14,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation (DB, Auth/RBAC, Audit, Retention model)** - Security, role separation, and an immutable audit trail that everything else depends on (completed 2026-06-24)
 - [x] **Phase 2: Gap-less Receipt Numbering Core (★)** - Concurrency-proven, per-fiscal-year, gap-less number allocator built before any issuance flow (completed 2026-06-25)
-- [ ] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt
+- [x] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt (completed 2026-07-01)
 - [ ] **Phase 4: Receipt PDF + Email Delivery (Outbox Worker)** - Async Thai/EN tax-compliant PDF and email pipeline with retry, decoupled from the issuance transaction
 - [ ] **Phase 5: e-Donation Export, Reports & Admin Settings** - Access-controlled e-Donation export, donation reports, no-deploy config, and verified backup/restore
 - [ ] **Phase 6: Public Donation Web Form (Flow B)** - Public bilingual donation form with slip upload, consent, bot protection, and pending-review queue feeding the existing pipeline
@@ -72,10 +72,26 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. On approval, a single DB transaction sets status to issued, allocates the gap-less number, writes the audit row, and enqueues the side-effect job — and a receipt number exists only for issued records (never on drafts/rejected).
   4. Cancelling an issued receipt sets status to "ยกเลิก" and retains its number (no gap, never deleted), with the action audited.
   5. Donor details (name, tax/national ID, address, email) are stored with the ID encrypted at rest and masked everywhere except authorized, audited reveals; staff can search/filter records by name, date range, status, and receipt number.
-**Plans**: TBD
+  6. **[Integration gate — added 2026-07-02]** An end-to-end integration test drives the real HTTP path (router → RequireAuth → RequireRoles/ResolveAppUser → handler → service → DB) with a realistic Keycloak token, covering the critical Maker create/submit and Checker approve/return flows; AND the human UI walkthrough passes. (See Conventions → Integration-test gate.)
+**Plans**: 8 plans (criteria 1–5) + 5 remediation plans (criterion 6 — integration gate: TanStack migration + FE↔BE contract alignment)
+- [x] 03-01-PLAN.md — Data layer: migrations 000005 (donations) + 000007 (outbox) + sqlc queries + Wave 0 test scaffolds
+- [x] 03-02-PLAN.md — Frontend bootstrap: Next.js 15 + shadcn + next-intl + Keycloak bearer + app shell
+- [x] 03-03-PLAN.md — Maker draft slice (TDD): create/edit/submit + PII encrypt/mask + consent + state machine
+- [x] 03-04-PLAN.md — Slip storage slice (TDD): MinIO + magic-byte + size limit + soft-delete-retain
+- [x] 03-05-PLAN.md — Issuance & review slice (TDD ★): atomic approve tx + SoD + concurrency proof + return/reject
+- [x] 03-06-PLAN.md — Cancel / Void & Reissue + audited PII reveal + search (TDD)
+- [x] 03-07-PLAN.md — Frontend list/search + detail/review + SoD blocked state
+- [x] 03-08-PLAN.md — Frontend create/edit form + slip upload + consent + reveal/cancel dialogs
+- [x] 03-09-PLAN.md — Backend list contract: {data:{items,total,page,per_page}} envelope + COUNT + creator-name join + E2E (TDD)
+- [x] 03-10-PLAN.md — FE foundation + list slice: TanStack Query/Table + BFF proxy + apiFetch unwrap + list screen migrated
+- [x] 03-11-PLAN.md — Backend detail contract: DonationDetailResponse + server-computed auth flags + review_history + E2E (TDD)
+- [x] 03-12-PLAN.md — FE detail/review/PII-reveal slice: BFF routes + useQuery/useMutation + SoD DOM-removal + audited reveal
+- [x] 03-13-PLAN.md — FE create/edit/slip + cancel/void-reissue slice: BFF request field-mapping + TanStack mutations + E2E create/cancel
 **UI hint**: yes
 
 > Note: the issue transaction enqueues an outbox job here, but the worker that consumes it (PDF + email) is built in Phase 4. Consent capture for Flow A donors is recorded here against the Phase 1 retention model (NFR-03).
+
+> ⚠️ **REOPENED 2026-07-02 — integration gate not met.** Criteria 1–5 passed unit/service-level verification (5/5), but driving the real stack with a real Keycloak token surfaced three runtime-seam bugs the unit tests could not catch: (1) `created-by-fk-mismatch` — claims.Subject (KC sub) written into `users(id)` FKs → **FIXED + committed** (ef7ede6); (2) `fe-be-audience-mismatch` — no audience mapper (aud=account → 401) + public/confidential client mismatch + missing web env → **FIXED, uncommitted** (realm-donnarec.json, web .env.example); (3) **RBAC AND-bug** — `RequireRoles(Maker,Checker,Admin)`/`(Checker,Admin)` enforce AND where "any of" was intended → 403 for every user → **OPEN**. Phase 3 stays open until criterion 6 (integration gate) is satisfied: bugs 2–3 fixed+committed, an E2E HTTP integration test added, and the human UI walkthrough passes.
 
 ### Phase 4: Receipt PDF + Email Delivery (Outbox Worker)
 **Goal**: After a receipt is issued, an async worker reliably renders a correct Thai/English tax-compliant PDF and emails it to the donor, with delivery status and retry, without ever blocking or rolling back the issuance transaction.
@@ -135,7 +151,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
-| 3. Donation Lifecycle & Maker-Checker Issuance | 0/TBD | Not started | - |
+| 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |

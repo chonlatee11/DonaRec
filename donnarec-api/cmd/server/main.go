@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,9 +17,15 @@ import (
 	"github.com/donnarec/donnarec-api/internal/audit"
 	"github.com/donnarec/donnarec-api/internal/auth"
 	"github.com/donnarec/donnarec-api/internal/config"
+	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
+	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/users"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
 )
@@ -92,15 +99,59 @@ func main() {
 
 	userSvc := users.NewUserService(pool, queries, logger)
 
+	// Envelope key provider: reads DONAREC_KEK from env (D-26, NFR-02).
+	keyProvider, err := crypto.NewEnvKeyProvider()
+	if err != nil {
+		logger.Fatal("crypto key provider init failed", zap.Error(err))
+	}
+
+	// Receipt number allocator: gap-less counter via SELECT … FOR UPDATE (D-33, NFR-04).
+	allocator := receiptno.NewAllocator(queries)
+
+	// Donation service: PII encrypt/mask, state machine, consent capture (FR-07/09/11/29).
+	donationSvc := donation.NewDonationService(pool, queries, allocator, auditSvc, keyProvider, logger)
+
+	// Object storage client: MinIO/S3-compatible, used for slip file uploads (Plan 03-04, D-48).
+	storageClient, err := storage.NewStorageClient(
+		cfg.MinIO.Endpoint,
+		cfg.MinIO.AccessKey,
+		cfg.MinIO.SecretKey,
+		cfg.MinIO.Bucket,
+		cfg.MinIO.Secure,
+	)
+	if err != nil {
+		logger.Fatal("storage client init failed", zap.Error(err))
+	}
+
+	// Slip service: upload/view/remove donation slip attachments (Plan 03-04, D-48, D-54).
+	slipSvc := donation.NewSlipService(pool, queries, storageClient, auditSvc, logger)
+
+	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
+	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
+	// (not in internal/auth) so the auth package stays DB-agnostic; pgx.ErrNoRows is
+	// translated to auth.ErrSubjectNotProvisioned, which the middleware maps to HTTP 403.
+	appUserResolver := func(ctx context.Context, subject string) (pgtype.UUID, error) {
+		u, err := queries.GetUserByKeycloakSubject(ctx, subject)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, auth.ErrSubjectNotProvisioned
+			}
+			return pgtype.UUID{}, err
+		}
+		return u.ID, nil
+	}
+
 	// --------------------------------------------------------
 	// Handlers
 	// --------------------------------------------------------
 	userHandler := users.NewUserHandler(userSvc, logger)
+	donationHandler := donation.NewDonationHandler(donationSvc, logger)
+	slipHandler := donation.NewSlipHandler(slipSvc, logger)
 
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, userHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -145,7 +196,7 @@ func main() {
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
 //  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin)
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, userHandler *users.UserHandler, logger *zap.Logger) *gin.Engine {
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -177,6 +228,51 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, user
 
 	// POST /api/admin/users — create user (Admin-only, D-01)
 	adminGroup.POST("/users", userHandler.CreateUser)
+
+	// ---- Maker/Checker/Admin — /api/donations (all staff) ----
+	// Pattern E: RequireRoles after RequireAuth — claims must already exist in context.
+	// Checker/Admin review actions (approve/return/reject/cancel) wired in plans 03-05/03-06.
+	donationGroup := api.Group("/donations")
+	donationGroup.Use(auth.RequireAnyRole(auth.RoleMaker, auth.RoleChecker, auth.RoleAdmin))
+	// Resolve Keycloak sub -> users.id ONCE for every donation route (bug: created-by-fk-mismatch).
+	// Scoped to donationGroup only (all *_by FK writes live here; slip + checker subgroups inherit).
+	// Deliberately NOT on the admin group — user provisioning (POST /api/admin/users) has no such FK.
+	donationGroup.Use(auth.ResolveAppUser(appUserResolver, logger))
+	donationGroup.POST("", donationHandler.Create)
+	donationGroup.GET("", donationHandler.List)
+	donationGroup.GET("/:id", donationHandler.GetByID)
+	donationGroup.PUT("/:id", donationHandler.Update)
+	donationGroup.POST("/:id/submit", donationHandler.Submit)
+
+	// ---- Slip attachment routes (Plan 03-04, D-48) ----
+	// POST   /:id/slip        — upload a slip file (multipart/form-data, field "file")
+	// GET    /:id/slip        — view slip presigned URL (15-min TTL, T-03-16)
+	// DELETE /:id/slip        — soft-delete the active slip (D-54)
+	donationGroup.POST("/:id/slip", slipHandler.Upload)
+	donationGroup.GET("/:id/slip", slipHandler.View)
+	donationGroup.DELETE("/:id/slip", slipHandler.Remove)
+
+	// GET /:id/pii — full PII reveal (D-46); route open to all staff but service gates to Checker/Admin.
+	// The role check inside RevealPII returns ErrForbidden (403) for Makers.
+	// Placed here (not checkerGroup) so a Maker receives 403, not 401/404 (better UX + testability).
+	donationGroup.GET("/:id/pii", donationHandler.RevealPII)
+
+	// ---- Checker/Admin review actions (Plans 03-05 + 03-06, D-45, D-47) ----
+	// POST /:id/approve  — issue receipt via atomic 7-step tx (INV-1, FR-08)
+	// POST /:id/return   — return to draft with mandatory reason (FR-12)
+	// POST /:id/reject   — permanently reject with mandatory reason (FR-12)
+	// POST /:id/cancel   — void an issued receipt; retains number (FR-19, D-47, plan 03-06)
+	// POST /:id/reissue  — void & reissue; creates corrected draft linked via replaces (D-50, plan 03-06)
+	//
+	// Scoped to Checker + Admin only (defense-in-depth over service-layer SoD and role guards).
+	// Inherits parent donationGroup middleware (RequireAuth + Maker/Checker/Admin).
+	checkerGroup := donationGroup.Group("")
+	checkerGroup.Use(auth.RequireAnyRole(auth.RoleChecker, auth.RoleAdmin))
+	checkerGroup.POST("/:id/approve", donationHandler.Approve)
+	checkerGroup.POST("/:id/return", donationHandler.ReturnToDraft)
+	checkerGroup.POST("/:id/reject", donationHandler.Reject)
+	checkerGroup.POST("/:id/cancel", donationHandler.Cancel)
+	checkerGroup.POST("/:id/reissue", donationHandler.Reissue)
 
 	return router
 }

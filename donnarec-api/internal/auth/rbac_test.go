@@ -143,6 +143,47 @@ func TestRequireRoles_Unit(t *testing.T) {
 	})
 }
 
+// TestRequireAnyRole_Unit verifies the "any of" (logical OR) guard used by the
+// donation and checker route groups. Regression guard for the RBAC AND-bug:
+// donationGroup/checkerGroup previously used RequireRoles (AND), which 403'd every
+// real user because no user holds all listed roles simultaneously.
+func TestRequireAnyRole_Unit(t *testing.T) {
+	run := func(userRoles []string, allowed []string) int {
+		router := gin.New()
+		router.Use(injectClaims(KeycloakClaims{
+			Subject:     "u",
+			RealmAccess: RealmRoles{Roles: userRoles},
+		}))
+		router.GET("/g", RequireAnyRole(allowed...), func(c *gin.Context) { c.Status(http.StatusOK) })
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/g", nil)
+		router.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	t.Run("maker-only passes maker/checker/admin guard (donationGroup)", func(t *testing.T) {
+		assert.Equal(t, http.StatusOK, run([]string{RoleMaker}, []string{RoleMaker, RoleChecker, RoleAdmin}))
+	})
+	t.Run("checker-only passes checker/admin guard (checkerGroup) — the AND-bug case", func(t *testing.T) {
+		// Under the old RequireRoles(Checker, Admin) this was 403 (needed admin too).
+		assert.Equal(t, http.StatusOK, run([]string{RoleChecker}, []string{RoleChecker, RoleAdmin}))
+	})
+	t.Run("admin-only passes checker/admin guard", func(t *testing.T) {
+		assert.Equal(t, http.StatusOK, run([]string{RoleAdmin}, []string{RoleChecker, RoleAdmin}))
+	})
+	t.Run("user holding none of the allowed roles is denied 403", func(t *testing.T) {
+		assert.Equal(t, http.StatusForbidden, run([]string{RoleMaker}, []string{RoleChecker, RoleAdmin}))
+	})
+	t.Run("returns 401 when no claims in context", func(t *testing.T) {
+		router := gin.New()
+		router.GET("/g", RequireAnyRole(RoleMaker), func(c *gin.Context) { c.Status(http.StatusOK) })
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodGet, "/g", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+	})
+}
+
 // injectClaims is a test helper that injects pre-built KeycloakClaims
 // into the Gin context, simulating what RequireAuth() does after token validation.
 func injectClaims(claims KeycloakClaims) gin.HandlerFunc {

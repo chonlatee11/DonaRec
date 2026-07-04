@@ -73,9 +73,10 @@
     {
       "clientId": "donnarec-frontend",
       "name": "DonaRec Front-end",
-      "description": "Next.js back-office UI — public client (no client secret)",
+      "description": "Next.js back-office UI — confidential client (server-side NextAuth holds the client secret; PKCE still enforced on the authorization code flow)",
       "enabled": true,
-      "publicClient": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
       "bearerOnly": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
@@ -89,7 +90,20 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
-      }
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-donnarec-backend",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "donnarec-backend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
 

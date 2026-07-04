@@ -36,6 +36,11 @@ import (
 // All fields are frozen snapshots from the moment of allocation (D-42):
 // Formatted is persisted to the ledger and will never change even if config changes.
 type AllocatedReceipt struct {
+	// ID is the receipt_numbers ledger primary key (BIGSERIAL from INSERT RETURNING).
+	// This is the value set in donations.receipt_number_id as the FK reference (D-38).
+	// [Rule 1 fix: field was missing, causing IssueDonation receipt_number_id FK to be
+	// unset; added to expose the ledger PK that downstream callers (Plan 03-05) require.]
+	ID int64
 	// FiscalYear is the Thai Buddhist Era fiscal year (e.g. 2569).
 	FiscalYear int
 	// RunningNo is the sequential number within the fiscal year (e.g. 1).
@@ -180,7 +185,9 @@ func (a *Allocator) Allocate(ctx context.Context, tx pgx.Tx, issueDate time.Time
 
 	// Step 8: Return the frozen snapshot from the ledger row (D-42).
 	// AllocatedAt comes from the DB-side now() in the INSERT, not from time.Now().
+	// ID is the receipt_numbers PK — downstream callers set donations.receipt_number_id = ID (D-38).
 	return AllocatedReceipt{
+		ID:          ledger.ID,
 		FiscalYear:  int(ledger.FiscalYear),
 		RunningNo:   int(ledger.RunningNo),
 		Formatted:   ledger.Formatted,
