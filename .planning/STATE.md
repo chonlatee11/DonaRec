@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 04
-current_phase_name: receipt-pdf-email-delivery-outbox-worker
+current_phase: 5
+current_phase_name: e-Donation Export, Reports & Admin Settings
 status: verifying
 stopped_at: "Completed Phase 04 code-review fixes (04-REVIEW.md): CR-01, CR-02, WR-01, WR-02, WR-04, WR-05, WR-06, WR-07 fixed; WR-03 documented as known limitation"
-last_updated: "2026-07-04T13:06:47.293Z"
+last_updated: "2026-07-04T15:25:33.393Z"
 last_activity: 2026-07-04
-last_activity_desc: Phase 04 execution started
+last_activity_desc: Phase 04 complete, transitioned to Phase 5
 progress:
   total_phases: 6
   completed_phases: 4
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 ## Current Position
 
-Phase: 04 (receipt-pdf-email-delivery-outbox-worker) — EXECUTING
-Plan: 8 of 8
+Phase: 5 — e-Donation Export, Reports & Admin Settings
+Plan: Not started
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
 Status: Phase complete — ready for verification
-Last activity: 2026-07-04 — Phase 04 execution started
+Last activity: 2026-07-04 — Phase 04 complete, transitioned to Phase 5
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -40,7 +40,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 
 **Velocity:**
 
-- Total plans completed: 5
+- Total plans completed: 14
 - Average duration: —
 - Total execution time: —
 
@@ -49,6 +49,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 5 | - | - |
+| 04 | 9 | - | - |
 
 **Recent Trend:**
 
