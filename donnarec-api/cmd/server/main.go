@@ -148,6 +148,11 @@ func main() {
 		logger.Fatal("receipts storage client init failed", zap.Error(err))
 	}
 
+	// Wire the SAME receipts store into DonationService for DownloadReceipt's
+	// presigned URL (FR-28, plan 04-06) — resend/download reuse the frozen PDF the
+	// worker (above) writes; neither path re-renders or allocates a new number.
+	donationSvc.SetReceiptsStore(receiptsStore)
+
 	// Sandboxed remote-Chromium renderer (D-58) — dials the chrome sidecar over CDP.
 	pdfRenderer, err := pdf.NewRenderer(cfg.Worker.ChromeWSURL)
 	if err != nil {
@@ -322,6 +327,12 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// Placed here (not checkerGroup) so a Maker receives 403, not 401/404 (better UX + testability).
 	donationGroup.GET("/:id/pii", donationHandler.RevealPII)
 
+	// GET /:id/receipt-pdf — download the frozen receipt PDF via a short-lived presigned
+	// URL (FR-28, D-57 "staff download always", plan 04-06). Open to all of
+	// Maker/Checker/Admin — placed on donationGroup (not checkerGroup) so every staff
+	// role can always retrieve the PDF, matching the RevealPII placement rationale above.
+	donationGroup.GET("/:id/receipt-pdf", donationHandler.DownloadReceipt)
+
 	// ---- Checker/Admin review actions (Plans 03-05 + 03-06, D-45, D-47) ----
 	// POST /:id/approve  — issue receipt via atomic 7-step tx (INV-1, FR-08)
 	// POST /:id/return   — return to draft with mandatory reason (FR-12)
@@ -338,6 +349,9 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	checkerGroup.POST("/:id/reject", donationHandler.Reject)
 	checkerGroup.POST("/:id/cancel", donationHandler.Cancel)
 	checkerGroup.POST("/:id/reissue", donationHandler.Reissue)
+	// POST /:id/resend — re-enqueue an outbox issue_receipt job for an issued donation
+	// (D-56/D-57, FR-27, plan 04-06). Never allocates a new number or re-renders.
+	checkerGroup.POST("/:id/resend", donationHandler.Resend)
 
 	return router
 }

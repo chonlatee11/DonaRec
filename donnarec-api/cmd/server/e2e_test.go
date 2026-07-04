@@ -32,6 +32,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -58,6 +59,15 @@ const e2eTestKEK = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e
 
 // backendClientID is the audience the real verifier enforces (KEYCLOAK_CLIENT_ID).
 const backendClientID = "donnarec-backend"
+
+// fakeReceiptsStore is a hermetic stub satisfying donation.ReceiptsStore. See the
+// comment at its construction site in newE2EHarness for why a real MinIO client is
+// deliberately NOT used here.
+type fakeReceiptsStore struct{}
+
+func (fakeReceiptsStore) PresignedGet(_ context.Context, objectKey string, _ time.Duration) (string, error) {
+	return "https://fake-receipts.example.test/" + objectKey, nil
+}
 
 // e2eHarness bundles the fully-wired router (via the production setupRouter) plus
 // the handles a test needs to provision users and mint matching tokens.
@@ -108,13 +118,15 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	require.NoError(t, err, "storage client must construct (lazy — no connection)")
 	slipSvc := donation.NewSlipService(pool, queries, storageClient, auditSvc, logger)
 
-	// Receipts StorageClient for DownloadReceipt's presigned URL (FR-28, 04-06).
-	// PresignedGetObject is a pure client-side signature computation — no network
-	// call is made at construction OR at presign time, so a dummy endpoint is fine
-	// (mirrors the slip storageClient comment above).
-	receiptsStore, err := storage.NewStorageClient("localhost:9000", "minioadmin", "minioadmin", "donnarec-receipts", false)
-	require.NoError(t, err, "receipts storage client must construct (lazy — no connection)")
-	donationSvc.SetReceiptsStore(receiptsStore)
+	// DownloadReceipt's presigned URL (FR-28, 04-06) uses a fake ReceiptsStore here —
+	// unlike NewStorageClient's construction, minio-go's PresignedGetObject performs a
+	// real bucket-region probe network call, so a real client would depend on whatever
+	// incidental MinIO instance/credentials happen to be reachable on the test host.
+	// This test's job is to prove the HTTP -> auth -> RBAC -> handler -> service -> DB
+	// seam (not the MinIO round-trip, which internal/worker's tests already cover
+	// against a genuine MinIO testcontainer, 04-05) — a hermetic fake keeps this test
+	// deterministic and host-independent.
+	donationSvc.SetReceiptsStore(fakeReceiptsStore{})
 
 	// Handlers.
 	userHandler := users.NewUserHandler(userSvc, logger)
