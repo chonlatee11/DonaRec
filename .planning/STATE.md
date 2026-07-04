@@ -6,8 +6,9 @@ current_phase: 03
 current_phase_name: donation-lifecycle-maker-checker-issuance
 status: "Phase 3 shipped — PR #3"
 stopped_at: Phase 4 context gathered
-last_updated: "2026-07-04T05:37:52.522Z"
+last_updated: "2026-07-04T06:43:47.459Z"
 last_activity: 2026-07-04
+last_activity_desc: Phase 04 planning complete
 progress:
   total_phases: 6
   completed_phases: 3
@@ -31,7 +32,7 @@ Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
 Plan: 6 of 13
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
 Status: Phase 3 shipped — PR #3
-Last activity: 2026-07-04
+Last activity: 2026-07-04 — Phase 04 planning complete
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
