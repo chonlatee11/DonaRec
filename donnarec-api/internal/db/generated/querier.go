@@ -257,6 +257,16 @@ type Querier interface {
 	// Checker-set fields (reviewed_by/at/reason) are NOT included here.
 	// PII columns accept ciphertext — re-encrypt at service layer before calling.
 	UpdateDraftDonation(ctx context.Context, arg UpdateDraftDonationParams) error
+	// Update the single number-format config row (Admin-only, Phase 4 D-58 settings
+	// UI — CONTEXT.md canonical_refs note: consolidate number-format editing into
+	// the same Admin settings screen as the template config, rather than a
+	// separate page). Frozen ledger entries (D-42) are NEVER affected by this —
+	// only the NEXT allocation picks up the new format. Callers MUST validate
+	// separator/prefix against the same safe-character allowlist
+	// receiptno.formatReceiptNo enforces at allocation time (mirrored in
+	// internal/settings/service.go) BEFORE calling this, so a bad save cannot
+	// silently corrupt the next issuance instead of failing fast at save-time.
+	UpdateReceiptNumberConfig(ctx context.Context, arg UpdateReceiptNumberConfigParams) error
 	// Update the single config row (Admin-only, D-58). updated_by is set to the
 	// acting admin's app-user id for the audit trail (Pattern D, FR-13).
 	// Callers MUST validate template_html/template_html_en parse successfully via
