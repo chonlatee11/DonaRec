@@ -148,3 +148,51 @@ func TestSettingsService_SaveAndGet_RoundTrip(t *testing.T) {
 	assert.Equal(t, "RT", after.Prefix)
 	assert.Equal(t, adminRow.ID.String(), after.UpdatedBy, "updated_by must be the caller-supplied users.id")
 }
+
+// TestSaveSettings_PartialFailureRollsBackBothWrites proves WR-07's fix
+// (04-REVIEW.md): UpdateReceiptTemplateConfig and UpdateReceiptNumberConfig
+// are written inside ONE transaction, so a failure on the SECOND write rolls
+// back the FIRST too — no partial save.
+//
+// year_format has no app-level validation in SaveSettings (only
+// separator/prefix go through numberFormatCharAllowlist) — its DB CHECK
+// constraint (year_format IN ('BE4','CE4'), migrations/000004) is the only
+// backstop, making it a convenient way to force the SECOND write
+// (UpdateReceiptNumberConfig) to fail while the FIRST write
+// (UpdateReceiptTemplateConfig) would otherwise have already succeeded.
+func TestSaveSettings_PartialFailureRollsBackBothWrites(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping DB integration test in short mode")
+	}
+	t.Parallel()
+
+	pool := testutil.SetupTestPostgres(t)
+	queries := db.New(pool)
+	ctx := context.Background()
+
+	adminRow, err := queries.CreateUser(ctx, db.CreateUserParams{
+		Email:           "admin-settings-partial-fail@example.com",
+		DisplayName:     "Admin Settings Partial Fail Test",
+		KeycloakSubject: "admin-settings-partial-fail-subject",
+	})
+	require.NoError(t, err)
+
+	svc := settings.NewSettingsService(pool, queries, nil, zap.NewNop())
+
+	before, err := svc.GetSettings(ctx)
+	require.NoError(t, err)
+
+	input := validSettings()
+	input.TemplateHTML = `<html><body>SHOULD NOT PERSIST {{.DonorName}}</body></html>`
+	input.YearFormat = "XX99" // violates the DB CHECK constraint — forces the SECOND write to fail
+
+	err = svc.SaveSettings(ctx, input, adminRow.ID)
+	require.Error(t, err, "an invalid year_format must be rejected (via the DB CHECK constraint)")
+
+	after, err := svc.GetSettings(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, before.TemplateHTML, after.TemplateHTML,
+		"the template write must be rolled back — no partial save when the number-format write fails")
+	assert.Equal(t, before.YearFormat, after.YearFormat,
+		"year_format itself must be unchanged after the rejected save")
+}
