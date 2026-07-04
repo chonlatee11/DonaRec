@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
+status: "Phase 3 shipped — PR #3"
 stopped_at: Completed 03-13-PLAN.md (create/edit/cancel/reissue donation flows migrated to BFF + TanStack; E2E create+cancel over the production router)
-last_updated: "2026-07-04T00:07:17.673Z"
+last_updated: "2026-07-04T05:02:42.787Z"
 last_activity: 2026-07-04
 progress:
   total_phases: 6
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
 Plan: 6 of 13
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
-Status: Ready to execute
+Status: Phase 3 shipped — PR #3
 Last activity: 2026-07-04
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
