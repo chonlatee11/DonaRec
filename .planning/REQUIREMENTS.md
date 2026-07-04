@@ -44,8 +44,8 @@
 - [ ] **FR-21**: ฝังลายน้ำ (watermark) ของโรงพยาบาลบนเอกสาร [M]
 - [ ] **FR-22**: แสดงลายเซ็นผู้มีอำนาจบนใบเสร็จ (รูปภาพลายเซ็นใน MVP) [M]
 - [ ] **FR-24**: ใบเสร็จมีข้อมูลครบตามข้อกำหนดลดหย่อนภาษี (ตามข้อ 6 — รวมข้อความสิทธิลดหย่อน 1 เท่า/2 เท่า) [M]
-- [ ] **FR-23**: รองรับการสร้างใบเสร็จเป็นภาษาไทยหรืออังกฤษตามผู้บริจาค [M]
-- [ ] **NFR-07**: สร้าง PDF และส่งอีเมลในเวลาที่ยอมรับได้ (~2–3 วินาที/ใบ) [M]
+- [x] **FR-23**: รองรับการสร้างใบเสร็จเป็นภาษาไทยหรืออังกฤษตามผู้บริจาค [M]
+- [x] **NFR-07**: สร้าง PDF และส่งอีเมลในเวลาที่ยอมรับได้ (~2–3 วินาที/ใบ) [M]
 
 ### Email Delivery (ส่งอีเมล)
 
@@ -148,8 +148,8 @@ Which phases cover which requirements.
 | FR-21 | Phase 4 | Pending |
 | FR-22 | Phase 4 | Pending |
 | FR-24 | Phase 4 | Pending |
-| FR-23 | Phase 4 | Pending |
-| NFR-07 | Phase 4 | Pending |
+| FR-23 | Phase 4 | Complete |
+| NFR-07 | Phase 4 | Complete |
 | FR-25 | Phase 4 | Pending |
 | FR-26 | Phase 4 | Pending |
 | FR-27 | Phase 4 | Pending |
@@ -170,6 +170,7 @@ Which phases cover which requirements.
 | NFR-06 | Phase 6 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 43 active (FR ×34 + NFR ×9)
 - Mapped to phases: 43/43 ✓ (100%)
 - Unmapped: 0

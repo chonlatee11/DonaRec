@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 04
 current_phase_name: receipt-pdf-email-delivery-outbox-worker
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-07-04T07:11:40.352Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-07-04T07:25:15.958Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 30
-  completed_plans: 23
+  completed_plans: 24
   percent: 50
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 04 (receipt-pdf-email-delivery-outbox-worker) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
 Status: Ready to execute
 Last activity: 2026-07-04 — Phase 04 execution started
@@ -67,6 +67,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 03 P12 | 35min | 2 tasks | 12 files |
 | Phase 03 P13 | 3min | 3 tasks | 9 files |
 | Phase 04 P01 | 15min | 3 tasks | 19 files |
+| Phase 04 P02 | 12min | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -97,6 +98,8 @@ Recent decisions affecting current work:
 - [Phase 03]: Cancel/reissue mutation wiring lives in DonationDetailView (useMutation), not in CancelDialog itself; CancelDialog stays presentational — Matches the existing approve/return/reject pattern established in 03-12; fixed a broken Server Action -> client-BFF-fetcher call path (Rule 1 bug)
 - [Phase 04]: [Phase 04] 04-01: ClaimNextOutboxJob's self-referencing subquery requires table aliases (o./j.) to satisfy sqlc's static analyzer, even though Postgres itself has no ambiguity issue with the unaliased query
 - [Phase 04]: [Phase 04] 04-01: receipt_template_config seeded with BOTH template_html (Thai) and template_html_en (English) skeletons so donor_language='en' records don't render blank before an admin edits the template; section6_text_th/en left empty pending accounting/legal sign-off
+- [Phase 04]: [Phase 04] 04-02: chrome sidecar service builds from chromedp/headless-shell:stable + fonts-thai-tlwg, reachable only over the internal compose network (no host ports:); chromedp pinned v0.14.2 to avoid a Go 1.26 toolchain bump
+- [Phase 04]: [Phase 04] 04-02: testutil.StartChrome builds the same docker/chrome.Dockerfile via testcontainers FromDockerfile and resolves the real CDP webSocketDebuggerUrl from /json/version, mirroring StartPostgres/NewKeycloakTestServer's t.Helper/cleanup shape
 
 ### Pending Todos
 
@@ -130,6 +133,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T07:11:40.342Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-07-04T07:25:15.948Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
