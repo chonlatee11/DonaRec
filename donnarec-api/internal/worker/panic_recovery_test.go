@@ -86,11 +86,18 @@ func TestProcessOnceSafe_RecoversFromPanicAndWorkerKeepsRunning(t *testing.T) {
 		_ = w.ProcessOnceSafe(ctx)
 	}, "a panic while processing one job must be recovered by ProcessOnceSafe, never propagate")
 
-	// The panicking job (donationA) may be left mid-processing — CR-01's
-	// reclaim is what eventually recovers it, not this test's concern. What
-	// CR-02 guarantees is that the WORKER (and therefore the whole process,
-	// since Run shares this goroutine) is still alive and functional —
-	// proven by processing a brand-new, healthy job right after.
+	// The panicking job (donationA) is left claimed ('processing') rather than
+	// marked done/failed — CR-01's reclaim is what eventually recovers it
+	// back to 'pending' once StuckJobTimeout elapses, not this test's
+	// concern. What CR-02 guarantees is that the WORKER (and therefore the
+	// whole process, since Run shares this goroutine) is still alive and
+	// functional — proven by processing a brand-new, healthy job right after.
+	var jobAStatus string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status FROM outbox_jobs WHERE payload->>'donation_id' = $1 ORDER BY created_at DESC LIMIT 1`,
+		donationA.ID.String(),
+	).Scan(&jobAStatus))
+	require.Equal(t, "processing", jobAStatus, "a job that panicked mid-render is left claimed, not silently marked done/failed")
 	donationB := seedIssuedDonation(t, ctx, pool, queries, "donor-panic-b@example.com")
 
 	err = w.ProcessOnceSafe(ctx)

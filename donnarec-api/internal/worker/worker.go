@@ -47,6 +47,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
@@ -158,7 +159,7 @@ func (w *Worker) Run(ctx context.Context) {
 			if err := w.ReclaimStuckJobs(ctx); err != nil {
 				w.logger.Error("worker: reclaim stuck jobs failed", zap.String("operation", "ReclaimStuckJobs"), zap.Error(err))
 			}
-			if err := w.ProcessOnce(ctx); err != nil && !errors.Is(err, ErrNoJob) {
+			if err := w.ProcessOnceSafe(ctx); err != nil && !errors.Is(err, ErrNoJob) {
 				w.logger.Error("worker: process tick failed", zap.String("operation", "ProcessOnce"), zap.Error(err))
 			}
 		}
@@ -237,4 +238,34 @@ func (w *Worker) ProcessOnce(ctx context.Context) error {
 		return fmt.Errorf("worker: mark job %d done: %w", job.ID, err)
 	}
 	return nil
+}
+
+// ProcessOnceSafe wraps ProcessOnce with a deferred recover() (CR-02,
+// 04-REVIEW.md): a panic anywhere inside a single job's processing (e.g. a
+// third-party CDP/template.Execute edge case — nil deref, index out of range)
+// is logged and swallowed here instead of propagating up through Run's
+// goroutine, which would otherwise terminate the ENTIRE donnarec-api process
+// (Go panics that escape every goroutine kill the whole process, not just the
+// goroutine it started in) — taking the JSON HTTP API down with it over a
+// single bad receipt render.
+//
+// A job whose processing panicked is left claimed ('processing') — it is not
+// marked done or failed, since the panic could have interrupted the job at
+// any point. ReclaimStuckJobs (CR-01) is what eventually recovers it back to
+// 'pending' once StuckJobTimeout elapses, giving it a normal retry via
+// ProcessOnce's usual MarkOutboxJobFailed/backoff path on the next claim.
+//
+// Run calls this instead of ProcessOnce directly. Tests may call it directly
+// to prove the recovery behavior without waiting on the ticker loop.
+func (w *Worker) ProcessOnceSafe(ctx context.Context) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			w.logger.Error("worker: recovered from panic during job processing",
+				zap.Any("panic", r),
+				zap.String("stack", string(debug.Stack())),
+			)
+			err = nil
+		}
+	}()
+	return w.ProcessOnce(ctx)
 }
