@@ -86,7 +86,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] 03-10-PLAN.md — FE foundation + list slice: TanStack Query/Table + BFF proxy + apiFetch unwrap + list screen migrated
 - [x] 03-11-PLAN.md — Backend detail contract: DonationDetailResponse + server-computed auth flags + review_history + E2E (TDD)
 - [x] 03-12-PLAN.md — FE detail/review/PII-reveal slice: BFF routes + useQuery/useMutation + SoD DOM-removal + audited reveal
-- [ ] 03-13-PLAN.md — FE create/edit/slip + cancel/void-reissue slice: BFF request field-mapping + TanStack mutations + E2E create/cancel
+- [x] 03-13-PLAN.md — FE create/edit/slip + cancel/void-reissue slice: BFF request field-mapping + TanStack mutations + E2E create/cancel
 **UI hint**: yes
 
 > Note: the issue transaction enqueues an outbox job here, but the worker that consumes it (PDF + email) is built in Phase 4. Consent capture for Flow A donors is recorded here against the Phase 1 retention model (NFR-03).
@@ -151,7 +151,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
-| 3. Donation Lifecycle & Maker-Checker Issuance | 12/13 | In Progress|  |
+| 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete   | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |

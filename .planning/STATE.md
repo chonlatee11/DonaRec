@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-12-PLAN.md (frontend detail/review slice — BFF routes + client DonationDetailView, TanStack Query/Mutation)
-last_updated: "2026-07-03T07:02:31.958Z"
-last_activity: 2026-07-03
+stopped_at: Completed 03-13-PLAN.md (create/edit/cancel/reissue donation flows migrated to BFF + TanStack; E2E create+cancel over the production router)
+last_updated: "2026-07-04T00:07:17.673Z"
+last_activity: 2026-07-04
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 22
-  completed_plans: 21
-  percent: 33
+  completed_plans: 22
+  percent: 50
 ---
 
 # Project State
@@ -26,10 +26,10 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
-Plan: 5 of 13
+Plan: 6 of 13
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
 Status: Ready to execute
-Last activity: 2026-07-03
+Last activity: 2026-07-04
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -62,6 +62,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 03 P11 | 30min | 3 tasks | 7 files |
 | Phase 03 P10 | 18min | 2 tasks | 13 files |
 | Phase 03 P12 | 35min | 2 tasks | 12 files |
+| Phase 03 P13 | 3min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -89,6 +90,7 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03] 03-10: BFF proxy pattern (D-R1) - app/api/bff Route Handlers + lib/bff.ts bffForward obtain the Keycloak token via getServerSession and forward a Bearer server-side; access token never reaches the browser. TanStack Query calls the same-origin BFF route only.
 - [Phase ?]: [Phase 03] 03-10: apiFetch unwraps the data envelope (D-R2); DonationListResponse key donations to items; DonationSummary.amount is a numeric string (parseFloat at render). Root fix for bug #5 (undefined.length on result.donations). Donation list screen migrated to TanStack Query + TanStack Table.
 - [Phase 03]: 03-12: BFF Route Handlers for donation detail (composes slip_url via a second server-side /:id/slip call)/pii (donor_tax_id->national_id mapping)/approve/return/reject; client DonationDetailView (useQuery+useMutation) drives Screen 3+4 — ReviewActionPanel/MaskedIdField needed zero changes since their existing Promise<{error}|null> callback contracts already matched the new mutation wrappers. Cancel/reissue deliberately deferred to 03-13.
+- [Phase 03]: Cancel/reissue mutation wiring lives in DonationDetailView (useMutation), not in CancelDialog itself; CancelDialog stays presentational — Matches the existing approve/return/reject pattern established in 03-12; fixed a broken Server Action -> client-BFF-fetcher call path (Rule 1 bug)
 
 ### Pending Todos
 
@@ -122,6 +124,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-03T07:02:31.950Z
-Stopped at: Completed 03-12-PLAN.md (frontend detail/review slice — BFF routes + client DonationDetailView, TanStack Query/Mutation)
+Last session: 2026-07-04T00:07:17.666Z
+Stopped at: Completed 03-13-PLAN.md (create/edit/cancel/reissue donation flows migrated to BFF + TanStack; E2E create+cancel over the production router)
 Resume file: None
