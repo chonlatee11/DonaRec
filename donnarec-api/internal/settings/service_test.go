@@ -42,7 +42,7 @@ func validSettings() settings.ReceiptSettings {
 func TestSaveSettings_InvalidTemplate_Rejected(t *testing.T) {
 	t.Parallel()
 
-	svc := settings.NewSettingsService(db.New(nil), nil, zap.NewNop())
+	svc := settings.NewSettingsService(nil, db.New(nil), nil, zap.NewNop())
 
 	t.Run("thai_template_invalid", func(t *testing.T) {
 		input := validSettings()
@@ -66,7 +66,7 @@ func TestSaveSettings_InvalidTemplate_Rejected(t *testing.T) {
 func TestSaveSettings_InvalidNumberFormat_Rejected(t *testing.T) {
 	t.Parallel()
 
-	svc := settings.NewSettingsService(db.New(nil), nil, zap.NewNop())
+	svc := settings.NewSettingsService(nil, db.New(nil), nil, zap.NewNop())
 
 	t.Run("dangerous_separator", func(t *testing.T) {
 		input := validSettings()
@@ -89,7 +89,7 @@ func TestSaveSettings_InvalidNumberFormat_Rejected(t *testing.T) {
 func TestSaveTemplateImage_InvalidSlot_Rejected(t *testing.T) {
 	t.Parallel()
 
-	svc := settings.NewSettingsService(db.New(nil), nil, zap.NewNop())
+	svc := settings.NewSettingsService(nil, db.New(nil), nil, zap.NewNop())
 
 	_, err := svc.SaveTemplateImage(context.Background(), "not-a-real-slot", nil, 0, pgtype.UUID{})
 	require.ErrorIs(t, err, settings.ErrInvalidImageSlot)
@@ -118,7 +118,7 @@ func TestSettingsService_SaveAndGet_RoundTrip(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	svc := settings.NewSettingsService(queries, nil, zap.NewNop())
+	svc := settings.NewSettingsService(pool, queries, nil, zap.NewNop())
 
 	// GetSettings must succeed against the 04-01/Phase-2 seeded rows before any save.
 	initial, err := svc.GetSettings(ctx)
