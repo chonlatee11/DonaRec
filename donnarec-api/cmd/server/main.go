@@ -155,7 +155,9 @@ func main() {
 	donationSvc.SetReceiptsStore(receiptsStore)
 
 	// Sandboxed remote-Chromium renderer (D-58) — dials the chrome sidecar over CDP.
-	pdfRenderer, err := pdf.NewRenderer(cfg.Worker.ChromeWSURL)
+	// Passing logger lets the WR-02 fix (04-REVIEW.md) actually surface FailRequest
+	// errors instead of them vanishing into a discarded goroutine error.
+	pdfRenderer, err := pdf.NewRenderer(cfg.Worker.ChromeWSURL, logger)
 	if err != nil {
 		logger.Fatal("pdf renderer init failed", zap.Error(err))
 	}

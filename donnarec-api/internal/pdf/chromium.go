@@ -37,10 +37,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/fetch"
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"go.uber.org/zap"
 )
 
 // renderTimeout bounds a single render (RenderPDF or a renderInSandbox regression test)
@@ -57,19 +60,29 @@ const documentSettleDelay = 300 * time.Millisecond
 // Renderer drives a remote headless-Chromium instance over the Chrome DevTools Protocol
 // (CDP) to turn self-contained HTML into PDF bytes. Use NewRenderer to construct.
 type Renderer struct {
-	wsURL string
+	wsURL  string
+	logger *zap.Logger
 }
 
 // NewRenderer constructs a Renderer targeting the given Chrome DevTools Protocol
 // WebSocket endpoint (e.g. config.WorkerConfig.ChromeWSURL — "ws://chrome:9222" in
 // Docker — or a testutil.StartChrome(t) URL in tests).
 //
+// logger is optional (variadic so every existing single-argument call site keeps
+// compiling unchanged) — a nil/omitted logger defaults to zap.NewNop(). Passing the
+// app's real logger (cmd/server/main.go) lets renderInSandbox's fetch-block handler
+// actually surface FailRequest errors (WR-02, 04-REVIEW.md) instead of them vanishing.
+//
 // Mirrors storage.NewStorageClient's package-prefixed error-wrap constructor style.
-func NewRenderer(chromeWSURL string) (*Renderer, error) {
+func NewRenderer(chromeWSURL string, logger ...*zap.Logger) (*Renderer, error) {
 	if chromeWSURL == "" {
 		return nil, fmt.Errorf("pdf: chromedp remote allocator init: empty chrome websocket URL")
 	}
-	return &Renderer{wsURL: chromeWSURL}, nil
+	l := zap.NewNop()
+	if len(logger) > 0 && logger[0] != nil {
+		l = logger[0]
+	}
+	return &Renderer{wsURL: chromeWSURL, logger: l}, nil
 }
 
 // RenderPDF renders selfContainedHTML to PDF bytes via the sandboxed remote Chromium
@@ -86,11 +99,24 @@ func (r *Renderer) RenderPDF(ctx context.Context, selfContainedHTML string) ([]b
 		return err
 	})
 
-	if err := renderInSandbox(ctx, r.wsURL, selfContainedHTML, printAction); err != nil {
+	if err := renderInSandbox(ctx, r.wsURL, r.logger, selfContainedHTML, printAction); err != nil {
 		return nil, fmt.Errorf("pdf: render pdf: %w", err)
 	}
 
 	return pdfBuf, nil
+}
+
+// failRequestAndLog fails a paused CDP request (fetch.FailRequest) against ctx's bound
+// executor, logging — never silently swallowing (WR-02, 04-REVIEW.md) — any error. A
+// stuck paused request with no diagnostic signal would otherwise hang the whole render
+// until renderTimeout (30s) with zero indication why.
+func failRequestAndLog(ctx context.Context, logger *zap.Logger, requestID fetch.RequestID) {
+	if err := fetch.FailRequest(requestID, network.ErrorReasonFailed).Do(ctx); err != nil {
+		logger.Warn("pdf: fail paused CDP request",
+			zap.String("request_id", string(requestID)),
+			zap.Error(err),
+		)
+	}
 }
 
 // renderInSandbox connects to the chrome sidecar at wsURL, establishes the D-58 render
@@ -103,7 +129,7 @@ func (r *Renderer) RenderPDF(ctx context.Context, selfContainedHTML string) ([]b
 // page.PrintToPDF) and render_sandbox_security_test.go's regression tests (trailing
 // action = chromedp.Title / chromedp.Evaluate) go through — there is only one place the
 // three D-58 mitigations are wired.
-func renderInSandbox(ctx context.Context, wsURL, html string, extraActions ...chromedp.Action) error {
+func renderInSandbox(ctx context.Context, wsURL string, logger *zap.Logger, html string, extraActions ...chromedp.Action) error {
 	allocCtx, cancel := chromedp.NewRemoteAllocator(ctx, wsURL)
 	defer cancel()
 
@@ -118,11 +144,22 @@ func renderInSandbox(ctx context.Context, wsURL, html string, extraActions ...ch
 		// before it ever reaches the network (T-04-08).
 		fetch.Enable().WithPatterns([]*fetch.RequestPattern{{URLPattern: "*"}}),
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			// WR-02 fix (04-REVIEW.md): bind directly to THIS context's Target
+			// executor rather than spawning a fresh chromedp.Run per paused-request
+			// event — concurrently issuing chromedp.Run calls from multiple
+			// goroutines against the same browser context, while the main action
+			// sequence is concurrently awaiting PrintToPDF, is exactly the CDP
+			// protocol-interleaving risk chromedp's own examples warn about.
+			// Executing the command directly via cdp.WithExecutor avoids
+			// re-entering chromedp's allocator/browser layer entirely.
+			execCtx := cdp.WithExecutor(ctx, chromedp.FromContext(ctx).Target)
 			chromedp.ListenTarget(ctx, func(ev interface{}) {
 				if paused, ok := ev.(*fetch.EventRequestPaused); ok {
-					go func() {
-						_ = chromedp.Run(ctx, fetch.FailRequest(paused.RequestID, "Failed"))
-					}()
+					// ListenTarget's callback must not block event processing,
+					// so the actual CDP call still runs in its own goroutine —
+					// only the "how" (direct executor vs fresh chromedp.Run)
+					// changed, not the "when" (fire-and-forget per event).
+					go failRequestAndLog(execCtx, logger, paused.RequestID)
 				}
 			})
 			return nil

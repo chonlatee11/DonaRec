@@ -27,6 +27,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/donnarec/donnarec-api/internal/testutil"
 )
@@ -45,7 +46,7 @@ func TestRenderSandboxSecurity_JSDisabled(t *testing.T) {
 </body></html>`
 
 	var title string
-	err := renderInSandbox(context.Background(), wsURL, html,
+	err := renderInSandbox(context.Background(), wsURL, zap.NewNop(), html,
 		chromedp.Sleep(200*time.Millisecond),
 		chromedp.Title(&title),
 	)
@@ -67,7 +68,7 @@ func TestRenderSandboxSecurity_NetworkBlocked(t *testing.T) {
 </body></html>`
 
 	var naturalWidth int
-	err := renderInSandbox(context.Background(), wsURL, html,
+	err := renderInSandbox(context.Background(), wsURL, zap.NewNop(), html,
 		chromedp.Sleep(500*time.Millisecond),
 		chromedp.Evaluate(`document.getElementById('probe').naturalWidth`, &naturalWidth),
 	)
