@@ -337,6 +337,35 @@ func TestE2E_MakerCheckerIssuancePipeline(t *testing.T) {
 		assert.True(t, found, "issued donation %s must appear in status=issued list", donationID)
 	})
 
+	t.Run("DonorLanguage_PersistsAndDefaults", func(t *testing.T) {
+		// D-55/FR-23: explicit donor_language="en" round-trips through the real
+		// Create -> GetByID path and is frozen (never re-derived).
+		body := validDonorBody("นาย ภาษาอังกฤษ")
+		body["donor_language"] = "en"
+		w := h.do(t, http.MethodPost, "/api/donations", makerToken, body)
+		require.Equal(t, http.StatusCreated, w.Code, "create body: %s", w.Body.String())
+		created := decodeDonation(t, w)
+		assert.Equal(t, "en", created.DonorLanguage, "donor_language must persist as submitted on create")
+
+		w = h.do(t, http.MethodGet, "/api/donations/"+created.ID, makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "get body: %s", w.Body.String())
+		fetched := decodeDonation(t, w)
+		assert.Equal(t, "en", fetched.DonorLanguage, "donor_language must round-trip on GET (frozen snapshot)")
+
+		// Omitted donor_language defaults to "th" (D-55).
+		bodyNoLang := validDonorBody("นาย ค่าเริ่มต้นภาษา")
+		w = h.do(t, http.MethodPost, "/api/donations", makerToken, bodyNoLang)
+		require.Equal(t, http.StatusCreated, w.Code, "create (no lang) body: %s", w.Body.String())
+		createdDefault := decodeDonation(t, w)
+		assert.Equal(t, "th", createdDefault.DonorLanguage, "omitted donor_language must default to th")
+
+		// An invalid donor_language value is rejected at the validation boundary (422).
+		bodyInvalid := validDonorBody("นาย ค่าภาษาไม่ถูกต้อง")
+		bodyInvalid["donor_language"] = "fr"
+		w = h.do(t, http.MethodPost, "/api/donations", makerToken, bodyInvalid)
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code, "invalid donor_language must be rejected; body: %s", w.Body.String())
+	})
+
 	t.Run("UnprovisionedSubject_403", func(t *testing.T) {
 		// Validly-signed token whose sub has NO users row → ResolveAppUser 403s.
 		orphanToken := h.kc.MintTokenForSubject("99999999-9999-9999-9999-999999999999", backendClientID, "maker")
