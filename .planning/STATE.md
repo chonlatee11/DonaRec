@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 03
-current_phase_name: donation-lifecycle-maker-checker-issuance
-status: "Phase 3 shipped — PR #3"
-stopped_at: Phase 4 context gathered
-last_updated: "2026-07-04T06:43:47.459Z"
+current_phase: 04
+current_phase_name: receipt-pdf-email-delivery-outbox-worker
+status: executing
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-07-04T07:11:40.352Z"
 last_activity: 2026-07-04
-last_activity_desc: Phase 04 planning complete
+last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 22
-  completed_plans: 22
+  total_plans: 30
+  completed_plans: 23
   percent: 50
 ---
 
@@ -24,15 +24,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** ออกใบเสร็จบริจาคที่มีเลขที่รันต่อเนื่องไม่ซ้ำ ห้ามข้ามเลข (gap-less) ตามปีงบประมาณ หลังผ่านการอนุมัติโดยมนุษย์ และส่งถึงผู้บริจาคได้อย่างถูกต้องน่าเชื่อถือ
-**Current focus:** Phase 03 — donation-lifecycle-maker-checker-issuance
+**Current focus:** Phase 04 — receipt-pdf-email-delivery-outbox-worker
 
 ## Current Position
 
-Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
-Plan: 6 of 13
+Phase: 04 (receipt-pdf-email-delivery-outbox-worker) — EXECUTING
+Plan: 2 of 8
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
-Status: Phase 3 shipped — PR #3
-Last activity: 2026-07-04 — Phase 04 planning complete
+Status: Ready to execute
+Last activity: 2026-07-04 — Phase 04 execution started
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -66,6 +66,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 03 P10 | 18min | 2 tasks | 13 files |
 | Phase 03 P12 | 35min | 2 tasks | 12 files |
 | Phase 03 P13 | 3min | 3 tasks | 9 files |
+| Phase 04 P01 | 15min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03] 03-10: apiFetch unwraps the data envelope (D-R2); DonationListResponse key donations to items; DonationSummary.amount is a numeric string (parseFloat at render). Root fix for bug #5 (undefined.length on result.donations). Donation list screen migrated to TanStack Query + TanStack Table.
 - [Phase 03]: 03-12: BFF Route Handlers for donation detail (composes slip_url via a second server-side /:id/slip call)/pii (donor_tax_id->national_id mapping)/approve/return/reject; client DonationDetailView (useQuery+useMutation) drives Screen 3+4 — ReviewActionPanel/MaskedIdField needed zero changes since their existing Promise<{error}|null> callback contracts already matched the new mutation wrappers. Cancel/reissue deliberately deferred to 03-13.
 - [Phase 03]: Cancel/reissue mutation wiring lives in DonationDetailView (useMutation), not in CancelDialog itself; CancelDialog stays presentational — Matches the existing approve/return/reject pattern established in 03-12; fixed a broken Server Action -> client-BFF-fetcher call path (Rule 1 bug)
+- [Phase 04]: [Phase 04] 04-01: ClaimNextOutboxJob's self-referencing subquery requires table aliases (o./j.) to satisfy sqlc's static analyzer, even though Postgres itself has no ambiguity issue with the unaliased query
+- [Phase 04]: [Phase 04] 04-01: receipt_template_config seeded with BOTH template_html (Thai) and template_html_en (English) skeletons so donor_language='en' records don't render blank before an admin edits the template; section6_text_th/en left empty pending accounting/legal sign-off
 
 ### Pending Todos
 
@@ -127,6 +130,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T05:37:52.513Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-receipt-pdf-email-delivery-outbox-worker/04-CONTEXT.md
+Last session: 2026-07-04T07:11:40.342Z
+Stopped at: Completed 04-01-PLAN.md
+Resume file: None
