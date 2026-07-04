@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 04
 current_phase_name: receipt-pdf-email-delivery-outbox-worker
-status: executing
+status: verifying
 stopped_at: "Completed 04-07-PLAN.md (Admin settings API: config store + preview)"
-last_updated: "2026-07-04T11:31:34.276Z"
+last_updated: "2026-07-04T12:00:08.567Z"
 last_activity: 2026-07-04
 last_activity_desc: Phase 04 execution started
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 30
-  completed_plans: 29
-  percent: 50
+  completed_plans: 30
+  percent: 67
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 Phase: 04 (receipt-pdf-email-delivery-outbox-worker) — EXECUTING
 Plan: 8 of 8
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-04 — Phase 04 execution started
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
@@ -73,6 +73,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 04 P05 | 25m | 1 tasks | 8 files |
 | Phase 04 P06 | 35min | 3 tasks | 20 files |
 | Phase 04 P07 | 20min | 2 tasks | 11 files |
+| Phase 04 P08 | 13min | 2 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,9 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-07: Added UpdateReceiptNumberConfig sqlc query (Rule 2) — the number-format tab had no save path before this plan; Phase 2 only ever built a read-only GetReceiptNumberConfig
 - [Phase 04]: 04-07: adminGroup now runs auth.ResolveAppUser (mirrors donationGroup) so settings Save/UploadImage can set updated_by to the acting admin's resolved users.id, never the raw Keycloak subject
 - [Phase 04]: 04-07: settings Preview/PreviewPDF reuse the EXACT SAME receiptsStore and pdfRenderer instances the outbox worker (04-05) uses — not new ones — so preview structurally cannot run through a second, less-sandboxed rendering path (D-58/D-61)
+- [Phase ?]: 04-08: Admin settings route is /admin/settings (plan's file path); Admin gating is a client UX hint only, Go RequireRoles(RoleAdmin) remains the real authority
+- [Phase 04]: 04-08: TemplateEditor.tsx split into TemplateEditorFields + TemplateLivePreview so the live preview persists across all four tabs, not just the template tab
+- [Phase 04]: 04-08: TH Sarabun New font remains unsourced (same open licensing item as backend) — preview iframe falls back to Google-Fonts Sarabun until public/fonts/THSarabunNew.woff2 is provided
 
 ### Pending Todos
 
@@ -155,6 +159,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T11:31:34.266Z
+Last session: 2026-07-04T11:58:37.211Z
 Stopped at: Completed 04-07-PLAN.md (Admin settings API: config store + preview)
 Resume file: 
+None
