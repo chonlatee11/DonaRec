@@ -104,7 +104,15 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The PDF and email run in a worker behind a transactional outbox — a job exists if and only if a receipt was issued — so approval returns fast (PDF+email within ~2–3s/receipt target, measured off the lock-critical path).
   4. The donor receives a bilingual email with the PDF attached; send status (success/failure) is recorded, failures are retryable, and resending never allocates a new number.
   5. When a donor has no email, staff can download the receipt PDF directly, and an admin can edit templates, watermark, signature, and number format without a deploy.
-**Plans**: TBD
+**Plans**: 8 plans
+- [ ] 04-01-PLAN.md — Data-layer & config foundation: migrations 000008–000012 + sqlc worker/email/settings queries + config knobs
+- [ ] 04-02-PLAN.md — Chrome sidecar (fonts-thai-tlwg) + chromedp v0.14.2 pin + testcontainers helper
+- [ ] 04-03-PLAN.md — PDF render core (TDD): sandboxed Thai/EN Chromium render + golden-file + JS/network security regression
+- [ ] 04-04-PLAN.md — EmailSender interface + dev capture + bilingual receipt/email i18n (TDD)
+- [ ] 04-05-PLAN.md — Outbox worker pipeline (TDD): poll→render→freeze PDF→email→record + retry/backoff dead-letter
+- [ ] 04-06-PLAN.md — Staff resend/download slice + donor_language capture + Email Delivery panel + E2E
+- [ ] 04-07-PLAN.md — Admin settings config store + template/image validation + HTML/real-PDF preview + E2E (TDD)
+- [ ] 04-08-PLAN.md — Admin Settings UI (Screen 6): four tabs + sandboxed live preview + real-PDF + save-all
 **UI hint**: yes
 
 > **Research flag:** Thai-PDF rendering spike with worst-case Thai text required BEFORE locking the PDF library; also email deliverability setup (SPF/DKIM/DMARC).
@@ -152,6 +160,6 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 1. Foundation (DB, Auth/RBAC, Audit, Retention) | 5/5 | Complete   | 2026-06-25 |
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
-| 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/TBD | Not started | - |
+| 4. Receipt PDF + Email Delivery (Outbox Worker) | 0/8 | Not started | - |
 | 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
