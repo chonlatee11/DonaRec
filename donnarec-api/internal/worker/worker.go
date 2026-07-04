@@ -23,12 +23,24 @@
 //	      construction — this package only ever runs against jobs that were
 //	      already committed by Phase 3's Approve transaction; it never imports
 //	      internal/receiptno.
+//	Stuck-job reclaim (CR-01, 04-REVIEW.md): ReclaimStuckJobs resets a job
+//	      that has sat in 'processing' longer than Config.StuckJobTimeout back
+//	      to 'pending' — recovers a job orphaned by a worker process that was
+//	      killed/panicked/OOM-killed between claim and completion, which
+//	      otherwise had NO path back to claimable (dead forever). Called once
+//	      per Run tick, before ProcessOnce.
+//	Panic recovery (CR-02, 04-REVIEW.md): Run calls ProcessOnce via a
+//	      recover()-guarded wrapper so a panic while processing one job (e.g.
+//	      a third-party CDP/template edge case) is logged and swallowed rather
+//	      than crashing the entire donnarec-api process (including the HTTP
+//	      API, which has its own independent gin.Recovery()).
 //
 // Anti-patterns explicitly absent (mirrors internal/receiptno/allocator.go's
 // doc-comment convention):
 //   - NO separate SELECT-then-UPDATE claim (would race across workers)
 //   - NO synchronous render/email call inside any DB transaction
 //   - NO unbounded auto-retry (Config.MaxAttempts always terminates retries)
+//   - NO unrecovered panic path from Run's ticker loop (CR-02)
 package worker
 
 import (
@@ -87,6 +99,13 @@ type Config struct {
 	// attempts count already recorded on the job (pre-increment — see
 	// config.WorkerConfig.ComputeBackoff's doc comment, 04-01-SUMMARY).
 	ComputeBackoff func(attempts int32) time.Duration
+	// StuckJobTimeout is how long a job may sit in 'processing' before
+	// ReclaimStuckJobs resets it back to 'pending' (CR-01, 04-REVIEW.md) —
+	// recovers from a worker process killed/panicked/OOM-killed between
+	// claiming a job and marking it done/failed. Must be well above the
+	// ~2-3s NFR-07 render+email budget so a healthy in-flight job is never
+	// reclaimed out from under the worker actually processing it.
+	StuckJobTimeout time.Duration
 }
 
 // Worker polls outbox_jobs and dispatches each claimed job by job_type.
@@ -136,11 +155,34 @@ func (w *Worker) Run(ctx context.Context) {
 			w.logger.Info("worker: shutting down")
 			return
 		case <-ticker.C:
+			if err := w.ReclaimStuckJobs(ctx); err != nil {
+				w.logger.Error("worker: reclaim stuck jobs failed", zap.String("operation", "ReclaimStuckJobs"), zap.Error(err))
+			}
 			if err := w.ProcessOnce(ctx); err != nil && !errors.Is(err, ErrNoJob) {
 				w.logger.Error("worker: process tick failed", zap.String("operation", "ProcessOnce"), zap.Error(err))
 			}
 		}
 	}
+}
+
+// ReclaimStuckJobs resets outbox jobs that have been stuck in 'processing'
+// for longer than cfg.StuckJobTimeout back to 'pending' (CR-01, 04-REVIEW.md)
+// — recovers a job left claimed-but-unfinished by a worker process that was
+// killed, panicked, OOM-killed, or evicted before it could call
+// MarkOutboxJobDone/MarkOutboxJobFailed. Called once per Run tick, before
+// ProcessOnce, so a reclaimed job becomes claimable again on the very same
+// tick's ClaimNextOutboxJob call. Safe to call with zero eligible rows (a
+// no-op, not an error).
+func (w *Worker) ReclaimStuckJobs(ctx context.Context) error {
+	cutoff := time.Now().Add(-w.cfg.StuckJobTimeout)
+	n, err := w.queries.ReclaimStuckOutboxJobs(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
+	if err != nil {
+		return fmt.Errorf("worker: reclaim stuck jobs: %w", err)
+	}
+	if n > 0 {
+		w.logger.Warn("worker: reclaimed stuck outbox jobs", zap.Int64("count", n))
+	}
+	return nil
 }
 
 // ProcessOnce claims exactly one due outbox job (ClaimNextOutboxJob — atomic

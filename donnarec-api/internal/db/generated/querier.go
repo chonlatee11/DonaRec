@@ -216,6 +216,24 @@ type Querier interface {
 	// @max_attempts, transition to the terminal 'failed' state (dead-letter — no
 	// further auto-retry; staff see the failure and can resend manually, FR-27).
 	MarkOutboxJobFailed(ctx context.Context, arg MarkOutboxJobFailedParams) error
+	// CR-01 fix (04-REVIEW.md): a job that was claimed (status='processing') but
+	// never reached MarkOutboxJobDone/MarkOutboxJobFailed — because the worker
+	// process was killed, panicked (see CR-02), OOM-killed, or evicted between
+	// the claim and the completion write — would otherwise stay 'processing'
+	// forever: ClaimNextOutboxJob's own filter (status IN ('pending','failed'))
+	// deliberately excludes 'processing' rows so two workers never double-process
+	// the same job, but that same exclusion means a truly abandoned job had no
+	// way back into the claimable set.
+	//
+	// Any row whose updated_at is older than @cutoff (now() - StuckJobTimeout,
+	// computed in Go so the threshold is configurable via WORKER_STUCK_JOB_TIMEOUT)
+	// is reset to 'pending' — safe because updated_at is bumped by BOTH the claim
+	// (ClaimNextOutboxJob) and the completion writes (MarkOutboxJobDone/Failed), so
+	// a row this old can only mean the job is genuinely abandoned, never a
+	// healthy in-flight render/email still within its normal ~2-3s budget
+	// (NFR-07) — the default timeout is minutes, several orders of magnitude
+	// above that budget.
+	ReclaimStuckOutboxJobs(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
 	// Checker permanently rejects pending_review → rejected with a mandatory reason (D-45, FR-12).
 	// 'rejected' is a terminal state — no further transitions are allowed.
 	// review_reason is enforced as non-empty at service layer before this call.

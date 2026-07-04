@@ -184,8 +184,9 @@ func main() {
 	emailSender := &mailer.DevSender{OutDir: mailDevOutDir}
 
 	outboxWorker := worker.New(pool, queries, receiptsStore, pdfRenderer, emailSender, i18nBundle, logger, worker.Config{
-		PollInterval: cfg.Worker.PollInterval,
-		MaxAttempts:  int32(cfg.Worker.MaxAttempts),
+		PollInterval:    cfg.Worker.PollInterval,
+		MaxAttempts:     int32(cfg.Worker.MaxAttempts),
+		StuckJobTimeout: cfg.Worker.StuckJobTimeout,
 		ComputeBackoff: func(attempts int32) time.Duration {
 			return cfg.Worker.ComputeBackoff(int(attempts))
 		},

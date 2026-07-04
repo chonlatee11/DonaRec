@@ -57,6 +57,13 @@ type WorkerConfig struct {
 	// MaxAttempts is the number of send attempts before a job becomes terminally
 	// 'failed' (dead-letter) — matches len(backoffSchedule)+1 attempts total.
 	MaxAttempts int
+	// StuckJobTimeout is how long a job may remain in 'processing' before the
+	// worker's stuck-job reclaim resets it back to 'pending' (CR-01,
+	// 04-REVIEW.md) — recovers from a worker process killed/panicked/
+	// OOM-killed between claiming a job and marking it done/failed. Default
+	// (10 minutes) is well above the ~2-3s NFR-07 render+email budget, so a
+	// healthy in-flight job is never reclaimed out from under the worker.
+	StuckJobTimeout time.Duration
 }
 
 // ComputeBackoff returns the delay to wait before the next retry, given the
@@ -159,9 +166,10 @@ func Load() (*Config, error) {
 			Secure:         getEnvBool("MINIO_SECURE", false),
 		},
 		Worker: WorkerConfig{
-			ChromeWSURL:  getEnvStr("CHROME_WS_URL", "ws://chrome:9222"),
-			PollInterval: getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
-			MaxAttempts:  getEnvInt("WORKER_MAX_ATTEMPTS", 5),
+			ChromeWSURL:     getEnvStr("CHROME_WS_URL", "ws://chrome:9222"),
+			PollInterval:    getEnvDuration("WORKER_POLL_INTERVAL", 5*time.Second),
+			MaxAttempts:     getEnvInt("WORKER_MAX_ATTEMPTS", 5),
+			StuckJobTimeout: getEnvDuration("WORKER_STUCK_JOB_TIMEOUT", 10*time.Minute),
 		},
 	}
 
