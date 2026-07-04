@@ -21,6 +21,37 @@
 //	Pattern C (no PII in logs): only donation_id / job_id / operation name are
 //	      ever logged from this file — never donor name/email/tax id, the
 //	      rendered HTML, or the PDF bytes.
+//
+// KNOWN LIMITATION (WR-03, 04-REVIEW.md — deliberately NOT fixed this pass):
+//
+//	deduction_multiplier/section6_text/template_html are read from
+//	receipt_template_config at FIRST-render time (renderReceiptPDF, below),
+//	not snapshotted at Approve time (internal/donation/service.go). If an
+//	admin edits these values in the narrow window between Approve
+//	committing (which enqueues the outbox job) and the worker actually
+//	processing it (normally one poll interval, ~5s — but longer if the job
+//	sits behind a backlog or a stuck/reclaimed job, CR-01), the rendered
+//	receipt will reflect the NEW config, not what was in effect when the
+//	checker approved — unlike every other receipt field (receipt number,
+//	donor snapshot), which IS frozen at approval.
+//
+//	The safe fix (snapshotting deduction_multiplier — at minimum — onto the
+//	donations row or the outbox job payload) requires touching
+//	internal/donation/service.go's Approve method: the single most
+//	load-bearing, security/compliance-critical transaction in the codebase
+//	(D-52 — gap-less receipt numbering + SoD + audit, all inside one
+//	pg_advisory-locked tx). Adding a new column + sqlc params + a
+//	config-table read to that path is exactly the kind of change CLAUDE.md
+//	warns must be reviewed with extreme care, and doing it as a drive-by
+//	code-review fix (vs. a properly planned/tested phase) risks a
+//	regression in the one invariant this whole system cannot get wrong.
+//	Deferred to a future phase with its own plan + tests against Approve,
+//	rather than scope-creeping this fix pass into that transaction.
+//
+//	Mitigating factor: this is an ADMIN-configuration-change race, not a
+//	donor/staff-triggered one — an admin editing the deduction multiplier
+//	or receipt template seconds after a checker approves a donation is a
+//	narrow, low-frequency operational scenario, not a per-request path.
 package worker
 
 import (
@@ -168,6 +199,12 @@ func (w *Worker) getOrRenderReceiptPDF(ctx context.Context, donation db.Donation
 // pipeline (internal/pdf, 04-03). Called exactly once per donation — the
 // caller (getOrRenderReceiptPDF) only invokes this when
 // receipt_pdf_object_key is still nil.
+//
+// KNOWN LIMITATION (WR-03 — see package doc comment above for full
+// reasoning): tplCfg (including deduction_multiplier/section6 text/template
+// HTML) is read fresh here, NOT snapshotted at Approve time — an admin
+// config edit in the window between approval and first-render will affect
+// the rendered receipt.
 func (w *Worker) renderReceiptPDF(ctx context.Context, donation db.Donation) ([]byte, error) {
 	tplCfg, err := w.queries.GetReceiptTemplateConfig(ctx)
 	if err != nil {
