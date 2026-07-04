@@ -145,20 +145,26 @@ services:
   # into it would bloat every deploy and couple two very different
   # crash/restart domains (browser crash vs. API crash).
   #
-  # SECURITY (T-04-03, D-58): this service has NO `ports:` mapping — it is
-  # reachable ONLY over the internal compose network, by `api` (via
+  # SECURITY (T-04-03, D-58, WR-01 fix 04-REVIEW.md): this service has NO
+  # `ports:` mapping (blocks HOST -> container / inbound only) AND is
+  # attached ONLY to the `chrome-internal` network, which is declared
+  # `internal: true` below — Docker refuses to route ANY traffic from an
+  # `internal: true` network to the outside world, so this container has
+  # zero outbound route regardless of what runs inside it. It is reachable
+  # ONLY by `api` (also joined to chrome-internal, via
   # chromedp.NewRemoteAllocator, added in 04-03) and by integration tests
-  # (via testutil.StartChrome, 04-02 Task 2). Network isolation is layer 1
-  # of 3 defense-in-depth against the admin-authored-HTML render surface;
-  # layers 2/3 (CDP Fetch-block + Emulation.SetScriptExecutionDisabled) live
-  # in Go render code, not here.
+  # (via testutil.StartChrome, 04-02 Task 2 — a separate testcontainers
+  # network, not this compose project). Network isolation is layer 1 of 3
+  # defense-in-depth against the admin-authored-HTML render surface; layers
+  # 2/3 (CDP Fetch-block + Emulation.SetScriptExecutionDisabled) live in Go
+  # render code, not here.
   # ----------------------------------------------------------------
   chrome:
     build:
       context: .
       dockerfile: docker/chrome.Dockerfile
     networks:
-      - default
+      - chrome-internal
     restart: unless-stopped
 
   # ----------------------------------------------------------------
@@ -219,6 +225,13 @@ services:
       CHROME_WS_URL: ${CHROME_WS_URL:-ws://chrome:9222}
     ports:
       - "${API_PORT:-8000}:8000"
+    networks:
+      # default: reach postgres/keycloak/minio (unrestricted egress).
+      # chrome-internal: ALSO join the internal-only network so api can still
+      # reach ws://chrome:9222 (WR-01) — api itself is not egress-restricted;
+      # only chrome is (it has no other reason to ever need internet access).
+      - default
+      - chrome-internal
     depends_on:
       postgres:
         condition: service_healthy
@@ -237,6 +250,16 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+
+networks:
+  # chrome-internal (WR-01 fix, 04-REVIEW.md): internal:true tells Docker to
+  # NEVER add a default route / NAT rule for this network — containers
+  # attached to it (chrome) have no path to the internet at all, closing the
+  # gap between what the D-58 comments claimed ("network-isolated sidecar")
+  # and what the compose file actually configured (previously just "no
+  # inbound ports:", which never blocked outbound/egress).
+  chrome-internal:
+    internal: true
 
 volumes:
   postgres_data:
