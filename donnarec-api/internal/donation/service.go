@@ -169,6 +169,11 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 		consentPurpose = &v
 	}
 
+	// D-55/FR-23: donor_language is frozen at create-time as part of the snapshot.
+	// Empty/omitted defaults to "th"; validator (omitempty,oneof=th en) already
+	// rejects any other non-empty value with 422 before this method runs.
+	donorLanguage := resolveDonorLanguage(req.DonorLanguage)
+
 	var fullRow db.Donation
 	err = dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		qtx := s.queries.WithTx(tx)
@@ -188,6 +193,7 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 			ConsentPurpose:     consentPurpose,
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
+			DonorLanguage:      donorLanguage,
 		})
 		if txErr != nil {
 			return txErr
@@ -301,6 +307,10 @@ func (s *DonationService) UpdateDraft(ctx context.Context, id string, req Update
 		consentPurpose = &v
 	}
 
+	// D-55/FR-23: donor_language may be corrected while still in draft; empty/omitted
+	// defaults to "th" (same resolution as Create).
+	donorLanguage := resolveDonorLanguage(req.DonorLanguage)
+
 	var updatedRow db.Donation
 	err = dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		qtx := s.queries.WithTx(tx)
@@ -334,6 +344,7 @@ func (s *DonationService) UpdateDraft(ctx context.Context, id string, req Update
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
 			ID:                 pgUUID,
+			DonorLanguage:      donorLanguage,
 		}); updateErr != nil {
 			return fmt.Errorf("update draft: %w", updateErr)
 		}
@@ -1006,6 +1017,10 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 
 		// Step 3: Create replacement draft at status='draft' with corrected data.
 		var txErr error
+		// ReissueDonationRequest carries no donor_language field (out of this plan's
+		// scope, D-55/FR-23 only covers Create/UpdateDraft) — default "th" here matches
+		// the DB column's own DEFAULT and preserves pre-existing behavior (every prior
+		// Reissue-created draft already ended up "th" via the DB default).
 		newRow, txErr = qtx.CreateDonation(ctx, db.CreateDonationParams{
 			CreatedBy:          actingUserID,
 			DonorName:          req.DonorName,
@@ -1022,6 +1037,7 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 			ConsentPurpose:     consentPurpose,
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
+			DonorLanguage:      "th",
 		})
 		if txErr != nil {
 			return fmt.Errorf("create replacement draft: %w", txErr)
@@ -1453,4 +1469,15 @@ func dateStr(d pgtype.Date) string {
 		return ""
 	}
 	return d.Time.Format("2006-01-02")
+}
+
+// resolveDonorLanguage defaults an omitted donor_language to "th" (D-55, FR-23).
+// The request validator (omitempty,oneof=th en) already rejects any non-empty value
+// other than "th"/"en" with 422 before this is ever called, so an empty string is the
+// only non-"th"/"en" input this function will ever see.
+func resolveDonorLanguage(v string) string {
+	if v == "" {
+		return "th"
+	}
+	return v
 }

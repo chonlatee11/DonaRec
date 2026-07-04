@@ -40,7 +40,8 @@ INSERT INTO donations (
     consent_text_version,
     consent_purpose,
     retain_until,
-    legal_basis
+    legal_basis,
+    donor_language
 ) VALUES (
     @created_by,
     @donor_name,
@@ -56,7 +57,8 @@ INSERT INTO donations (
     @consent_text_version,
     @consent_purpose,
     @retain_until,
-    @legal_basis
+    @legal_basis,
+    @donor_language
 )
 RETURNING
     id, created_by, status, created_at, updated_at;
@@ -123,6 +125,7 @@ SET
     consent_purpose      = @consent_purpose,
     retain_until         = @retain_until,
     legal_basis          = @legal_basis,
+    donor_language       = @donor_language,
     updated_at           = now()
 WHERE id     = @id
   AND status = 'draft';

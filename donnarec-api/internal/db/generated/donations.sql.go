@@ -102,7 +102,8 @@ INSERT INTO donations (
     consent_text_version,
     consent_purpose,
     retain_until,
-    legal_basis
+    legal_basis,
+    donor_language
 ) VALUES (
     $1,
     $2,
@@ -118,7 +119,8 @@ INSERT INTO donations (
     $12,
     $13,
     $14,
-    $15
+    $15,
+    $16
 )
 RETURNING
     id, created_by, status, created_at, updated_at
@@ -140,6 +142,7 @@ type CreateDonationParams struct {
 	ConsentPurpose     *string            `db:"consent_purpose" json:"consent_purpose"`
 	RetainUntil        pgtype.Date        `db:"retain_until" json:"retain_until"`
 	LegalBasis         string             `db:"legal_basis" json:"legal_basis"`
+	DonorLanguage      string             `db:"donor_language" json:"donor_language"`
 }
 
 type CreateDonationRow struct {
@@ -170,6 +173,7 @@ func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) 
 		arg.ConsentPurpose,
 		arg.RetainUntil,
 		arg.LegalBasis,
+		arg.DonorLanguage,
 	)
 	var i CreateDonationRow
 	err := row.Scan(
@@ -709,8 +713,9 @@ SET
     consent_purpose      = $12,
     retain_until         = $13,
     legal_basis          = $14,
+    donor_language       = $15,
     updated_at           = now()
-WHERE id     = $15
+WHERE id     = $16
   AND status = 'draft'
 `
 
@@ -729,6 +734,7 @@ type UpdateDraftDonationParams struct {
 	ConsentPurpose     *string            `db:"consent_purpose" json:"consent_purpose"`
 	RetainUntil        pgtype.Date        `db:"retain_until" json:"retain_until"`
 	LegalBasis         string             `db:"legal_basis" json:"legal_basis"`
+	DonorLanguage      string             `db:"donor_language" json:"donor_language"`
 	ID                 pgtype.UUID        `db:"id" json:"id"`
 }
 
@@ -751,6 +757,7 @@ func (q *Queries) UpdateDraftDonation(ctx context.Context, arg UpdateDraftDonati
 		arg.ConsentPurpose,
 		arg.RetainUntil,
 		arg.LegalBasis,
+		arg.DonorLanguage,
 		arg.ID,
 	)
 	return err
