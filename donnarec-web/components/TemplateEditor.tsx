@@ -113,17 +113,36 @@ const PREVIEW_FONT_FACE = `<style>
   body, * { font-family: 'THSarabunNewPreview', 'Sarabun', sans-serif; }
 </style>`;
 
-/** Injects the preview font-face block right after <head> (or prepends it if no <head> tag is present). */
+/**
+ * FW-02: restrictive CSP enforced inside the sandboxed preview document. The
+ * iframe uses `sandbox="allow-same-origin"` with no `allow-scripts` (JS — the
+ * primary XSS vector — is already dead), but passive sub-resources
+ * (`<img>`/`<link>`/CSS `url()`) could still issue same-origin GETs carrying
+ * the admin's cookies. This closes the D-58 "no network" half:
+ *   - default-src 'none'          — block everything not explicitly allowed
+ *   - img-src data:               — inline images only, no network fetches
+ *   - style-src 'unsafe-inline' 'self' — the injected <style> + same-origin CSS
+ *   - font-src 'self' data:       — keep TH Sarabun (/fonts/*.woff2) resolving
+ */
+const PREVIEW_CSP_META = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline' 'self'; font-src 'self' data:">`;
+
+const PREVIEW_HEAD_INJECTION = PREVIEW_CSP_META + PREVIEW_FONT_FACE;
+
+/**
+ * Injects the CSP meta + preview font-face block right after <head> (or
+ * prepends it if no <head> tag is present). The CSP <meta> is placed first so
+ * it applies before any resource-loading markup in the document.
+ */
 function withPreviewFontFace(html: string): string {
   const headIndex = html.toLowerCase().indexOf("<head>");
   if (headIndex !== -1) {
     return (
       html.slice(0, headIndex + "<head>".length) +
-      PREVIEW_FONT_FACE +
+      PREVIEW_HEAD_INJECTION +
       html.slice(headIndex + "<head>".length)
     );
   }
-  return PREVIEW_FONT_FACE + html;
+  return PREVIEW_HEAD_INJECTION + html;
 }
 
 export function TemplateLivePreview({ formValues, disabled }: TemplateLivePreviewProps) {
