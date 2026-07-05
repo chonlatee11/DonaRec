@@ -7,10 +7,12 @@ import (
 	"html/template"
 	"io"
 	"regexp"
+	"time"
 
 	dbhelpers "github.com/donnarec/donnarec-api/internal/db"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/pdf"
+	"github.com/donnarec/donnarec-api/internal/receiptfmt"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -301,17 +303,26 @@ func (s *SettingsService) fetchTemplateImage(ctx context.Context, objectKey *str
 	return pdf.DataURI(mimeType, data), nil
 }
 
+// sampleIssueInstant is the fixed timestamp the preview fixtures render as their
+// issue date (15 March 2026, safely mid-day so the Bangkok calendar date is
+// unambiguously the 15th). Formatting it through receiptfmt.FormatIssueDate —
+// the SAME helper the worker uses on the real receipt (BL-01) — is what
+// guarantees the admin preview date matches production output exactly:
+// "15 มี.ค. 2569" (th) / "15 Mar 2026" (en).
+var sampleIssueInstant = time.Date(2026, 3, 15, 12, 0, 0, 0, time.UTC)
+
 // sampleReceiptData returns the fixture ReceiptData used by BuildPreviewHTML (D-61
 // mandate: sample/mock data only, never live donor PII). Two fixtures — Thai-name and
 // English-name — so BOTH donor_language branches can be sanity-checked
 // (04-UI-SPEC.md "Sample preview data" note).
 func sampleReceiptData(language string) pdf.ReceiptData {
+	issueDate := receiptfmt.FormatIssueDate(pgtype.Timestamptz{Time: sampleIssueInstant, Valid: true}, language)
 	if language == "en" {
 		return pdf.ReceiptData{
 			DonorName: "Jane Sample Donor",
 			ReceiptNo: "2569/000001",
 			Amount:    "1,500.00",
-			IssueDate: "15 Mar 2026",
+			IssueDate: issueDate,
 			Language:  "en",
 		}
 	}
@@ -319,7 +330,7 @@ func sampleReceiptData(language string) pdf.ReceiptData {
 		DonorName: "นาย ตัวอย่าง ใจบุญ",
 		ReceiptNo: "2569/000001",
 		Amount:    "1,500.00",
-		IssueDate: "15 มี.ค. 2569",
+		IssueDate: issueDate,
 		Language:  "th",
 	}
 }

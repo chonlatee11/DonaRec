@@ -64,6 +64,7 @@ import (
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/mailer"
 	"github.com/donnarec/donnarec-api/internal/pdf"
+	"github.com/donnarec/donnarec-api/internal/receiptfmt"
 	"github.com/gabriel-vasile/mimetype"
 	gogoi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 
@@ -239,7 +240,7 @@ func (w *Worker) renderReceiptPDF(ctx context.Context, donation db.Donation) ([]
 		DonorName:           donation.DonorName,
 		ReceiptNo:           receiptNo,
 		Amount:              formatAmount(donation.Amount),
-		IssueDate:           formatIssueDate(donation.ApprovedAt),
+		IssueDate:           receiptfmt.FormatIssueDate(donation.ApprovedAt, donation.DonorLanguage),
 		Section6Text:        section6,
 		DeductionMultiplier: tplCfg.DeductionMultiplier,
 		Language:            donation.DonorLanguage,
@@ -393,15 +394,4 @@ func formatAmount(n pgtype.Numeric) string {
 		result = "-" + result
 	}
 	return result
-}
-
-// formatIssueDate formats the donation's approved_at timestamp (the receipt
-// issue date) as YYYY-MM-DD. Returns "" if unset (should not happen for a
-// job the worker is asked to process, since only issued donations enqueue
-// this job type — defensive rather than assumed).
-func formatIssueDate(t pgtype.Timestamptz) string {
-	if !t.Valid {
-		return ""
-	}
-	return t.Time.Format("2006-01-02")
 }
