@@ -166,17 +166,26 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
-// ReclaimStuckJobs resets outbox jobs that have been stuck in 'processing'
-// for longer than cfg.StuckJobTimeout back to 'pending' (CR-01, 04-REVIEW.md)
-// — recovers a job left claimed-but-unfinished by a worker process that was
-// killed, panicked, OOM-killed, or evicted before it could call
+// ReclaimStuckJobs reclaims outbox jobs that have been stuck in 'processing'
+// for longer than cfg.StuckJobTimeout (CR-01, 04-REVIEW.md) — recovers a job
+// left claimed-but-unfinished by a worker process that was killed, panicked,
+// OOM-killed, or evicted before it could call
 // MarkOutboxJobDone/MarkOutboxJobFailed. Called once per Run tick, before
-// ProcessOnce, so a reclaimed job becomes claimable again on the very same
-// tick's ClaimNextOutboxJob call. Safe to call with zero eligible rows (a
-// no-op, not an error).
+// ProcessOnce, so a reclaimed-to-'pending' job becomes claimable again on the
+// very same tick's ClaimNextOutboxJob call. Safe to call with zero eligible
+// rows (a no-op, not an error).
+//
+// BW-01 fix (04-REVIEW-PRESHIP.md): the reclaim increments attempts and applies
+// the terminal CASE (→ 'failed' once attempts reaches cfg.MaxAttempts), so a
+// deterministically-panicking job — which ProcessOnceSafe leaves 'processing'
+// without incrementing attempts — is BOUNDED and eventually dead-letters
+// instead of being reclaimed and retried forever.
 func (w *Worker) ReclaimStuckJobs(ctx context.Context) error {
 	cutoff := time.Now().Add(-w.cfg.StuckJobTimeout)
-	n, err := w.queries.ReclaimStuckOutboxJobs(ctx, pgtype.Timestamptz{Time: cutoff, Valid: true})
+	n, err := w.queries.ReclaimStuckOutboxJobs(ctx, db.ReclaimStuckOutboxJobsParams{
+		MaxAttempts: w.cfg.MaxAttempts,
+		Cutoff:      pgtype.Timestamptz{Time: cutoff, Valid: true},
+	})
 	if err != nil {
 		return fmt.Errorf("worker: reclaim stuck jobs: %w", err)
 	}

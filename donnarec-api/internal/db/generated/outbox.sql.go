@@ -140,11 +140,17 @@ func (q *Queries) MarkOutboxJobFailed(ctx context.Context, arg MarkOutboxJobFail
 
 const reclaimStuckOutboxJobs = `-- name: ReclaimStuckOutboxJobs :execrows
 UPDATE outbox_jobs
-SET status = 'pending',
+SET status = CASE WHEN attempts + 1 >= $1 THEN 'failed' ELSE 'pending' END,
+    attempts = attempts + 1,
     updated_at = now()
 WHERE status = 'processing'
-  AND updated_at < $1
+  AND updated_at < $2
 `
+
+type ReclaimStuckOutboxJobsParams struct {
+	MaxAttempts int32              `db:"max_attempts" json:"max_attempts"`
+	Cutoff      pgtype.Timestamptz `db:"cutoff" json:"cutoff"`
+}
 
 // CR-01 fix (04-REVIEW.md): a job that was claimed (status='processing') but
 // never reached MarkOutboxJobDone/MarkOutboxJobFailed — because the worker
@@ -163,8 +169,8 @@ WHERE status = 'processing'
 // healthy in-flight render/email still within its normal ~2-3s budget
 // (NFR-07) — the default timeout is minutes, several orders of magnitude
 // above that budget.
-func (q *Queries) ReclaimStuckOutboxJobs(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
-	result, err := q.db.Exec(ctx, reclaimStuckOutboxJobs, cutoff)
+func (q *Queries) ReclaimStuckOutboxJobs(ctx context.Context, arg ReclaimStuckOutboxJobsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, reclaimStuckOutboxJobs, arg.MaxAttempts, arg.Cutoff)
 	if err != nil {
 		return 0, err
 	}

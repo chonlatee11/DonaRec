@@ -60,14 +60,24 @@ RETURNING o.id, o.job_type, o.payload, o.attempts;
 --
 -- Any row whose updated_at is older than @cutoff (now() - StuckJobTimeout,
 -- computed in Go so the threshold is configurable via WORKER_STUCK_JOB_TIMEOUT)
--- is reset to 'pending' — safe because updated_at is bumped by BOTH the claim
+-- is reclaimed — safe because updated_at is bumped by BOTH the claim
 -- (ClaimNextOutboxJob) and the completion writes (MarkOutboxJobDone/Failed), so
 -- a row this old can only mean the job is genuinely abandoned, never a
 -- healthy in-flight render/email still within its normal ~2-3s budget
 -- (NFR-07) — the default timeout is minutes, several orders of magnitude
 -- above that budget.
+--
+-- BW-01 fix (04-REVIEW-PRESHIP.md): the reclaim MUST increment attempts and
+-- apply the SAME terminal CASE as MarkOutboxJobFailed. ProcessOnceSafe (CR-02)
+-- recovers a panic and leaves the job 'processing' WITHOUT incrementing
+-- attempts; a deterministically-panicking job would otherwise be reclaimed to
+-- 'pending' and retried forever, never dead-lettering — defeating the
+-- bounded-retry invariant. Incrementing here bounds the panic+reclaim path
+-- exactly like the returned-error path: once attempts reaches @max_attempts the
+-- job transitions to terminal 'failed' (dead-letter) instead of 'pending'.
 UPDATE outbox_jobs
-SET status = 'pending',
+SET status = CASE WHEN attempts + 1 >= @max_attempts THEN 'failed' ELSE 'pending' END,
+    attempts = attempts + 1,
     updated_at = now()
 WHERE status = 'processing'
   AND updated_at < @cutoff;

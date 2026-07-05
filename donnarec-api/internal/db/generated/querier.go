@@ -243,7 +243,7 @@ type Querier interface {
 	// healthy in-flight render/email still within its normal ~2-3s budget
 	// (NFR-07) — the default timeout is minutes, several orders of magnitude
 	// above that budget.
-	ReclaimStuckOutboxJobs(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error)
+	ReclaimStuckOutboxJobs(ctx context.Context, arg ReclaimStuckOutboxJobsParams) (int64, error)
 	// Checker permanently rejects pending_review → rejected with a mandatory reason (D-45, FR-12).
 	// 'rejected' is a terminal state — no further transitions are allowed.
 	// review_reason is enforced as non-empty at service layer before this call.
