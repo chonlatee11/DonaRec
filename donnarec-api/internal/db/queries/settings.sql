@@ -72,10 +72,10 @@ WHERE id = true;
 -- statement), so a concurrent write to a different slot is never clobbered.
 UPDATE receipt_template_config
 SET
-    letterhead_object_key = CASE WHEN @slot = 'letterhead' THEN @object_key ELSE letterhead_object_key END,
-    seal_object_key       = CASE WHEN @slot = 'seal'       THEN @object_key ELSE seal_object_key END,
-    signature_object_key  = CASE WHEN @slot = 'signature'  THEN @object_key ELSE signature_object_key END,
-    watermark_object_key  = CASE WHEN @slot = 'watermark'  THEN @object_key ELSE watermark_object_key END,
+    letterhead_object_key = CASE WHEN @slot::text = 'letterhead' THEN @object_key::text ELSE letterhead_object_key END,
+    seal_object_key       = CASE WHEN @slot::text = 'seal'       THEN @object_key::text ELSE seal_object_key END,
+    signature_object_key  = CASE WHEN @slot::text = 'signature'  THEN @object_key::text ELSE signature_object_key END,
+    watermark_object_key  = CASE WHEN @slot::text = 'watermark'  THEN @object_key::text ELSE watermark_object_key END,
     updated_at            = now(),
     updated_by            = @updated_by
 WHERE id = true;

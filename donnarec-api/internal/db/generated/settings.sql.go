@@ -165,10 +165,10 @@ func (q *Queries) UpdateReceiptTemplateContent(ctx context.Context, arg UpdateRe
 const updateTemplateImageKey = `-- name: UpdateTemplateImageKey :exec
 UPDATE receipt_template_config
 SET
-    letterhead_object_key = CASE WHEN $1 = 'letterhead' THEN $2 ELSE letterhead_object_key END,
-    seal_object_key       = CASE WHEN $1 = 'seal'       THEN $2 ELSE seal_object_key END,
-    signature_object_key  = CASE WHEN $1 = 'signature'  THEN $2 ELSE signature_object_key END,
-    watermark_object_key  = CASE WHEN $1 = 'watermark'  THEN $2 ELSE watermark_object_key END,
+    letterhead_object_key = CASE WHEN $1::text = 'letterhead' THEN $2::text ELSE letterhead_object_key END,
+    seal_object_key       = CASE WHEN $1::text = 'seal'       THEN $2::text ELSE seal_object_key END,
+    signature_object_key  = CASE WHEN $1::text = 'signature'  THEN $2::text ELSE signature_object_key END,
+    watermark_object_key  = CASE WHEN $1::text = 'watermark'  THEN $2::text ELSE watermark_object_key END,
     updated_at            = now(),
     updated_by            = $3
 WHERE id = true

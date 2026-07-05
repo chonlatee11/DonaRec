@@ -237,12 +237,21 @@ type Querier interface {
 	//
 	// Any row whose updated_at is older than @cutoff (now() - StuckJobTimeout,
 	// computed in Go so the threshold is configurable via WORKER_STUCK_JOB_TIMEOUT)
-	// is reset to 'pending' — safe because updated_at is bumped by BOTH the claim
+	// is reclaimed — safe because updated_at is bumped by BOTH the claim
 	// (ClaimNextOutboxJob) and the completion writes (MarkOutboxJobDone/Failed), so
 	// a row this old can only mean the job is genuinely abandoned, never a
 	// healthy in-flight render/email still within its normal ~2-3s budget
 	// (NFR-07) — the default timeout is minutes, several orders of magnitude
 	// above that budget.
+	//
+	// BW-01 fix (04-REVIEW-PRESHIP.md): the reclaim MUST increment attempts and
+	// apply the SAME terminal CASE as MarkOutboxJobFailed. ProcessOnceSafe (CR-02)
+	// recovers a panic and leaves the job 'processing' WITHOUT incrementing
+	// attempts; a deterministically-panicking job would otherwise be reclaimed to
+	// 'pending' and retried forever, never dead-lettering — defeating the
+	// bounded-retry invariant. Incrementing here bounds the panic+reclaim path
+	// exactly like the returned-error path: once attempts reaches @max_attempts the
+	// job transitions to terminal 'failed' (dead-letter) instead of 'pending'.
 	ReclaimStuckOutboxJobs(ctx context.Context, arg ReclaimStuckOutboxJobsParams) (int64, error)
 	// Checker permanently rejects pending_review → rejected with a mandatory reason (D-45, FR-12).
 	// 'rejected' is a terminal state — no further transitions are allowed.
@@ -301,7 +310,20 @@ type Querier interface {
 	// html/template.Parse BEFORE calling this (surfaces as "Template save failed"
 	// per UI-SPEC) — this query does not validate template syntax itself.
 	UpdateReceiptTemplateConfig(ctx context.Context, arg UpdateReceiptTemplateConfigParams) error
+	// BW-04 fix (04-REVIEW-PRESHIP.md): the "save all tabs" write path
+	// (SaveSettings) updates ONLY the admin-editable text/compliance fields and
+	// NEVER the image object keys. Those keys are owned solely by the upload
+	// endpoint (UpdateTemplateImageKey) — writing them from the settings PUT body
+	// would let a stale/omitted key silently null or revert a freshly-uploaded
+	// asset. Deliberately omits letterhead/seal/signature/watermark_object_key so
+	// their current DB values are left untouched.
 	UpdateReceiptTemplateContent(ctx context.Context, arg UpdateReceiptTemplateContentParams) error
+	// BW-03 fix (04-REVIEW-PRESHIP.md): persist ONE brand-image slot key with a
+	// single atomic per-column write, replacing SaveTemplateImage's former
+	// read-whole-row / mutate-one-slot / write-whole-row path (which had no
+	// tx/lock and lost a sibling slot's fresh key under concurrent uploads). Each
+	// non-target slot column is set to its OWN current value (read in the same
+	// statement), so a concurrent write to a different slot is never clobbered.
 	UpdateTemplateImageKey(ctx context.Context, arg UpdateTemplateImageKeyParams) error
 }
 
