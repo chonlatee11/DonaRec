@@ -170,6 +170,11 @@ export function TemplateLivePreview({ formValues, disabled }: TemplateLivePrevie
   // overwrite a newer, still-current preview with stale HTML.
   const previewGuardRef = useRef(createLatestGuard());
 
+  // FI-02: same out-of-order guard for the real-PDF render — rapid clicks on
+  // the PDF toggle can otherwise let an older render's blob resolve last and
+  // display a stale document.
+  const pdfGuardRef = useRef(createLatestGuard());
+
   // Stable dependency key so the debounced fetch re-fires only when a value
   // that actually affects the rendered receipt changes (D-61 "no heavy
   // re-render every keystroke" — the debounce utility itself coalesces
@@ -230,19 +235,22 @@ export function TemplateLivePreview({ formValues, disabled }: TemplateLivePrevie
   }, [pdfBlobUrl]);
 
   async function handleRenderRealPdf() {
+    const requestId = pdfGuardRef.current.next();
     setPdfLoading(true);
     setPdfError(null);
     try {
       const blob = await fetchPreviewPDFBlob(buildPreviewRequest(formValues, language));
+      if (!pdfGuardRef.current.isCurrent(requestId)) return; // stale — a newer render superseded this one
       const url = URL.createObjectURL(blob);
       setPdfBlobUrl((prev) => {
         if (prev) URL.revokeObjectURL(prev);
         return url;
       });
     } catch (err) {
+      if (!pdfGuardRef.current.isCurrent(requestId)) return;
       setPdfError(err instanceof Error ? err.message : t("renderPdfFailed"));
     } finally {
-      setPdfLoading(false);
+      if (pdfGuardRef.current.isCurrent(requestId)) setPdfLoading(false);
     }
   }
 
