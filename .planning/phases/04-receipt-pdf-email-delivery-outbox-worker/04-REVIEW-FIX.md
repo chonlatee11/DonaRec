@@ -15,7 +15,7 @@ verification:
   backend: "go build ./... OK, go vet clean, go test -short ./... all pass"
   caveats:
     - "RESOLVED 2026-07-05: ran sqlc generate v1.31.1 — hand-edited generated code did NOT byte-match; fixed by adding ::text casts to UpdateTemplateImageKey (@slot/@object_key) so sqlc infers string not interface{}/*string (had broken the build). Regenerated + committed (5945d3a). go build/vet/tests green."
-    - "OPEN: Docker not running — DB-backed RED tests (BW-01/BW-03/BW-04) compile but were not executed against live Postgres; run `go test ./...` with Docker up"
+    - "RESOLVED 2026-07-05: ran full `go test ./...` with Docker up (Postgres+MinIO+Chrome+Keycloak testcontainers) — exit 0. BW-01 (worker, 126s fresh), BW-03 (TestSaveTemplateImage_ConcurrentSlotUploads_NoLostUpdate 3.82s), BW-04 (TestSaveSettings_DoesNotClobberUploadedImageKeys 2.67s) all ran fresh and PASSED, no skips."
 ---
 
 # Phase 04 — Code Review Fixes (Consolidated)
@@ -77,5 +77,5 @@ Per-finding detail is in `04-REVIEW-FIX-backend.md` and `04-REVIEW-FIX-frontend.
 
 ## Pre-merge verification checklist
 - [x] `sqlc generate` reconciled — ran v1.31.1, fixed type inference via `::text` casts, regenerated + committed (`5945d3a`); build/vet/tests green
-- [ ] `go test ./...` (Docker up) exercises the BW-01/BW-03/BW-04 DB-backed RED→GREEN tests
-- [ ] Human/legal sign-off on BL-01 receipt date era/format (BE vs CE, month wording)
+- [x] `go test ./...` (Docker up) — full suite exit 0; BW-01/BW-03/BW-04 DB-backed tests ran fresh against real Postgres+MinIO and passed (no skips)
+- [ ] Human/legal sign-off on BL-01 receipt date era/format (BE vs CE, month wording) — **only remaining item**
