@@ -27,16 +27,20 @@ type DevSender struct {
 // (DevSender has no provider to assign one).
 func (d *DevSender) Send(ctx context.Context, msg Message) (SendResult, error) {
 	dir := filepath.Join(d.OutDir, uuid.NewString())
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	// BI-01 fix (04-REVIEW-PRESHIP.md): the captured message body + PDF
+	// attachment contain donor PII (name, receipt, amount) written unencrypted
+	// to local disk. Restrict them to the owner only — 0700 dir, 0600 files —
+	// instead of the previous world-readable 0755/0644.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return SendResult{}, err
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "body.html"), []byte(msg.BodyHTML), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "body.html"), []byte(msg.BodyHTML), 0o600); err != nil {
 		return SendResult{}, err
 	}
 
 	if msg.Attachment.Filename != "" {
-		if err := os.WriteFile(filepath.Join(dir, msg.Attachment.Filename), msg.Attachment.Data, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, msg.Attachment.Filename), msg.Attachment.Data, 0o600); err != nil {
 			return SendResult{}, err
 		}
 	}

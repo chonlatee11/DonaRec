@@ -177,6 +177,17 @@ func main() {
 
 	// EmailSender: dev/local capture only this phase (D-60) — a real provider
 	// (SES/Postmark) is a stakeholder gate deferred to a later phase.
+	//
+	// BI-01 fix (04-REVIEW-PRESHIP.md): DevSender writes donor-PII PDFs
+	// unencrypted to local disk and performs NO real delivery, so it must never
+	// be wired implicitly. Require an explicit MAIL_DEV=1 opt-in; refuse to start
+	// otherwise (no real provider is wired yet, so this is fail-fast by design —
+	// a production deploy that forgets to configure a real sender will not
+	// silently capture PII to /tmp).
+	if !mailDevEnabled(os.Getenv) {
+		logger.Fatal("refusing to start with the dev-only DevSender email backend: " +
+			"set MAIL_DEV=1 to explicitly enable local mail capture (no real email provider is wired yet — BI-01)")
+	}
 	// MAIL_DEV_OUTDIR defaults to a fixed path so captured messages are easy
 	// to find in a running dev container.
 	mailDevOutDir := os.Getenv("MAIL_DEV_OUTDIR")
@@ -379,6 +390,14 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	checkerGroup.POST("/:id/resend", donationHandler.Resend)
 
 	return router
+}
+
+// mailDevEnabled reports whether the dev/local capture EmailSender (DevSender)
+// is explicitly enabled via MAIL_DEV=1 (BI-01). DevSender writes donor-PII PDFs
+// unencrypted to local disk and performs no real delivery, so it must never be
+// wired implicitly in a non-dev environment — only an exact "1" opts in.
+func mailDevEnabled(getenv func(string) string) bool {
+	return getenv("MAIL_DEV") == "1"
 }
 
 // zapRequestLogger returns a Gin middleware that logs each request with structured fields.
