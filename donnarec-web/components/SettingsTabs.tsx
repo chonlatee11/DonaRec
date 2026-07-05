@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -100,6 +100,12 @@ export function SettingsTabs() {
   );
   const [uploadingSlot, setUploadingSlot] = useState<ImageSlot | null>(null);
 
+  // FW-01: keep a ref pointing at the LATEST preview URLs so the unmount
+  // cleanup revokes the live blob URLs — not the initial (all-null) snapshot
+  // an empty-dep cleanup closure would otherwise capture, which leaked memory.
+  const localPreviewUrlsRef = useRef(localPreviewUrls);
+  localPreviewUrlsRef.current = localPreviewUrls;
+
   // Seed local editable state once — never clobber in-progress edits on a
   // background refetch (e.g. after a successful save invalidates the query).
   useEffect(() => {
@@ -109,13 +115,13 @@ export function SettingsTabs() {
   }, [data, values]);
 
   // Revoke locally-created object URLs on unmount to avoid leaking memory.
+  // Reads the ref at teardown so it sees whatever URLs are live at that moment.
   useEffect(() => {
     return () => {
-      Object.values(localPreviewUrls).forEach((url) => {
+      Object.values(localPreviewUrlsRef.current).forEach((url) => {
         if (url) URL.revokeObjectURL(url);
       });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const uploadMutation = useMutation({
