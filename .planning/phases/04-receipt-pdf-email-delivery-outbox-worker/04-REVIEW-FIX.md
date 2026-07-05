@@ -14,8 +14,8 @@ verification:
   frontend: "npm test 44 passed, lint clean, next build succeeded"
   backend: "go build ./... OK, go vet clean, go test -short ./... all pass"
   caveats:
-    - "sqlc unavailable in fix env — generated *.sql.go/querier.go hand-edited to match sqlc v1.31.1; re-run `sqlc generate` to confirm"
-    - "Docker not running in fix env — DB-backed RED tests (BW-01/BW-03/BW-04) compile but were not executed against live Postgres; run `go test ./...` with Docker up"
+    - "RESOLVED 2026-07-05: ran sqlc generate v1.31.1 — hand-edited generated code did NOT byte-match; fixed by adding ::text casts to UpdateTemplateImageKey (@slot/@object_key) so sqlc infers string not interface{}/*string (had broken the build). Regenerated + committed (5945d3a). go build/vet/tests green."
+    - "OPEN: Docker not running — DB-backed RED tests (BW-01/BW-03/BW-04) compile but were not executed against live Postgres; run `go test ./...` with Docker up"
 ---
 
 # Phase 04 — Code Review Fixes (Consolidated)
@@ -75,7 +75,7 @@ Per-finding detail is in `04-REVIEW-FIX-backend.md` and `04-REVIEW-FIX-frontend.
 - **BI-05** reclaim index / unbounded table growth — fine at hospital volume; no speculative
   migration added. Deferred (scale).
 
-## Pre-merge verification checklist (run in an env with Docker + sqlc)
-- [ ] `sqlc generate` produces no diff against the hand-edited generated files
+## Pre-merge verification checklist
+- [x] `sqlc generate` reconciled — ran v1.31.1, fixed type inference via `::text` casts, regenerated + committed (`5945d3a`); build/vet/tests green
 - [ ] `go test ./...` (Docker up) exercises the BW-01/BW-03/BW-04 DB-backed RED→GREEN tests
 - [ ] Human/legal sign-off on BL-01 receipt date era/format (BE vs CE, month wording)
