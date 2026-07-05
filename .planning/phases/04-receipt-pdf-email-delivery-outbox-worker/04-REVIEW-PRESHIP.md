@@ -13,8 +13,13 @@ findings:
   warning: 8
   info: 8
   total: 17
-status: issues_found
+status: fixed
+resolution: "13 fixed, 1 deferred (BW-02 → 04-BACKLOG.md), 2 skipped (by-design/scale). See 04-REVIEW-FIX.md."
 ---
+
+> **Resolved 2026-07-05** via `/gsd-code-review 04 --fix --all` — 13/17 findings fixed
+> (incl. blocker BL-01), BW-02 deferred to `04-BACKLOG.md`, BI-03/BI-05 skipped. Fix
+> details + pre-merge caveats in `04-REVIEW-FIX.md`.
 
 # Phase 04 — Pre-Ship Code Review (Consolidated)
 
