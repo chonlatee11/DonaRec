@@ -65,7 +65,6 @@ import (
 	"github.com/donnarec/donnarec-api/internal/mailer"
 	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptfmt"
-	"github.com/gabriel-vasile/mimetype"
 	gogoi18n "github.com/nicksnyder/go-i18n/v2/i18n"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -239,7 +238,7 @@ func (w *Worker) renderReceiptPDF(ctx context.Context, donation db.Donation) ([]
 	data := pdf.ReceiptData{
 		DonorName:           donation.DonorName,
 		ReceiptNo:           receiptNo,
-		Amount:              formatAmount(donation.Amount),
+		Amount:              receiptfmt.FormatAmount(donation.Amount),
 		IssueDate:           receiptfmt.FormatIssueDate(donation.ApprovedAt, donation.DonorLanguage),
 		Section6Text:        section6,
 		DeductionMultiplier: tplCfg.DeductionMultiplier,
@@ -268,24 +267,7 @@ func (w *Worker) renderReceiptPDF(ctx context.Context, donation db.Donation) ([]
 	return pdfBytes, nil
 }
 
-// fetchTemplateImage returns a base64 data: URI for the given
-// receipt_template_config object key, or an empty template.URL if the key is
-// unset (no admin-uploaded asset yet — the seeded 04-01 template tolerates an
-// empty img src). The Go app fetches the bytes itself (network access it
-// legitimately has); Chromium never fetches them (04-RESEARCH Pitfall 3).
-func (w *Worker) fetchTemplateImage(ctx context.Context, objectKey *string) (template.URL, error) {
-	if objectKey == nil || *objectKey == "" {
-		return "", nil
-	}
-	data, err := w.receiptsStore.GetObject(ctx, *objectKey)
-	if err != nil {
-		return "", fmt.Errorf("fetch template image %q: %w", *objectKey, err)
-	}
-	mimeType := mimetype.Detect(data).String()
-	return pdf.DataURI(mimeType, data), nil
-}
-
-// fetchTemplateImageSoft is fetchTemplateImage's fail-OPEN variant for the
+// fetchTemplateImageSoft is the fail-OPEN variant of pdf.FetchTemplateImage for the
 // four decorative branding slots (letterhead/seal/signature/watermark) —
 // WR-06, 04-REVIEW.md. None of them are legally-required receipt content, so
 // a transient object-storage error fetching one is logged (Pattern C:
@@ -295,7 +277,7 @@ func (w *Worker) fetchTemplateImage(ctx context.Context, objectKey *string) (tem
 // (nil/empty) objectKey is the normal steady-state case, not a failure — it
 // is never logged.
 func (w *Worker) fetchTemplateImageSoft(ctx context.Context, objectKey *string, imageName string) template.URL {
-	uri, err := w.fetchTemplateImage(ctx, objectKey)
+	uri, err := pdf.FetchTemplateImage(ctx, w.receiptsStore, objectKey)
 	if err != nil {
 		w.logger.Warn("worker: non-critical branding image fetch failed — rendering without it",
 			zap.String("operation", "fetchTemplateImage"),
@@ -361,37 +343,4 @@ func (w *Worker) composeReceiptEmail(donation db.Donation, pdfBytes []byte) (mai
 func sanitizeFilename(s string) string {
 	replacer := strings.NewReplacer("/", "-", "\\", "-", " ", "_")
 	return replacer.Replace(s)
-}
-
-// formatAmount converts a pgtype.Numeric (big.Int mantissa + Exp) to a plain
-// decimal string, mirroring internal/donation/service.go's unexported
-// numericStr helper (duplicated here rather than exported cross-package,
-// since it is a small, self-contained pure function with no other shared
-// state).
-func formatAmount(n pgtype.Numeric) string {
-	if !n.Valid || n.Int == nil {
-		return "0"
-	}
-	intStr := n.Int.Text(10)
-	negative := strings.HasPrefix(intStr, "-")
-	if negative {
-		intStr = intStr[1:]
-	}
-
-	var result string
-	if n.Exp >= 0 {
-		result = intStr + strings.Repeat("0", int(n.Exp))
-	} else {
-		decPlaces := int(-n.Exp)
-		for len(intStr) <= decPlaces {
-			intStr = "0" + intStr
-		}
-		pos := len(intStr) - decPlaces
-		result = intStr[:pos] + "." + intStr[pos:]
-	}
-
-	if negative {
-		result = "-" + result
-	}
-	return result
 }

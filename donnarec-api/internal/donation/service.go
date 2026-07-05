@@ -37,6 +37,7 @@ import (
 	dbhelpers "github.com/donnarec/donnarec-api/internal/db"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/pii"
+	"github.com/donnarec/donnarec-api/internal/receiptfmt"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
 )
 
@@ -514,7 +515,7 @@ func (s *DonationService) List(ctx context.Context, filter ListFilter, claims au
 			DonorTaxIDMasked:   pii.MaskNationalID(string(plaintext)),
 			DonorAddress:       donorAddress,
 			DonorEmail:         donorEmail,
-			Amount:             numericStr(amount),
+			Amount:             receiptfmt.FormatAmount(amount),
 			DonatedAt:          dateStr(donatedAt),
 			Notes:              notes,
 			ConsentGiven:       consentGiven,
@@ -1406,7 +1407,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 			ID:               row.ID.String(),
 			Status:           string(row.Status),
 			DonorName:        row.DonorName,
-			Amount:           numericStr(row.Amount),
+			Amount:           receiptfmt.FormatAmount(row.Amount),
 			DonatedAt:        dateStr(row.DonatedAt),
 			ReceiptFormatted: row.ReceiptFormatted,
 			CreatedBy:        createdByName,
@@ -1531,7 +1532,7 @@ func (s *DonationService) buildDetailResponse(ctx context.Context, row db.Donati
 		NationalIDMasked:    maskedTaxID,
 		Address:             row.DonorAddress,
 		Email:               row.DonorEmail,
-		Amount:              numericStr(row.Amount),
+		Amount:              receiptfmt.FormatAmount(row.Amount),
 		DonatedAt:           dateStr(row.DonatedAt),
 		Note:                row.Notes,
 		ConsentGiven:        row.ConsentGiven,
@@ -1608,40 +1609,6 @@ func (s *DonationService) expandReceiptRef(ctx context.Context, id pgtype.UUID) 
 		formatted = *ref.ReceiptFormatted
 	}
 	return &ReceiptRef{ID: ref.ID.String(), ReceiptFormatted: formatted}, nil
-}
-
-// numericStr converts a pgtype.Numeric (big.Int + Exp) to a decimal string.
-// Used for Amount fields in DonationResponse.
-// Handles positive and negative amounts; treats invalid/nil as "0".
-func numericStr(n pgtype.Numeric) string {
-	if !n.Valid || n.Int == nil {
-		return "0"
-	}
-	// *big.Int.Text(base) returns the string representation; no math/big import needed
-	// since we only call a method on the existing *big.Int value (not constructing one).
-	intStr := n.Int.Text(10)
-	negative := false
-	if len(intStr) > 0 && intStr[0] == '-' {
-		negative = true
-		intStr = intStr[1:]
-	}
-	var result string
-	if n.Exp >= 0 {
-		// Positive exponent: append trailing zeros.
-		result = intStr + strings.Repeat("0", int(n.Exp))
-	} else {
-		// Negative exponent: insert decimal point.
-		decPlaces := int(-n.Exp)
-		for len(intStr) <= decPlaces {
-			intStr = "0" + intStr // left-pad to accommodate the decimal
-		}
-		pos := len(intStr) - decPlaces
-		result = intStr[:pos] + "." + intStr[pos:]
-	}
-	if negative {
-		return "-" + result
-	}
-	return result
 }
 
 // dateStr converts a pgtype.Date to a "YYYY-MM-DD" string, or "" if invalid.

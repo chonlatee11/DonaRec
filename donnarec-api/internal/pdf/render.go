@@ -31,10 +31,40 @@ package pdf
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"html/template"
+
+	"github.com/gabriel-vasile/mimetype"
 )
+
+// ImageStore is the minimal object-fetch seam FetchTemplateImage needs —
+// satisfied by both internal/worker.ReceiptsStore and
+// internal/settings.ReceiptsStore (each has GetObject) in production.
+type ImageStore interface {
+	GetObject(ctx context.Context, objectKey string) ([]byte, error)
+}
+
+// FetchTemplateImage returns a base64 data: URI (see DataURI) for the given
+// receipt_template_config object key, or an empty template.URL if the key is
+// nil/empty (no admin-uploaded asset yet). The Go app fetches the bytes itself
+// (network access it legitimately has); Chromium never fetches them
+// (04-RESEARCH.md Pitfall 3).
+//
+// BI-04 (04-REVIEW-PRESHIP.md): this is the single shared implementation
+// previously duplicated verbatim in the worker and settings packages.
+func FetchTemplateImage(ctx context.Context, store ImageStore, objectKey *string) (template.URL, error) {
+	if objectKey == nil || *objectKey == "" {
+		return "", nil
+	}
+	data, err := store.GetObject(ctx, *objectKey)
+	if err != nil {
+		return "", fmt.Errorf("fetch template image %q: %w", *objectKey, err)
+	}
+	mimeType := mimetype.Detect(data).String()
+	return DataURI(mimeType, data), nil
+}
 
 // ReceiptData is the template data structure supplied to Render. Field names match the
 // placeholders already used by the seeded receipt_template_config templates

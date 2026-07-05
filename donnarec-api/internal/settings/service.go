@@ -13,7 +13,6 @@ import (
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptfmt"
-	"github.com/gabriel-vasile/mimetype"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -256,16 +255,16 @@ func (s *SettingsService) BuildPreviewHTML(ctx context.Context, req PreviewReque
 	data.DeductionMultiplier = req.DeductionMultiplier
 
 	var err error
-	if data.LetterheadData, err = s.fetchTemplateImage(ctx, req.LetterheadObjectKey); err != nil {
+	if data.LetterheadData, err = pdf.FetchTemplateImage(ctx, s.receiptsStore, req.LetterheadObjectKey); err != nil {
 		return "", err
 	}
-	if data.SealData, err = s.fetchTemplateImage(ctx, req.SealObjectKey); err != nil {
+	if data.SealData, err = pdf.FetchTemplateImage(ctx, s.receiptsStore, req.SealObjectKey); err != nil {
 		return "", err
 	}
-	if data.SignatureData, err = s.fetchTemplateImage(ctx, req.SignatureObjectKey); err != nil {
+	if data.SignatureData, err = pdf.FetchTemplateImage(ctx, s.receiptsStore, req.SignatureObjectKey); err != nil {
 		return "", err
 	}
-	if data.WatermarkData, err = s.fetchTemplateImage(ctx, req.WatermarkObjectKey); err != nil {
+	if data.WatermarkData, err = pdf.FetchTemplateImage(ctx, s.receiptsStore, req.WatermarkObjectKey); err != nil {
 		return "", err
 	}
 
@@ -274,22 +273,6 @@ func (s *SettingsService) BuildPreviewHTML(ctx context.Context, req PreviewReque
 		return "", fmt.Errorf("%w: %v", ErrInvalidTemplate, err)
 	}
 	return html, nil
-}
-
-// fetchTemplateImage returns a base64 data: URI for the given object key, or an empty
-// template.URL if key is nil/empty (no admin-uploaded asset yet). Mirrors
-// internal/worker/issue_receipt.go's fetchTemplateImage exactly — same Go-fetches-bytes,
-// Chromium-never-fetches rationale (04-RESEARCH.md Pitfall 3).
-func (s *SettingsService) fetchTemplateImage(ctx context.Context, objectKey *string) (template.URL, error) {
-	if objectKey == nil || *objectKey == "" {
-		return "", nil
-	}
-	data, err := s.receiptsStore.GetObject(ctx, *objectKey)
-	if err != nil {
-		return "", fmt.Errorf("settings: fetch template image %q: %w", *objectKey, err)
-	}
-	mimeType := mimetype.Detect(data).String()
-	return pdf.DataURI(mimeType, data), nil
 }
 
 // sampleIssueInstant is the fixed timestamp the preview fixtures render as their
