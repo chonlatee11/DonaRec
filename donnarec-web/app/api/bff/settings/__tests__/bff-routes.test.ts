@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { buildPreviewRequest, type SettingsFormValues } from "@/lib/settings";
 
 /**
  * BFF settings route-handler trust-boundary tests (04-08).
@@ -146,22 +147,59 @@ describe("BFF settings routes — trust boundary", () => {
     expect(calledUrl).toContain("/api/admin/settings/preview");
   });
 
-  it("never sends a donation id or donor field on preview (D-61 sample-data-only mandate)", async () => {
-    mockGetServerSession.mockResolvedValue({ accessToken: "tok" });
-    mockFetch.mockResolvedValue(jsonResponse({ data: { html: "<html></html>" } }, 200));
+  /**
+   * FI-03: the D-61 "sample-data-only" preview guarantee is enforced at the
+   * CLIENT boundary by buildPreviewRequest, which whitelists exactly the
+   * PreviewRequest contract fields. The BFF /settings/preview route is an
+   * intentional transparent proxy — it forwards the request body verbatim with
+   * a server-attached Bearer token (T-12-02) and is NOT the authority for this
+   * guarantee. The previous test built a payload that already omitted PII and
+   * then asserted the pass-through proxy omitted it too — it would have passed
+   * even if a caller DID include PII (false confidence). Retarget at the real
+   * guard: buildPreviewRequest never emits a donor/PII field, even when one is
+   * injected onto the settings object.
+   */
+  it("buildPreviewRequest strips donor/PII fields even if present on the settings object (D-61 client guard)", () => {
+    const pollutedSettings = {
+      template_html: "<html></html>",
+      template_html_en: "<html></html>",
+      section6_text_th: "",
+      section6_text_en: "",
+      deduction_multiplier: "1x",
+      letterhead_object_key: null,
+      seal_object_key: null,
+      signature_object_key: null,
+      watermark_object_key: null,
+      separator: "/",
+      running_no_padding: 6,
+      year_format: "BE4",
+      prefix: "",
+      // Injected donor/PII fields that must NEVER reach a preview request:
+      donation_id: "d-123",
+      national_id: "1234567890123",
+      donor_name: "สมชาย ใจดี",
+    } as unknown as SettingsFormValues;
 
-    const payload = { template_html: "<html></html>", language: "th" };
-    const req = makeRequest(
-      "POST",
-      "http://localhost/api/bff/settings/preview",
-      payload
+    const req = buildPreviewRequest(pollutedSettings, "th");
+
+    expect(req).not.toHaveProperty("donation_id");
+    expect(req).not.toHaveProperty("national_id");
+    expect(req).not.toHaveProperty("donor_name");
+    // Positive assertion: only the whitelisted PreviewRequest contract keys.
+    expect(Object.keys(req).sort()).toEqual(
+      [
+        "deduction_multiplier",
+        "language",
+        "letterhead_object_key",
+        "seal_object_key",
+        "section6_text_en",
+        "section6_text_th",
+        "signature_object_key",
+        "template_html",
+        "template_html_en",
+        "watermark_object_key",
+      ].sort()
     );
-    await previewPOST(req);
-
-    const [, calledInit] = mockFetch.mock.calls[0] as [string, RequestInit];
-    const sentBody = JSON.parse(calledInit.body as string) as Record<string, unknown>;
-    expect(sentBody).not.toHaveProperty("donation_id");
-    expect(sentBody).not.toHaveProperty("national_id");
   });
 
   it("passes through raw application/pdf bytes on POST preview/pdf", async () => {
