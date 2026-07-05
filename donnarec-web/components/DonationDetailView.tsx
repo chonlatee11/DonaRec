@@ -117,7 +117,17 @@ export function DonationDetailView({
   const downloadMutation = useMutation({
     mutationFn: () => downloadReceipt(id),
     onSuccess: (result) => {
-      window.open(result.url, "_blank", "noopener,noreferrer");
+      // FW-03: window.open() here runs after the await, outside the click's
+      // user-gesture stack, so popup blockers commonly suppress it and the
+      // receipt PDF silently fails to open. A synthesized anchor click is
+      // treated as a navigation, not a popup, and is not blocked.
+      const a = document.createElement("a");
+      a.href = result.url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     },
     onError: (err) => {
       toast({ variant: "destructive", description: apiErrorMessage(err) });
