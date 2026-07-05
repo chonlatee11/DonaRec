@@ -22,7 +22,12 @@
 //	      ever logged from this file — never donor name/email/tax id, the
 //	      rendered HTML, or the PDF bytes.
 //
-// KNOWN LIMITATION (WR-03, 04-REVIEW.md — deliberately NOT fixed this pass):
+// TODO(BW-02): snapshot compliance config at approval, not at render.
+// TRACKED BACKLOG ITEM — see
+// .planning/phases/04-receipt-pdf-email-delivery-outbox-worker/04-BACKLOG.md.
+// Deliberately NOT fixed autonomously (04-REVIEW-PRESHIP.md BW-02): the fix
+// touches the Approve issuance transaction + a schema change and needs its own
+// planned phase.
 //
 //	deduction_multiplier/section6_text/template_html are read from
 //	receipt_template_config at FIRST-render time (renderReceiptPDF, below),
@@ -200,11 +205,11 @@ func (w *Worker) getOrRenderReceiptPDF(ctx context.Context, donation db.Donation
 // caller (getOrRenderReceiptPDF) only invokes this when
 // receipt_pdf_object_key is still nil.
 //
-// KNOWN LIMITATION (WR-03 — see package doc comment above for full
-// reasoning): tplCfg (including deduction_multiplier/section6 text/template
-// HTML) is read fresh here, NOT snapshotted at Approve time — an admin
-// config edit in the window between approval and first-render will affect
-// the rendered receipt.
+// TODO(BW-02) — see package doc comment above + 04-BACKLOG.md: tplCfg
+// (including deduction_multiplier/section6 text/template HTML) is read fresh
+// here, NOT snapshotted at Approve time — an admin config edit in the window
+// between approval and first-render will affect the rendered receipt. Tracked
+// backlog item; deferred to a dedicated phase (touches the Approve tx).
 func (w *Worker) renderReceiptPDF(ctx context.Context, donation db.Donation) ([]byte, error) {
 	tplCfg, err := w.queries.GetReceiptTemplateConfig(ctx)
 	if err != nil {
