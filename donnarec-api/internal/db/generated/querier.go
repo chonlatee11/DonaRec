@@ -301,6 +301,7 @@ type Querier interface {
 	// html/template.Parse BEFORE calling this (surfaces as "Template save failed"
 	// per UI-SPEC) — this query does not validate template syntax itself.
 	UpdateReceiptTemplateConfig(ctx context.Context, arg UpdateReceiptTemplateConfigParams) error
+	UpdateTemplateImageKey(ctx context.Context, arg UpdateTemplateImageKeyParams) error
 }
 
 var _ Querier = (*Queries)(nil)

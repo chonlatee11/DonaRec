@@ -120,3 +120,32 @@ func (q *Queries) UpdateReceiptTemplateConfig(ctx context.Context, arg UpdateRec
 	)
 	return err
 }
+
+const updateTemplateImageKey = `-- name: UpdateTemplateImageKey :exec
+UPDATE receipt_template_config
+SET
+    letterhead_object_key = CASE WHEN $1 = 'letterhead' THEN $2 ELSE letterhead_object_key END,
+    seal_object_key       = CASE WHEN $1 = 'seal'       THEN $2 ELSE seal_object_key END,
+    signature_object_key  = CASE WHEN $1 = 'signature'  THEN $2 ELSE signature_object_key END,
+    watermark_object_key  = CASE WHEN $1 = 'watermark'  THEN $2 ELSE watermark_object_key END,
+    updated_at            = now(),
+    updated_by            = $3
+WHERE id = true
+`
+
+type UpdateTemplateImageKeyParams struct {
+	Slot      string      `db:"slot" json:"slot"`
+	ObjectKey string      `db:"object_key" json:"object_key"`
+	UpdatedBy pgtype.UUID `db:"updated_by" json:"updated_by"`
+}
+
+// BW-03 fix (04-REVIEW-PRESHIP.md): persist ONE brand-image slot key with a
+// single atomic per-column write, replacing SaveTemplateImage's former
+// read-whole-row / mutate-one-slot / write-whole-row path (which had no
+// tx/lock and lost a sibling slot's fresh key under concurrent uploads). Each
+// non-target slot column is set to its OWN current value (read in the same
+// statement), so a concurrent write to a different slot is never clobbered.
+func (q *Queries) UpdateTemplateImageKey(ctx context.Context, arg UpdateTemplateImageKeyParams) error {
+	_, err := q.db.Exec(ctx, updateTemplateImageKey, arg.Slot, arg.ObjectKey, arg.UpdatedBy)
+	return err
+}

@@ -207,35 +207,19 @@ func (s *SettingsService) SaveTemplateImage(ctx context.Context, slot string, r 
 		return "", err
 	}
 
-	current, err := s.queries.GetReceiptTemplateConfig(ctx)
-	if err != nil {
-		return "", fmt.Errorf("settings: get template config for image update: %w", err)
-	}
-
-	params := db.UpdateReceiptTemplateConfigParams{
-		TemplateHtml:        current.TemplateHtml,
-		TemplateHtmlEn:      current.TemplateHtmlEn,
-		Section6TextTh:      current.Section6TextTh,
-		Section6TextEn:      current.Section6TextEn,
-		DeductionMultiplier: current.DeductionMultiplier,
-		LetterheadObjectKey: current.LetterheadObjectKey,
-		SealObjectKey:       current.SealObjectKey,
-		SignatureObjectKey:  current.SignatureObjectKey,
-		WatermarkObjectKey:  current.WatermarkObjectKey,
-		UpdatedBy:           updatedBy,
-	}
-	switch slot {
-	case "letterhead":
-		params.LetterheadObjectKey = &objectKey
-	case "seal":
-		params.SealObjectKey = &objectKey
-	case "signature":
-		params.SignatureObjectKey = &objectKey
-	case "watermark":
-		params.WatermarkObjectKey = &objectKey
-	}
-
-	if err := s.queries.UpdateReceiptTemplateConfig(ctx, params); err != nil {
+	// BW-03 fix (04-REVIEW-PRESHIP.md): persist ONLY the uploaded slot's key via
+	// a single atomic per-column UPDATE (UpdateTemplateImageKey), instead of the
+	// former read-whole-row / mutate-one-slot / write-whole-row path. That old
+	// path had no transaction/lock, so two near-simultaneous uploads (or an
+	// interleaved SaveSettings PUT) raced and the later full-row writer clobbered
+	// the other slot's freshly-uploaded key. The single-column write reads every
+	// non-target slot's own current value in the same statement, so no sibling
+	// slot can be lost.
+	if err := s.queries.UpdateTemplateImageKey(ctx, db.UpdateTemplateImageKeyParams{
+		Slot:      slot,
+		ObjectKey: objectKey,
+		UpdatedBy: updatedBy,
+	}); err != nil {
 		return "", fmt.Errorf("settings: persist template image key: %w", err)
 	}
 

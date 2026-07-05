@@ -43,3 +43,20 @@ SET
     updated_at            = now(),
     updated_by            = @updated_by
 WHERE id = true;
+
+-- name: UpdateTemplateImageKey :exec
+-- BW-03 fix (04-REVIEW-PRESHIP.md): persist ONE brand-image slot key with a
+-- single atomic per-column write, replacing SaveTemplateImage's former
+-- read-whole-row / mutate-one-slot / write-whole-row path (which had no
+-- tx/lock and lost a sibling slot's fresh key under concurrent uploads). Each
+-- non-target slot column is set to its OWN current value (read in the same
+-- statement), so a concurrent write to a different slot is never clobbered.
+UPDATE receipt_template_config
+SET
+    letterhead_object_key = CASE WHEN @slot = 'letterhead' THEN @object_key ELSE letterhead_object_key END,
+    seal_object_key       = CASE WHEN @slot = 'seal'       THEN @object_key ELSE seal_object_key END,
+    signature_object_key  = CASE WHEN @slot = 'signature'  THEN @object_key ELSE signature_object_key END,
+    watermark_object_key  = CASE WHEN @slot = 'watermark'  THEN @object_key ELSE watermark_object_key END,
+    updated_at            = now(),
+    updated_by            = @updated_by
+WHERE id = true;
