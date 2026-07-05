@@ -107,11 +107,16 @@ export function ImageUploadSlot({
     <div className="flex flex-col items-center gap-2" data-slot={slot}>
       <div
         role="button"
-        tabIndex={disabled ? -1 : 0}
+        tabIndex={disabled || uploading ? -1 : 0}
         aria-label={ariaLabel}
-        onClick={() => !disabled && inputRef.current?.click()}
+        aria-disabled={disabled || uploading}
+        // FI-01: gate on `uploading` too, so a second file can't be selected
+        // for this slot mid-flight (which would start a racing upload whose
+        // last-wins resolution + early `finally` clears uploadingSlot). Mirrors
+        // BW-03 on the server side.
+        onClick={() => !disabled && !uploading && inputRef.current?.click()}
         onKeyDown={(e) => {
-          if (!disabled && (e.key === "Enter" || e.key === " ")) {
+          if (!disabled && !uploading && (e.key === "Enter" || e.key === " ")) {
             e.preventDefault();
             inputRef.current?.click();
           }
