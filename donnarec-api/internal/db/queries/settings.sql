@@ -44,6 +44,25 @@ SET
     updated_by            = @updated_by
 WHERE id = true;
 
+-- name: UpdateReceiptTemplateContent :exec
+-- BW-04 fix (04-REVIEW-PRESHIP.md): the "save all tabs" write path
+-- (SaveSettings) updates ONLY the admin-editable text/compliance fields and
+-- NEVER the image object keys. Those keys are owned solely by the upload
+-- endpoint (UpdateTemplateImageKey) — writing them from the settings PUT body
+-- would let a stale/omitted key silently null or revert a freshly-uploaded
+-- asset. Deliberately omits letterhead/seal/signature/watermark_object_key so
+-- their current DB values are left untouched.
+UPDATE receipt_template_config
+SET
+    template_html         = @template_html,
+    template_html_en      = @template_html_en,
+    section6_text_th      = @section6_text_th,
+    section6_text_en      = @section6_text_en,
+    deduction_multiplier  = @deduction_multiplier,
+    updated_at            = now(),
+    updated_by            = @updated_by
+WHERE id = true;
+
 -- name: UpdateTemplateImageKey :exec
 -- BW-03 fix (04-REVIEW-PRESHIP.md): persist ONE brand-image slot key with a
 -- single atomic per-column write, replacing SaveTemplateImage's former

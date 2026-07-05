@@ -130,11 +130,14 @@ func (s *SettingsService) GetSettings(ctx context.Context) (ReceiptSettings, err
 	}, nil
 }
 
-// SaveSettings validates then persists ALL settings fields in one call — both
-// receipt_template_config and receipt_number_config — Admin-gated at the handler/route
-// level (D-58) and audited by the caller (Pattern D, AuditMiddleware). updatedBy MUST be
-// the acting admin's resolved users.id (auth.ResolveAppUser), never the raw Keycloak
-// subject.
+// SaveSettings validates then persists the editable settings fields in one call —
+// the text/compliance fields of receipt_template_config plus receipt_number_config —
+// Admin-gated at the handler/route level (D-58) and audited by the caller (Pattern D,
+// AuditMiddleware). updatedBy MUST be the acting admin's resolved users.id
+// (auth.ResolveAppUser), never the raw Keycloak subject.
+//
+// The brand-image object keys are deliberately NOT written here (BW-04): they are owned
+// solely by the image-upload endpoint (SaveTemplateImage) and are read-only on this PUT.
 //
 // Validation order (BEFORE any DB write, so a rejected save leaves both config rows
 // untouched — no partial save):
@@ -160,16 +163,18 @@ func (s *SettingsService) SaveSettings(ctx context.Context, input ReceiptSetting
 	return dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		qtx := s.queries.WithTx(tx)
 
-		if err := qtx.UpdateReceiptTemplateConfig(ctx, db.UpdateReceiptTemplateConfigParams{
+		// BW-04 fix (04-REVIEW-PRESHIP.md): write ONLY the text/compliance fields
+		// via UpdateReceiptTemplateContent — the brand-image object keys are
+		// deliberately NOT written here. They are owned solely by the upload
+		// endpoint (SaveTemplateImage → UpdateTemplateImageKey); echoing them from
+		// this "save all tabs" PUT body would let a stale/omitted key silently
+		// null or revert a freshly-uploaded asset.
+		if err := qtx.UpdateReceiptTemplateContent(ctx, db.UpdateReceiptTemplateContentParams{
 			TemplateHtml:        input.TemplateHTML,
 			TemplateHtmlEn:      input.TemplateHTMLEn,
 			Section6TextTh:      input.Section6TextTh,
 			Section6TextEn:      input.Section6TextEn,
 			DeductionMultiplier: input.DeductionMultiplier,
-			LetterheadObjectKey: input.LetterheadObjectKey,
-			SealObjectKey:       input.SealObjectKey,
-			SignatureObjectKey:  input.SignatureObjectKey,
-			WatermarkObjectKey:  input.WatermarkObjectKey,
 			UpdatedBy:           updatedBy,
 		}); err != nil {
 			return fmt.Errorf("settings: update template config: %w", err)

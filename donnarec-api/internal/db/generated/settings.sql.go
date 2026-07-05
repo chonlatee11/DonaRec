@@ -121,6 +121,47 @@ func (q *Queries) UpdateReceiptTemplateConfig(ctx context.Context, arg UpdateRec
 	return err
 }
 
+const updateReceiptTemplateContent = `-- name: UpdateReceiptTemplateContent :exec
+UPDATE receipt_template_config
+SET
+    template_html         = $1,
+    template_html_en      = $2,
+    section6_text_th      = $3,
+    section6_text_en      = $4,
+    deduction_multiplier  = $5,
+    updated_at            = now(),
+    updated_by            = $6
+WHERE id = true
+`
+
+type UpdateReceiptTemplateContentParams struct {
+	TemplateHtml        string      `db:"template_html" json:"template_html"`
+	TemplateHtmlEn      string      `db:"template_html_en" json:"template_html_en"`
+	Section6TextTh      string      `db:"section6_text_th" json:"section6_text_th"`
+	Section6TextEn      string      `db:"section6_text_en" json:"section6_text_en"`
+	DeductionMultiplier string      `db:"deduction_multiplier" json:"deduction_multiplier"`
+	UpdatedBy           pgtype.UUID `db:"updated_by" json:"updated_by"`
+}
+
+// BW-04 fix (04-REVIEW-PRESHIP.md): the "save all tabs" write path
+// (SaveSettings) updates ONLY the admin-editable text/compliance fields and
+// NEVER the image object keys. Those keys are owned solely by the upload
+// endpoint (UpdateTemplateImageKey) — writing them from the settings PUT body
+// would let a stale/omitted key silently null or revert a freshly-uploaded
+// asset. Deliberately omits letterhead/seal/signature/watermark_object_key so
+// their current DB values are left untouched.
+func (q *Queries) UpdateReceiptTemplateContent(ctx context.Context, arg UpdateReceiptTemplateContentParams) error {
+	_, err := q.db.Exec(ctx, updateReceiptTemplateContent,
+		arg.TemplateHtml,
+		arg.TemplateHtmlEn,
+		arg.Section6TextTh,
+		arg.Section6TextEn,
+		arg.DeductionMultiplier,
+		arg.UpdatedBy,
+	)
+	return err
+}
+
 const updateTemplateImageKey = `-- name: UpdateTemplateImageKey :exec
 UPDATE receipt_template_config
 SET
