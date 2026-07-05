@@ -37,18 +37,29 @@ import (
 	dbhelpers "github.com/donnarec/donnarec-api/internal/db"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/pii"
+	"github.com/donnarec/donnarec-api/internal/receiptfmt"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
 )
+
+// ReceiptsStore is the narrow interface DonationService needs to presign a frozen
+// receipt PDF for download (FR-28). Satisfied implicitly by *storage.StorageClient
+// (the SAME receipts-bucket client the outbox worker uses to freeze PDFs, 04-05) —
+// donation package never imports internal/storage directly, matching this codebase's
+// existing narrow-interface convention (see internal/worker.PDFRenderer/ReceiptsStore).
+type ReceiptsStore interface {
+	PresignedGet(ctx context.Context, objectKey string, ttl time.Duration) (string, error)
+}
 
 // DonationService implements donation lifecycle business logic.
 // All dependencies are constructor-injected (no global state — Pattern B).
 type DonationService struct {
-	pool        *pgxpool.Pool
-	queries     *db.Queries
-	allocator   *receiptno.Allocator // used in Approve (03-05)
-	auditSvc    *audit.AuditService  // used in Approve (03-05)
-	keyProvider crypto.KeyProvider
-	logger      *zap.Logger
+	pool          *pgxpool.Pool
+	queries       *db.Queries
+	allocator     *receiptno.Allocator // used in Approve (03-05)
+	auditSvc      *audit.AuditService  // used in Approve (03-05)
+	keyProvider   crypto.KeyProvider
+	logger        *zap.Logger
+	receiptsStore ReceiptsStore // used by DownloadReceipt (04-06); may be nil until SetReceiptsStore is called
 }
 
 // NewDonationService constructs a DonationService with injected dependencies.
@@ -69,6 +80,17 @@ func NewDonationService(
 		keyProvider: keyProvider,
 		logger:      logger,
 	}
+}
+
+// SetReceiptsStore injects the receipts-bucket StorageClient used by DownloadReceipt
+// to presign the frozen receipt PDF (FR-28). Kept as a post-construction setter —
+// not a NewDonationService parameter — so the ~20 existing call sites across
+// service_test.go/service_integration_test.go/service_fk_repro_test.go (none of which
+// exercise DownloadReceipt) do not need to change. cmd/server/main.go and
+// cmd/server/e2e_test.go call this once at wiring time, right after constructing the
+// SAME receipts StorageClient the outbox worker (04-05) uses.
+func (s *DonationService) SetReceiptsStore(store ReceiptsStore) {
+	s.receiptsStore = store
 }
 
 // canTransition returns true if the given action is permitted from the current donation status.
@@ -169,6 +191,11 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 		consentPurpose = &v
 	}
 
+	// D-55/FR-23: donor_language is frozen at create-time as part of the snapshot.
+	// Empty/omitted defaults to "th"; validator (omitempty,oneof=th en) already
+	// rejects any other non-empty value with 422 before this method runs.
+	donorLanguage := resolveDonorLanguage(req.DonorLanguage)
+
 	var fullRow db.Donation
 	err = dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		qtx := s.queries.WithTx(tx)
@@ -188,6 +215,7 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 			ConsentPurpose:     consentPurpose,
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
+			DonorLanguage:      donorLanguage,
 		})
 		if txErr != nil {
 			return txErr
@@ -301,6 +329,10 @@ func (s *DonationService) UpdateDraft(ctx context.Context, id string, req Update
 		consentPurpose = &v
 	}
 
+	// D-55/FR-23: donor_language may be corrected while still in draft; empty/omitted
+	// defaults to "th" (same resolution as Create).
+	donorLanguage := resolveDonorLanguage(req.DonorLanguage)
+
 	var updatedRow db.Donation
 	err = dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		qtx := s.queries.WithTx(tx)
@@ -334,6 +366,7 @@ func (s *DonationService) UpdateDraft(ctx context.Context, id string, req Update
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
 			ID:                 pgUUID,
+			DonorLanguage:      donorLanguage,
 		}); updateErr != nil {
 			return fmt.Errorf("update draft: %w", updateErr)
 		}
@@ -482,7 +515,7 @@ func (s *DonationService) List(ctx context.Context, filter ListFilter, claims au
 			DonorTaxIDMasked:   pii.MaskNationalID(string(plaintext)),
 			DonorAddress:       donorAddress,
 			DonorEmail:         donorEmail,
-			Amount:             numericStr(amount),
+			Amount:             receiptfmt.FormatAmount(amount),
 			DonatedAt:          dateStr(donatedAt),
 			Notes:              notes,
 			ConsentGiven:       consentGiven,
@@ -1006,6 +1039,10 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 
 		// Step 3: Create replacement draft at status='draft' with corrected data.
 		var txErr error
+		// ReissueDonationRequest carries no donor_language field (out of this plan's
+		// scope, D-55/FR-23 only covers Create/UpdateDraft) — default "th" here matches
+		// the DB column's own DEFAULT and preserves pre-existing behavior (every prior
+		// Reissue-created draft already ended up "th" via the DB default).
 		newRow, txErr = qtx.CreateDonation(ctx, db.CreateDonationParams{
 			CreatedBy:          actingUserID,
 			DonorName:          req.DonorName,
@@ -1022,6 +1059,7 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 			ConsentPurpose:     consentPurpose,
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
+			DonorLanguage:      "th",
 		})
 		if txErr != nil {
 			return fmt.Errorf("create replacement draft: %w", txErr)
@@ -1159,6 +1197,138 @@ func (s *DonationService) RevealPII(ctx context.Context, id string, claims auth.
 	}, nil
 }
 
+// Resend re-enqueues an outbox issue_receipt job for an already-issued donation so the
+// worker (04-05) re-sends the ALREADY-FROZEN receipt PDF via email (D-56/D-57, FR-27).
+//
+// Resend NEVER allocates a new receipt number and NEVER re-renders the PDF — it only
+// inserts a NEW outbox_jobs row; the worker's freeze-idempotency (04-05, D-56) guarantees
+// the stored PDF bytes are reused unchanged, and no receiptno.Allocator call is made
+// anywhere on this path.
+//
+// Authorization: Checker and Admin only. The checkerGroup route guard already enforces
+// this (T-04-15); the check here is service-layer defense-in-depth, matching the
+// Cancel/Reissue pattern.
+// Guards: status must be 'issued' (ErrInvalidTransition otherwise) AND
+// receipt_pdf_object_key must already be set (ErrReceiptNotReady otherwise — the worker
+// has not finished processing the original issue_receipt job yet).
+func (s *DonationService) Resend(ctx context.Context, id string, actingUserID pgtype.UUID, claims auth.KeycloakClaims) error {
+	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
+		return ErrForbidden
+	}
+
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	return dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		row, rowErr := qtx.GetDonationByID(ctx, pgUUID)
+		if rowErr != nil {
+			if errors.Is(rowErr, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get donation: %w", rowErr)
+		}
+
+		if row.Status != db.DonationStatusIssued {
+			return ErrInvalidTransition
+		}
+		if row.ReceiptPdfObjectKey == nil || *row.ReceiptPdfObjectKey == "" {
+			return ErrReceiptNotReady
+		}
+
+		// Same enqueue shape as Approve Step 7 — job_type "issue_receipt", payload
+		// {"donation_id": id}. The worker dispatches on job_type identically whether
+		// this is the original issuance job or a resend job.
+		payload, _ := json.Marshal(map[string]string{"donation_id": id})
+		if outboxErr := qtx.EnqueueOutboxJob(ctx, db.EnqueueOutboxJobParams{
+			JobType: "issue_receipt",
+			Payload: payload,
+		}); outboxErr != nil {
+			return fmt.Errorf("enqueue resend outbox job: %w", outboxErr)
+		}
+
+		afterJSON, _ := json.Marshal(map[string]any{
+			"donation_id": id,
+			"resent_by":   actingUserID.String(),
+		})
+		if auditErr := s.auditSvc.AppendAuditEntryTx(ctx, tx, audit.AuditEntry{
+			ActorID:    claims.Subject,
+			ActorEmail: claims.ActorIdentity(),
+			Action:     "receipt_resend",
+			Resource:   "/api/donations/" + id + "/resend",
+			AfterJSON:  afterJSON,
+		}); auditErr != nil {
+			return fmt.Errorf("audit resend: %w", auditErr)
+		}
+
+		return nil
+	})
+}
+
+// DownloadReceipt returns a short-lived (15-minute) presigned URL for the donation's
+// frozen receipt PDF (FR-28, T-04-17). Any staff role may download — the donationGroup
+// route guard already allows Maker/Checker/Admin (D-57 "staff download always"); there
+// is no additional service-layer role check here (mirrors RevealPII's routing note:
+// placed on donationGroup, not checkerGroup, so a Maker gets a real response, not 403).
+//
+// Returns ErrReceiptNotReady if the worker has not yet frozen the PDF
+// (receipt_pdf_object_key is nil) — this is expected in the brief window between
+// issuance and the worker's first pass, not an error condition per se.
+func (s *DonationService) DownloadReceipt(ctx context.Context, id string, claims auth.KeycloakClaims) (string, error) {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id); err != nil {
+		return "", fmt.Errorf("invalid donation ID: %w", err)
+	}
+
+	row, err := s.queries.GetDonationByID(ctx, pgUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("get donation: %w", err)
+	}
+
+	if row.ReceiptPdfObjectKey == nil || *row.ReceiptPdfObjectKey == "" {
+		return "", ErrReceiptNotReady
+	}
+
+	if s.receiptsStore == nil {
+		return "", fmt.Errorf("donation: receipts store not configured (SetReceiptsStore was never called)")
+	}
+
+	url, err := s.receiptsStore.PresignedGet(ctx, *row.ReceiptPdfObjectKey, 15*time.Minute)
+	if err != nil {
+		return "", fmt.Errorf("presign receipt pdf: %w", err)
+	}
+
+	// Audit the download (T-04-18). This is a read-only action with no other DB state
+	// to keep atomic with, so AppendAuditEntry (own-tx, D-15 pattern) is used rather
+	// than AppendAuditEntryTx — consistent with RevealPII's audit-then-return-plaintext
+	// discipline (D-13), the download URL is only returned after a successful audit write.
+	afterJSON, _ := json.Marshal(map[string]any{"donation_id": id})
+	if auditErr := s.auditSvc.AppendAuditEntry(ctx, audit.AuditEntry{
+		ActorID:    claims.Subject,
+		ActorEmail: claims.ActorIdentity(),
+		Action:     "receipt_download",
+		Resource:   "/api/donations/" + id + "/receipt-pdf",
+		AfterJSON:  afterJSON,
+	}); auditErr != nil {
+		return "", fmt.Errorf("audit download: %w", auditErr)
+	}
+
+	// Pattern C: log donation_id only — no PII, no object key (not sensitive here but
+	// consistent with the codebase-wide logging discipline).
+	s.logger.Info("receipt pdf presigned for download",
+		zap.String("donation_id", id),
+		zap.String("downloaded_by", claims.Subject),
+	)
+
+	return url, nil
+}
+
 // Search returns a paginated, PII-free list of donations filtered by optional criteria
 // (FR-10, D-53, D-R2). total is a real COUNT over the SAME filter predicate as the page
 // query (via CountDonations) — it is NEVER derived from len(items), since a page only
@@ -1237,7 +1407,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 			ID:               row.ID.String(),
 			Status:           string(row.Status),
 			DonorName:        row.DonorName,
-			Amount:           numericStr(row.Amount),
+			Amount:           receiptfmt.FormatAmount(row.Amount),
 			DonatedAt:        dateStr(row.DonatedAt),
 			ReceiptFormatted: row.ReceiptFormatted,
 			CreatedBy:        createdByName,
@@ -1328,34 +1498,64 @@ func (s *DonationService) buildDetailResponse(ctx context.Context, row db.Donati
 		})
 	}
 
+	// Screen 3b (Rule 2 — missing critical functionality, plan 04-06 Task 3): the
+	// FE's EmailDeliveryPanel has no other endpoint to source status/recipient/
+	// attempts from, so the latest email_delivery row is surfaced on the detail
+	// response itself. Only fetched for issued/cancelled (draft/pending_review/
+	// rejected never have an issue_receipt outbox job, so email_delivery could
+	// never contain rows for them). ErrNoRows means the worker (04-05) has not
+	// finished processing the issue_receipt job yet — NOT a failure — so
+	// EmailDelivery simply stays nil (FE shows the "not yet processed" empty state).
+	var emailDelivery *EmailDeliveryInfo
+	if row.Status == db.DonationStatusIssued || row.Status == db.DonationStatusCancelled {
+		ed, edErr := s.queries.GetLatestEmailDeliveryForDonation(ctx, row.ID)
+		if edErr != nil {
+			if !errors.Is(edErr, pgx.ErrNoRows) {
+				return nil, fmt.Errorf("get latest email delivery: %w", edErr)
+			}
+		} else {
+			emailDelivery = &EmailDeliveryInfo{
+				Status:            ed.Status,
+				SentTo:            ed.SentTo,
+				Attempts:          ed.Attempts,
+				ProviderMessageID: ed.ProviderMessageID,
+				LastError:         ed.LastError,
+				LastAttemptAt:     ed.CreatedAt.Time,
+			}
+		}
+	}
+
 	resp := &DonationDetailResponse{
-		ID:                 row.ID.String(),
-		Status:             string(row.Status),
-		DonorName:          row.DonorName,
-		NationalIDMasked:   maskedTaxID,
-		Address:            row.DonorAddress,
-		Email:              row.DonorEmail,
-		Amount:             numericStr(row.Amount),
-		DonatedAt:          dateStr(row.DonatedAt),
-		Note:               row.Notes,
-		ConsentGiven:       row.ConsentGiven,
-		ConsentTextVersion: row.ConsentTextVersion,
-		ConsentPurpose:     row.ConsentPurpose,
-		ReviewReason:       row.ReviewReason,
-		ReceiptFormatted:   row.ReceiptFormatted,
-		CreatedBy:          createdByName,
-		CreatedByID:        row.CreatedBy.String(),
-		CreatedAt:          row.CreatedAt.Time,
-		UpdatedAt:          row.UpdatedAt.Time,
-		EdonationKeyed:     row.EdonationKeyed,
-		Replaces:           replaces,
-		ReplacedBy:         replacedBy,
-		ReviewHistory:      reviewHistory,
-		ViewerIsCreator:    viewerIsCreator,
-		CanApprove:         canReview,
-		CanReturn:          canReview,
-		CanReject:          canReview,
-		CanRevealPII:       pii.CanRevealFull(claims),
+		ID:                  row.ID.String(),
+		Status:              string(row.Status),
+		DonorName:           row.DonorName,
+		NationalIDMasked:    maskedTaxID,
+		Address:             row.DonorAddress,
+		Email:               row.DonorEmail,
+		Amount:              receiptfmt.FormatAmount(row.Amount),
+		DonatedAt:           dateStr(row.DonatedAt),
+		Note:                row.Notes,
+		ConsentGiven:        row.ConsentGiven,
+		ConsentTextVersion:  row.ConsentTextVersion,
+		ConsentPurpose:      row.ConsentPurpose,
+		ReviewReason:        row.ReviewReason,
+		ReceiptFormatted:    row.ReceiptFormatted,
+		CreatedBy:           createdByName,
+		CreatedByID:         row.CreatedBy.String(),
+		CreatedAt:           row.CreatedAt.Time,
+		UpdatedAt:           row.UpdatedAt.Time,
+		EdonationKeyed:      row.EdonationKeyed,
+		Replaces:            replaces,
+		ReplacedBy:          replacedBy,
+		ReviewHistory:       reviewHistory,
+		DonorLanguage:       row.DonorLanguage,
+		ReceiptPDFObjectKey: row.ReceiptPdfObjectKey,
+		EmailDelivery:       emailDelivery,
+		ViewerIsCreator:     viewerIsCreator,
+		CanApprove:          canReview,
+		CanReturn:           canReview,
+		CanReject:           canReview,
+		CanRevealPII:        pii.CanRevealFull(claims),
 	}
 	if row.ConsentAt.Valid {
 		t := row.ConsentAt.Time
@@ -1411,44 +1611,21 @@ func (s *DonationService) expandReceiptRef(ctx context.Context, id pgtype.UUID) 
 	return &ReceiptRef{ID: ref.ID.String(), ReceiptFormatted: formatted}, nil
 }
 
-// numericStr converts a pgtype.Numeric (big.Int + Exp) to a decimal string.
-// Used for Amount fields in DonationResponse.
-// Handles positive and negative amounts; treats invalid/nil as "0".
-func numericStr(n pgtype.Numeric) string {
-	if !n.Valid || n.Int == nil {
-		return "0"
-	}
-	// *big.Int.Text(base) returns the string representation; no math/big import needed
-	// since we only call a method on the existing *big.Int value (not constructing one).
-	intStr := n.Int.Text(10)
-	negative := false
-	if len(intStr) > 0 && intStr[0] == '-' {
-		negative = true
-		intStr = intStr[1:]
-	}
-	var result string
-	if n.Exp >= 0 {
-		// Positive exponent: append trailing zeros.
-		result = intStr + strings.Repeat("0", int(n.Exp))
-	} else {
-		// Negative exponent: insert decimal point.
-		decPlaces := int(-n.Exp)
-		for len(intStr) <= decPlaces {
-			intStr = "0" + intStr // left-pad to accommodate the decimal
-		}
-		pos := len(intStr) - decPlaces
-		result = intStr[:pos] + "." + intStr[pos:]
-	}
-	if negative {
-		return "-" + result
-	}
-	return result
-}
-
 // dateStr converts a pgtype.Date to a "YYYY-MM-DD" string, or "" if invalid.
 func dateStr(d pgtype.Date) string {
 	if !d.Valid {
 		return ""
 	}
 	return d.Time.Format("2006-01-02")
+}
+
+// resolveDonorLanguage defaults an omitted donor_language to "th" (D-55, FR-23).
+// The request validator (omitempty,oneof=th en) already rejects any non-empty value
+// other than "th"/"en" with 422 before this is ever called, so an empty string is the
+// only non-"th"/"en" input this function will ever see.
+func resolveDonorLanguage(v string) string {
+	if v == "" {
+		return "th"
+	}
+	return v
 }

@@ -10,6 +10,11 @@ import "time"
 // CreateDonationRequest is the JSON request body for creating a new donation record (FR-07).
 // DonorTaxID is mandatory (D-44): a 13-digit Thai national/tax ID.
 // Consent fields are captured per donation snapshot (D-49, NFR-03).
+// DonorLanguage drives which bilingual PDF/email template the worker renders (D-55,
+// FR-23). Optional at the API boundary — empty string defaults to "th" at the service
+// layer (Create/UpdateDraft); the DB column additionally defaults+CHECKs th|en as a
+// backstop. Frozen at create-time as part of the immutable snapshot (D-43 precedent) —
+// never re-derived after creation.
 type CreateDonationRequest struct {
 	DonorName          string  `json:"donor_name"           validate:"required,min=1,max=255"`
 	DonorTaxID         string  `json:"donor_tax_id"         validate:"required,len=13,numeric"` // D-44: mandatory
@@ -21,6 +26,7 @@ type CreateDonationRequest struct {
 	ConsentGiven       bool    `json:"consent_given"`
 	ConsentTextVersion string  `json:"consent_text_version"`
 	ConsentPurpose     string  `json:"consent_purpose"`
+	DonorLanguage      string  `json:"donor_language"       validate:"omitempty,oneof=th en"` // D-55, FR-23
 }
 
 // UpdateDraftRequest is the JSON request body for editing a donation still in draft status (FR-09).
@@ -37,6 +43,7 @@ type UpdateDraftRequest struct {
 	ConsentGiven       bool    `json:"consent_given"`
 	ConsentTextVersion string  `json:"consent_text_version"`
 	ConsentPurpose     string  `json:"consent_purpose"`
+	DonorLanguage      string  `json:"donor_language"       validate:"omitempty,oneof=th en"` // D-55, FR-23
 }
 
 // DonationResponse is the API-level response for a single donation record.
@@ -84,6 +91,20 @@ type DonationResponse struct {
 type ReceiptRef struct {
 	ID               string `json:"id"`
 	ReceiptFormatted string `json:"receipt_formatted"`
+}
+
+// EmailDeliveryInfo is the most recent email send attempt for an issued/cancelled
+// donation's receipt PDF (Screen 3b, FR-27) — sourced from the email_delivery table
+// (one row per attempt, worker auto-retry AND staff resend both insert new rows).
+// Nil on DonationDetailResponse when no attempt has been recorded yet (the worker
+// (04-05) has not finished processing the issue_receipt outbox job).
+type EmailDeliveryInfo struct {
+	Status            string    `json:"status"` // "sent" | "failed" | "no_email"
+	SentTo            *string   `json:"sent_to,omitempty"`
+	Attempts          int32     `json:"attempts"`
+	ProviderMessageID *string   `json:"provider_message_id,omitempty"`
+	LastError         *string   `json:"last_error,omitempty"`
+	LastAttemptAt     time.Time `json:"last_attempt_at"`
 }
 
 // ReviewHistoryEntry is one return/reject event in a donation's review history,
@@ -151,6 +172,16 @@ type DonationDetailResponse struct {
 	ReplacedBy *ReceiptRef `json:"replaced_by,omitempty"`
 	// Full return/reject history (not just the latest — FR-12, D-R3), oldest→newest.
 	ReviewHistory []ReviewHistoryEntry `json:"review_history"`
+	// DonorLanguage is the frozen document language ("th"|"en") driving PDF/email
+	// rendering (D-55, FR-23) — set at create-time, never re-derived.
+	DonorLanguage string `json:"donor_language"`
+	// ReceiptPDFObjectKey is non-nil once the outbox worker has frozen the receipt
+	// PDF to object storage (D-56). Used by the FE to gate download/resend button
+	// enablement without a separate round-trip.
+	ReceiptPDFObjectKey *string `json:"receipt_pdf_object_key,omitempty"`
+	// EmailDelivery is the latest send attempt (Screen 3b) — see EmailDeliveryInfo
+	// doc comment. Only ever populated for status issued|cancelled.
+	EmailDelivery *EmailDeliveryInfo `json:"email_delivery,omitempty"`
 	// Server-computed authorization flags (T-03-31) — see type doc comment above.
 	ViewerIsCreator bool `json:"viewer_is_creator"`
 	CanApprove      bool `json:"can_approve"`

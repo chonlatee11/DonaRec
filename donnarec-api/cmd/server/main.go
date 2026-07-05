@@ -20,9 +20,14 @@ import (
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/i18n"
+	"github.com/donnarec/donnarec-api/internal/mailer"
+	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/settings"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/users"
+	"github.com/donnarec/donnarec-api/internal/worker"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -126,6 +131,86 @@ func main() {
 	// Slip service: upload/view/remove donation slip attachments (Plan 03-04, D-48, D-54).
 	slipSvc := donation.NewSlipService(pool, queries, storageClient, auditSvc, logger)
 
+	// --------------------------------------------------------
+	// Outbox worker (Phase 4, plan 04-05): polls outbox_jobs enqueued by the
+	// Approve issuance tx (Step 7) and renders/freezes/emails the receipt PDF
+	// entirely off the issuance lock path (NFR-07).
+	// --------------------------------------------------------
+
+	// Receipts object storage client: separate bucket from slips (D-56).
+	receiptsStore, err := storage.NewStorageClient(
+		cfg.MinIO.Endpoint,
+		cfg.MinIO.AccessKey,
+		cfg.MinIO.SecretKey,
+		cfg.MinIO.ReceiptsBucket,
+		cfg.MinIO.Secure,
+	)
+	if err != nil {
+		logger.Fatal("receipts storage client init failed", zap.Error(err))
+	}
+
+	// Wire the SAME receipts store into DonationService for DownloadReceipt's
+	// presigned URL (FR-28, plan 04-06) — resend/download reuse the frozen PDF the
+	// worker (above) writes; neither path re-renders or allocates a new number.
+	donationSvc.SetReceiptsStore(receiptsStore)
+
+	// Sandboxed remote-Chromium renderer (D-58) — dials the chrome sidecar over CDP.
+	// Passing logger lets the WR-02 fix (04-REVIEW.md) actually surface FailRequest
+	// errors instead of them vanishing into a discarded goroutine error.
+	pdfRenderer, err := pdf.NewRenderer(cfg.Worker.ChromeWSURL, logger)
+	if err != nil {
+		logger.Fatal("pdf renderer init failed", zap.Error(err))
+	}
+
+	// i18n bundle for bilingual receipt/email text (FR-23/26). LOCALES_DIR
+	// defaults to "/locales", matching the Dockerfile's COPY of
+	// internal/i18n/locales into the runtime image; override for local
+	// `go run` dev where the working directory is the module root.
+	localesDir := os.Getenv("LOCALES_DIR")
+	if localesDir == "" {
+		localesDir = "/locales"
+	}
+	i18nBundle, err := i18n.SetupBundle(localesDir)
+	if err != nil {
+		logger.Fatal("i18n bundle load failed", zap.Error(err), zap.String("locales_dir", localesDir))
+	}
+
+	// EmailSender: dev/local capture only this phase (D-60) — a real provider
+	// (SES/Postmark) is a stakeholder gate deferred to a later phase.
+	//
+	// BI-01 fix (04-REVIEW-PRESHIP.md): DevSender writes donor-PII PDFs
+	// unencrypted to local disk and performs NO real delivery, so it must never
+	// be wired implicitly. Require an explicit MAIL_DEV=1 opt-in; refuse to start
+	// otherwise (no real provider is wired yet, so this is fail-fast by design —
+	// a production deploy that forgets to configure a real sender will not
+	// silently capture PII to /tmp).
+	if !mailDevEnabled(os.Getenv) {
+		logger.Fatal("refusing to start with the dev-only DevSender email backend: " +
+			"set MAIL_DEV=1 to explicitly enable local mail capture (no real email provider is wired yet — BI-01)")
+	}
+	// MAIL_DEV_OUTDIR defaults to a fixed path so captured messages are easy
+	// to find in a running dev container.
+	mailDevOutDir := os.Getenv("MAIL_DEV_OUTDIR")
+	if mailDevOutDir == "" {
+		mailDevOutDir = "/tmp/donnarec-mail-dev"
+	}
+	emailSender := &mailer.DevSender{OutDir: mailDevOutDir}
+
+	outboxWorker := worker.New(pool, queries, receiptsStore, pdfRenderer, emailSender, i18nBundle, logger, worker.Config{
+		PollInterval:    cfg.Worker.PollInterval,
+		MaxAttempts:     int32(cfg.Worker.MaxAttempts),
+		StuckJobTimeout: cfg.Worker.StuckJobTimeout,
+		ComputeBackoff: func(attempts int32) time.Duration {
+			return cfg.Worker.ComputeBackoff(int(attempts))
+		},
+	})
+
+	// Settings service (Phase 4, plan 04-07): Admin-only receipt template/compliance
+	// config store (D-58/D-59/NFR-09). Reuses the SAME receiptsStore the worker (above)
+	// reads branding images from, and the SAME pdfRenderer for the real-PDF preview path
+	// (D-61 — preview must go through the identical sandboxed pipeline as production).
+	settingsSvc := settings.NewSettingsService(pool, queries, receiptsStore, logger)
+
 	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
 	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
 	// (not in internal/auth) so the auth package stays DB-agnostic; pgx.ErrNoRows is
@@ -147,11 +232,12 @@ func main() {
 	userHandler := users.NewUserHandler(userSvc, logger)
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
 	slipHandler := donation.NewSlipHandler(slipSvc, logger)
+	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
 
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -172,6 +258,12 @@ func main() {
 			logger.Fatal("server error", zap.Error(err))
 		}
 	}()
+
+	// Start the outbox worker in its own goroutine, sharing the SAME
+	// signal.NotifyContext ctx as the HTTP server for graceful shutdown
+	// (Phase 4, plan 04-05 — mirrors the pattern above).
+	go outboxWorker.Run(ctx)
+	logger.Info("outbox worker started", zap.Duration("poll_interval", cfg.Worker.PollInterval))
 
 	// Block until OS signal
 	<-ctx.Done()
@@ -195,8 +287,8 @@ func main() {
 //  3. AuditMiddleware — BEFORE RequireAuth to capture auth-failure events too (D-15)
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
-//  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin)
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, logger *zap.Logger) *gin.Engine {
+//  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin) + ResolveAppUser
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -225,9 +317,23 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// ---- Admin /api/admin group (requires admin role — D-01) ----
 	adminGroup := api.Group("/admin")
 	adminGroup.Use(auth.RequireRoles(auth.RoleAdmin))
+	// Resolve Keycloak sub -> users.id for admin routes that need updated_by (Phase 4,
+	// plan 04-07 settings save/image-upload) — mirrors donationGroup's ResolveAppUser
+	// wiring (bug: created-by-fk-mismatch). POST /users does not consume app_user_id
+	// today but requiring the calling admin to be a provisioned users row here too is
+	// consistent with every other *_by-writing route in this API.
+	adminGroup.Use(auth.ResolveAppUser(appUserResolver, logger))
 
 	// POST /api/admin/users — create user (Admin-only, D-01)
 	adminGroup.POST("/users", userHandler.CreateUser)
+
+	// ---- Settings: Admin-only receipt template/compliance config store (Phase 4,
+	// plan 04-07, D-58/D-59/D-61, NFR-09) ----
+	adminGroup.GET("/settings", settingsHandler.Get)
+	adminGroup.PUT("/settings", settingsHandler.Save)
+	adminGroup.POST("/settings/images/:slot", settingsHandler.UploadImage)
+	adminGroup.POST("/settings/preview", settingsHandler.Preview)
+	adminGroup.POST("/settings/preview/pdf", settingsHandler.PreviewPDF)
 
 	// ---- Maker/Checker/Admin — /api/donations (all staff) ----
 	// Pattern E: RequireRoles after RequireAuth — claims must already exist in context.
@@ -257,6 +363,12 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// Placed here (not checkerGroup) so a Maker receives 403, not 401/404 (better UX + testability).
 	donationGroup.GET("/:id/pii", donationHandler.RevealPII)
 
+	// GET /:id/receipt-pdf — download the frozen receipt PDF via a short-lived presigned
+	// URL (FR-28, D-57 "staff download always", plan 04-06). Open to all of
+	// Maker/Checker/Admin — placed on donationGroup (not checkerGroup) so every staff
+	// role can always retrieve the PDF, matching the RevealPII placement rationale above.
+	donationGroup.GET("/:id/receipt-pdf", donationHandler.DownloadReceipt)
+
 	// ---- Checker/Admin review actions (Plans 03-05 + 03-06, D-45, D-47) ----
 	// POST /:id/approve  — issue receipt via atomic 7-step tx (INV-1, FR-08)
 	// POST /:id/return   — return to draft with mandatory reason (FR-12)
@@ -273,8 +385,19 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	checkerGroup.POST("/:id/reject", donationHandler.Reject)
 	checkerGroup.POST("/:id/cancel", donationHandler.Cancel)
 	checkerGroup.POST("/:id/reissue", donationHandler.Reissue)
+	// POST /:id/resend — re-enqueue an outbox issue_receipt job for an issued donation
+	// (D-56/D-57, FR-27, plan 04-06). Never allocates a new number or re-renders.
+	checkerGroup.POST("/:id/resend", donationHandler.Resend)
 
 	return router
+}
+
+// mailDevEnabled reports whether the dev/local capture EmailSender (DevSender)
+// is explicitly enabled via MAIL_DEV=1 (BI-01). DevSender writes donor-PII PDFs
+// unencrypted to local disk and performs no real delivery, so it must never be
+// wired implicitly in a non-dev environment — only an exact "1" opts in.
+func mailDevEnabled(getenv func(string) string) bool {
+	return getenv("MAIL_DEV") == "1"
 }
 
 // zapRequestLogger returns a Gin middleware that logs each request with structured fields.

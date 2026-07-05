@@ -40,7 +40,8 @@ INSERT INTO donations (
     consent_text_version,
     consent_purpose,
     retain_until,
-    legal_basis
+    legal_basis,
+    donor_language
 ) VALUES (
     @created_by,
     @donor_name,
@@ -56,7 +57,8 @@ INSERT INTO donations (
     @consent_text_version,
     @consent_purpose,
     @retain_until,
-    @legal_basis
+    @legal_basis,
+    @donor_language
 )
 RETURNING
     id, created_by, status, created_at, updated_at;
@@ -97,7 +99,9 @@ SELECT
     cancel_reason,
     edonation_keyed,
     replaces,
-    replaced_by
+    replaced_by,
+    donor_language,
+    receipt_pdf_object_key
 FROM donations
 WHERE id = @id;
 
@@ -121,6 +125,7 @@ SET
     consent_purpose      = @consent_purpose,
     retain_until         = @retain_until,
     legal_basis          = @legal_basis,
+    donor_language       = @donor_language,
     updated_at           = now()
 WHERE id     = @id
   AND status = 'draft';
@@ -277,6 +282,17 @@ WHERE
 -- which also does not filter on is_active).
 SELECT display_name
 FROM users
+WHERE id = @id;
+
+-- name: SetReceiptPDFObjectKey :exec
+-- Record the frozen receipt PDF's MinIO object key after the worker (04-05)
+-- renders and stores it (D-56, FR-24 immutability). Called exactly once per
+-- donation, outside the issuance transaction (worker's own commit) — resend
+-- (04-06) reads this same key and never re-renders.
+UPDATE donations
+SET
+    receipt_pdf_object_key = @receipt_pdf_object_key,
+    updated_at              = now()
 WHERE id = @id;
 
 -- name: GetReceiptRefByID :one

@@ -7,6 +7,8 @@ package db
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const getReceiptNumberConfig = `-- name: GetReceiptNumberConfig :one
@@ -130,4 +132,44 @@ func (q *Queries) LockCounterForUpdate(ctx context.Context, fiscalYear int32) (i
 	var last_running_no int32
 	err := row.Scan(&last_running_no)
 	return last_running_no, err
+}
+
+const updateReceiptNumberConfig = `-- name: UpdateReceiptNumberConfig :exec
+UPDATE receipt_number_config
+SET
+    separator          = $1,
+    running_no_padding = $2,
+    year_format        = $3,
+    prefix             = $4,
+    updated_at         = now(),
+    updated_by         = $5
+WHERE id = true
+`
+
+type UpdateReceiptNumberConfigParams struct {
+	Separator        string      `db:"separator" json:"separator"`
+	RunningNoPadding int32       `db:"running_no_padding" json:"running_no_padding"`
+	YearFormat       string      `db:"year_format" json:"year_format"`
+	Prefix           string      `db:"prefix" json:"prefix"`
+	UpdatedBy        pgtype.UUID `db:"updated_by" json:"updated_by"`
+}
+
+// Update the single number-format config row (Admin-only, Phase 4 D-58 settings
+// UI — CONTEXT.md canonical_refs note: consolidate number-format editing into
+// the same Admin settings screen as the template config, rather than a
+// separate page). Frozen ledger entries (D-42) are NEVER affected by this —
+// only the NEXT allocation picks up the new format. Callers MUST validate
+// separator/prefix against the same safe-character allowlist
+// receiptno.formatReceiptNo enforces at allocation time (mirrored in
+// internal/settings/service.go) BEFORE calling this, so a bad save cannot
+// silently corrupt the next issuance instead of failing fast at save-time.
+func (q *Queries) UpdateReceiptNumberConfig(ctx context.Context, arg UpdateReceiptNumberConfigParams) error {
+	_, err := q.db.Exec(ctx, updateReceiptNumberConfig,
+		arg.Separator,
+		arg.RunningNoPadding,
+		arg.YearFormat,
+		arg.Prefix,
+		arg.UpdatedBy,
+	)
+	return err
 }

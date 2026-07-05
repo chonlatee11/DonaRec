@@ -158,50 +158,64 @@ type AuditLog struct {
 }
 
 type Donation struct {
-	ID                 pgtype.UUID        `db:"id" json:"id"`
-	CreatedBy          pgtype.UUID        `db:"created_by" json:"created_by"`
-	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Status             DonationStatus     `db:"status" json:"status"`
-	DonorName          string             `db:"donor_name" json:"donor_name"`
-	DonorAddress       string             `db:"donor_address" json:"donor_address"`
-	DonorEmail         *string            `db:"donor_email" json:"donor_email"`
-	DonorTaxIDEnc      []byte             `db:"donor_tax_id_enc" json:"donor_tax_id_enc"`
-	DonorTaxIDDek      []byte             `db:"donor_tax_id_dek" json:"donor_tax_id_dek"`
-	Amount             pgtype.Numeric     `db:"amount" json:"amount"`
-	DonatedAt          pgtype.Date        `db:"donated_at" json:"donated_at"`
-	Notes              *string            `db:"notes" json:"notes"`
-	ConsentGiven       bool               `db:"consent_given" json:"consent_given"`
-	ConsentAt          pgtype.Timestamptz `db:"consent_at" json:"consent_at"`
-	ConsentTextVersion *string            `db:"consent_text_version" json:"consent_text_version"`
-	ConsentPurpose     *string            `db:"consent_purpose" json:"consent_purpose"`
-	RetainUntil        pgtype.Date        `db:"retain_until" json:"retain_until"`
-	LegalBasis         string             `db:"legal_basis" json:"legal_basis"`
-	SubmittedAt        pgtype.Timestamptz `db:"submitted_at" json:"submitted_at"`
-	ReviewedBy         pgtype.UUID        `db:"reviewed_by" json:"reviewed_by"`
-	ReviewedAt         pgtype.Timestamptz `db:"reviewed_at" json:"reviewed_at"`
-	ReviewReason       *string            `db:"review_reason" json:"review_reason"`
-	ApprovedBy         pgtype.UUID        `db:"approved_by" json:"approved_by"`
-	ApprovedAt         pgtype.Timestamptz `db:"approved_at" json:"approved_at"`
-	ReceiptNumberID    *int64             `db:"receipt_number_id" json:"receipt_number_id"`
-	ReceiptFormatted   *string            `db:"receipt_formatted" json:"receipt_formatted"`
-	CancelledBy        pgtype.UUID        `db:"cancelled_by" json:"cancelled_by"`
-	CancelledAt        pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
-	CancelReason       *string            `db:"cancel_reason" json:"cancel_reason"`
-	EdonationKeyed     bool               `db:"edonation_keyed" json:"edonation_keyed"`
-	Replaces           pgtype.UUID        `db:"replaces" json:"replaces"`
-	ReplacedBy         pgtype.UUID        `db:"replaced_by" json:"replaced_by"`
+	ID                  pgtype.UUID        `db:"id" json:"id"`
+	CreatedBy           pgtype.UUID        `db:"created_by" json:"created_by"`
+	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Status              DonationStatus     `db:"status" json:"status"`
+	DonorName           string             `db:"donor_name" json:"donor_name"`
+	DonorAddress        string             `db:"donor_address" json:"donor_address"`
+	DonorEmail          *string            `db:"donor_email" json:"donor_email"`
+	DonorTaxIDEnc       []byte             `db:"donor_tax_id_enc" json:"donor_tax_id_enc"`
+	DonorTaxIDDek       []byte             `db:"donor_tax_id_dek" json:"donor_tax_id_dek"`
+	Amount              pgtype.Numeric     `db:"amount" json:"amount"`
+	DonatedAt           pgtype.Date        `db:"donated_at" json:"donated_at"`
+	Notes               *string            `db:"notes" json:"notes"`
+	ConsentGiven        bool               `db:"consent_given" json:"consent_given"`
+	ConsentAt           pgtype.Timestamptz `db:"consent_at" json:"consent_at"`
+	ConsentTextVersion  *string            `db:"consent_text_version" json:"consent_text_version"`
+	ConsentPurpose      *string            `db:"consent_purpose" json:"consent_purpose"`
+	RetainUntil         pgtype.Date        `db:"retain_until" json:"retain_until"`
+	LegalBasis          string             `db:"legal_basis" json:"legal_basis"`
+	SubmittedAt         pgtype.Timestamptz `db:"submitted_at" json:"submitted_at"`
+	ReviewedBy          pgtype.UUID        `db:"reviewed_by" json:"reviewed_by"`
+	ReviewedAt          pgtype.Timestamptz `db:"reviewed_at" json:"reviewed_at"`
+	ReviewReason        *string            `db:"review_reason" json:"review_reason"`
+	ApprovedBy          pgtype.UUID        `db:"approved_by" json:"approved_by"`
+	ApprovedAt          pgtype.Timestamptz `db:"approved_at" json:"approved_at"`
+	ReceiptNumberID     *int64             `db:"receipt_number_id" json:"receipt_number_id"`
+	ReceiptFormatted    *string            `db:"receipt_formatted" json:"receipt_formatted"`
+	CancelledBy         pgtype.UUID        `db:"cancelled_by" json:"cancelled_by"`
+	CancelledAt         pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
+	CancelReason        *string            `db:"cancel_reason" json:"cancel_reason"`
+	EdonationKeyed      bool               `db:"edonation_keyed" json:"edonation_keyed"`
+	Replaces            pgtype.UUID        `db:"replaces" json:"replaces"`
+	ReplacedBy          pgtype.UUID        `db:"replaced_by" json:"replaced_by"`
+	DonorLanguage       string             `db:"donor_language" json:"donor_language"`
+	ReceiptPdfObjectKey *string            `db:"receipt_pdf_object_key" json:"receipt_pdf_object_key"`
+}
+
+type EmailDelivery struct {
+	ID                int64              `db:"id" json:"id"`
+	DonationID        pgtype.UUID        `db:"donation_id" json:"donation_id"`
+	SentTo            *string            `db:"sent_to" json:"sent_to"`
+	Status            string             `db:"status" json:"status"`
+	ProviderMessageID *string            `db:"provider_message_id" json:"provider_message_id"`
+	Attempts          int32              `db:"attempts" json:"attempts"`
+	LastError         *string            `db:"last_error" json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
 type OutboxJob struct {
-	ID        int64              `db:"id" json:"id"`
-	JobType   string             `db:"job_type" json:"job_type"`
-	Payload   []byte             `db:"payload" json:"payload"`
-	Status    string             `db:"status" json:"status"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Attempts  int32              `db:"attempts" json:"attempts"`
-	LastError *string            `db:"last_error" json:"last_error"`
+	ID            int64              `db:"id" json:"id"`
+	JobType       string             `db:"job_type" json:"job_type"`
+	Payload       []byte             `db:"payload" json:"payload"`
+	Status        string             `db:"status" json:"status"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Attempts      int32              `db:"attempts" json:"attempts"`
+	LastError     *string            `db:"last_error" json:"last_error"`
+	NextAttemptAt pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
 }
 
 type ReceiptNumber struct {
@@ -227,6 +241,21 @@ type ReceiptNumberCounter struct {
 	LastRunningNo int32              `db:"last_running_no" json:"last_running_no"`
 	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type ReceiptTemplateConfig struct {
+	ID                  bool               `db:"id" json:"id"`
+	TemplateHtml        string             `db:"template_html" json:"template_html"`
+	TemplateHtmlEn      string             `db:"template_html_en" json:"template_html_en"`
+	Section6TextTh      string             `db:"section6_text_th" json:"section6_text_th"`
+	Section6TextEn      string             `db:"section6_text_en" json:"section6_text_en"`
+	DeductionMultiplier string             `db:"deduction_multiplier" json:"deduction_multiplier"`
+	LetterheadObjectKey *string            `db:"letterhead_object_key" json:"letterhead_object_key"`
+	SealObjectKey       *string            `db:"seal_object_key" json:"seal_object_key"`
+	SignatureObjectKey  *string            `db:"signature_object_key" json:"signature_object_key"`
+	WatermarkObjectKey  *string            `db:"watermark_object_key" json:"watermark_object_key"`
+	UpdatedAt           pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	UpdatedBy           pgtype.UUID        `db:"updated_by" json:"updated_by"`
 }
 
 type RetentionConfig struct {

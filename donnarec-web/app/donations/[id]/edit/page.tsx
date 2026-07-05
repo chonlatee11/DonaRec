@@ -62,6 +62,7 @@ export default async function EditDonationPage({
           note: donation.note,
           slip_url: donation.slip_url,
           review_history: donation.review_history,
+          donor_language: donation.donor_language,
         }}
       />
     </div>

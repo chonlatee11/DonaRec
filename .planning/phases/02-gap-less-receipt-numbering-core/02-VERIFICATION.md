@@ -1,7 +1,7 @@
 ---
 phase: 02-gap-less-receipt-numbering-core
 verified: 2026-06-27T00:00:00Z
-status: pass
+status: passed
 score: 5/5 must-haves verified
 overrides_applied: 0
 re_verification:
@@ -21,7 +21,7 @@ human_verification: []
 **Phase Goal:** The system can allocate a unique, gap-less, per-fiscal-year receipt running number inside a single short DB transaction, and this invariant is proven under concurrency and rollback before any UI depends on it.
 
 **Verified:** 2026-06-27
-**Status:** pass
+**Status:** passed
 **Re-verification:** No — initial verification
 
 ## Goal Achievement

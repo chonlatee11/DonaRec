@@ -2,16 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "Phase 3 shipped — PR #3"
-stopped_at: Completed 03-13-PLAN.md (create/edit/cancel/reissue donation flows migrated to BFF + TanStack; E2E create+cancel over the production router)
-last_updated: "2026-07-04T05:02:42.787Z"
-last_activity: 2026-07-04
+current_phase: 5
+current_phase_name: e-Donation Export, Reports & Admin Settings
+status: "Phase 04 shipped — PR #4"
+stopped_at: "Completed Phase 04 code-review fixes (04-REVIEW.md): CR-01, CR-02, WR-01, WR-02, WR-04, WR-05, WR-06, WR-07 fixed; WR-03 documented as known limitation"
+last_updated: "2026-07-05T04:30:05.645Z"
+last_activity: 2026-07-05
 progress:
   total_phases: 6
-  completed_phases: 3
-  total_plans: 22
-  completed_plans: 22
-  percent: 50
+  completed_phases: 4
+  total_plans: 30
+  completed_plans: 31
+  percent: 67
 ---
 
 # Project State
@@ -21,15 +23,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** ออกใบเสร็จบริจาคที่มีเลขที่รันต่อเนื่องไม่ซ้ำ ห้ามข้ามเลข (gap-less) ตามปีงบประมาณ หลังผ่านการอนุมัติโดยมนุษย์ และส่งถึงผู้บริจาคได้อย่างถูกต้องน่าเชื่อถือ
-**Current focus:** Phase 03 — donation-lifecycle-maker-checker-issuance
+**Current focus:** Phase 04 — receipt-pdf-email-delivery-outbox-worker
 
 ## Current Position
 
-Phase: 03 (donation-lifecycle-maker-checker-issuance) — EXECUTING
-Plan: 6 of 13
+Phase: 5 — e-Donation Export, Reports & Admin Settings
+Plan: Not started
 Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
-Status: Phase 3 shipped — PR #3
-Last activity: 2026-07-04
+Status: Phase 04 shipped — PR #4
+Last activity: 2026-07-05
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -37,7 +39,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 
 **Velocity:**
 
-- Total plans completed: 5
+- Total plans completed: 14
 - Average duration: —
 - Total execution time: —
 
@@ -46,6 +48,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 5 | - | - |
+| 04 | 9 | - | - |
 
 **Recent Trend:**
 
@@ -63,6 +66,14 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 03 P10 | 18min | 2 tasks | 13 files |
 | Phase 03 P12 | 35min | 2 tasks | 12 files |
 | Phase 03 P13 | 3min | 3 tasks | 9 files |
+| Phase 04 P01 | 15min | 3 tasks | 19 files |
+| Phase 04 P02 | 12min | 2 tasks | 6 files |
+| Phase 04 P04 | 3min | 1 tasks | 6 files |
+| Phase 04 P03 | 18min | 1 tasks | 6 files |
+| Phase 04 P05 | 25m | 1 tasks | 8 files |
+| Phase 04 P06 | 35min | 3 tasks | 20 files |
+| Phase 04 P07 | 20min | 2 tasks | 11 files |
+| Phase 04 P08 | 13min | 2 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -91,6 +102,27 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 03] 03-10: apiFetch unwraps the data envelope (D-R2); DonationListResponse key donations to items; DonationSummary.amount is a numeric string (parseFloat at render). Root fix for bug #5 (undefined.length on result.donations). Donation list screen migrated to TanStack Query + TanStack Table.
 - [Phase 03]: 03-12: BFF Route Handlers for donation detail (composes slip_url via a second server-side /:id/slip call)/pii (donor_tax_id->national_id mapping)/approve/return/reject; client DonationDetailView (useQuery+useMutation) drives Screen 3+4 — ReviewActionPanel/MaskedIdField needed zero changes since their existing Promise<{error}|null> callback contracts already matched the new mutation wrappers. Cancel/reissue deliberately deferred to 03-13.
 - [Phase 03]: Cancel/reissue mutation wiring lives in DonationDetailView (useMutation), not in CancelDialog itself; CancelDialog stays presentational — Matches the existing approve/return/reject pattern established in 03-12; fixed a broken Server Action -> client-BFF-fetcher call path (Rule 1 bug)
+- [Phase 04]: [Phase 04] 04-01: ClaimNextOutboxJob's self-referencing subquery requires table aliases (o./j.) to satisfy sqlc's static analyzer, even though Postgres itself has no ambiguity issue with the unaliased query
+- [Phase 04]: [Phase 04] 04-01: receipt_template_config seeded with BOTH template_html (Thai) and template_html_en (English) skeletons so donor_language='en' records don't render blank before an admin edits the template; section6_text_th/en left empty pending accounting/legal sign-off
+- [Phase 04]: [Phase 04] 04-02: chrome sidecar service builds from chromedp/headless-shell:stable + fonts-thai-tlwg, reachable only over the internal compose network (no host ports:); chromedp pinned v0.14.2 to avoid a Go 1.26 toolchain bump
+- [Phase 04]: [Phase 04] 04-02: testutil.StartChrome builds the same docker/chrome.Dockerfile via testcontainers FromDockerfile and resolves the real CDP webSocketDebuggerUrl from /json/version, mirroring StartPostgres/NewKeycloakTestServer's t.Helper/cleanup shape
+- [Phase ?]: [Phase 04] 04-04: EmailSender interface + DevSender capture-to-disk built per RESEARCH.md's pre-vetted code (D-60); no self-hosted SMTP/provider SDK import
+- [Phase ?]: [Phase 04] 04-04: i18n receipt.*/email.* message IDs added to th.json/en.json for FR-23/26; section6_text stays config-store-driven, not part of the i18n catalog, pending accounting/legal sign-off
+- [Phase 04]: 04-03: ReceiptData field names match the 04-01-seeded receipt_template_config placeholders; image/font fields typed template.URL/template.CSS (plain string gets sanitized to #ZgotmplZ by html/template)
+- [Phase 04]: 04-03: renderInSandbox is the single CDP action sequence both production RenderPDF and the security regression tests call — proves tests exercise the exact production sandbox (network-isolated sidecar + fetch.Enable/FailRequest-all + emulation.SetScriptExecutionDisabled)
+- [Phase ?]: [Phase 04] 04-05: worker.Config.ComputeBackoff is an injected func decoupled from config.WorkerConfig, so tests can use near-instant backoff without touching internal/config's unexported schedule
+- [Phase ?]: [Phase 04] 04-05: freeze-then-email ordering — render+freeze commits before email send is attempted, so a failed send never re-triggers a render; retries just re-fetch the frozen PDF from MinIO
+- [Phase ?]: [Phase 04] 04-05: template branding assets fetched via the same receipts bucket/ReceiptsStore as frozen PDFs — no dedicated asset bucket yet since 04-07 settings UI doesn't exist; revisit if 04-07 chooses differently
+- [Phase 04]: [Phase 04] 04-06: Resend is enqueue-only (D-56/D-57) — inserts a new outbox_jobs row for the same donation_id via the existing EnqueueOutboxJob path; relies entirely on 04-05's freeze-idempotency for the worker to reuse the frozen PDF, never re-numbers/re-renders.
+- [Phase 04]: [Phase 04] 04-06: donor_language (D-55) captured on create/edit, defaults 'th', frozen at create-time like other snapshot fields (D-43 precedent); resend route on checkerGroup (Checker/Admin), download route on the broader donationGroup so all staff roles can download.
+- [Phase 04]: [Phase 04] 04-06: Task 4 (Screen 3b human UI walkthrough, checkpoint:human-verify) DEFERRED to phase-end /gsd-verify-work by explicit user decision — code complete (Tasks 1-3, E2E-proven over real HTTP path); 04-06-SUMMARY.md documents exact walkthrough steps + credential prerequisites (Keycloak donnarec-frontend client secret, donnarec-web/.env.local, admin-test/maker-test/checker-test passwords).
+- [Phase 04]: 04-07: Added UpdateReceiptNumberConfig sqlc query (Rule 2) — the number-format tab had no save path before this plan; Phase 2 only ever built a read-only GetReceiptNumberConfig
+- [Phase 04]: 04-07: adminGroup now runs auth.ResolveAppUser (mirrors donationGroup) so settings Save/UploadImage can set updated_by to the acting admin's resolved users.id, never the raw Keycloak subject
+- [Phase 04]: 04-07: settings Preview/PreviewPDF reuse the EXACT SAME receiptsStore and pdfRenderer instances the outbox worker (04-05) uses — not new ones — so preview structurally cannot run through a second, less-sandboxed rendering path (D-58/D-61)
+- [Phase ?]: 04-08: Admin settings route is /admin/settings (plan's file path); Admin gating is a client UX hint only, Go RequireRoles(RoleAdmin) remains the real authority
+- [Phase 04]: 04-08: TemplateEditor.tsx split into TemplateEditorFields + TemplateLivePreview so the live preview persists across all four tabs, not just the template tab
+- [Phase 04]: 04-08: TH Sarabun New font remains unsourced (same open licensing item as backend) — preview iframe falls back to Google-Fonts Sarabun until public/fonts/THSarabunNew.woff2 is provided
+- [Phase 04]: [Phase 04] Code-review fixes (04-REVIEW.md): CR-01/CR-02 (blockers) and WR-01/02/04/05/06/07 fixed with RED/GREEN tests; WR-03 (deduction_multiplier frozen-at-approval) documented as a known limitation rather than reworking the Approve transaction — see 04-REVIEW-FIXES-SUMMARY.md
 
 ### Pending Todos
 
@@ -105,6 +137,10 @@ Phase 3 integration-gate remediation (blocks marking Phase 3 Complete):
 7. [ ] (Optional) wider auth/RBAC/wiring seam audit before formally re-closing Phase 3.
 
 Once item 5 passes, Phase 3 integration gate (ROADMAP criterion 6) is met → Phase 3 can be re-marked Complete.
+
+Phase 4 deferred UAT (blocks marking Phase 4 Complete — Conventions integration-test gate):
+
+1. [ ] 04-06 Task 4 — Screen 3b human UI walkthrough (EmailDeliveryPanel status/recipient/attempts, resend re-enqueue with unchanged receipt_no, download PDF renders Thai/English, Maker sees Download but not Resend). DEFERRED by explicit user decision to phase-end `/gsd-verify-work`. Code (Tasks 1-3) complete and E2E-proven over the real HTTP path (commits 6f9ad34, d09419d, 743389c, 7264491, 3659dbf, 2173be9). Full walkthrough steps + credential prerequisites (Keycloak `donnarec-frontend` confidential client secret, `donnarec-web/.env.local`, admin-test/maker-test/checker-test passwords) documented in `.planning/phases/04-receipt-pdf-email-delivery-outbox-worker/04-06-SUMMARY.md` under "Deferred: Task 4 Human UI Walkthrough".
 
 ### Blockers/Concerns
 
@@ -124,6 +160,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T00:07:17.666Z
-Stopped at: Completed 03-13-PLAN.md (create/edit/cancel/reissue donation flows migrated to BFF + TanStack; E2E create+cancel over the production router)
-Resume file: None
+Last session: 2026-07-04T13:06:47.282Z
+Stopped at: Completed Phase 04 code-review fixes (04-REVIEW.md): CR-01, CR-02, WR-01, WR-02, WR-04, WR-05, WR-06, WR-07 fixed; WR-03 documented as known limitation
+Resume file: 
+None

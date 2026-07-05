@@ -45,6 +45,38 @@ var ErrUnsupportedFileType = errors.New("storage: unsupported file type — only
 // ErrFileTooLarge is returned when a slip file exceeds the maximum allowed size (10 MB).
 var ErrFileTooLarge = errors.New("storage: file exceeds maximum allowed size of 10 MB")
 
+// maxTemplateImageSize is the maximum allowed brand-image size for the Phase 4 receipt
+// template settings store: 2 MB (D-58, letterhead/seal/signature/watermark uploads).
+// Deliberately smaller than maxSlipSize (10 MB) — these are small raster brand assets,
+// not donor-submitted documents (04-UI-SPEC.md "Image upload rejected" copy: "ไม่เกิน 2 MB").
+const maxTemplateImageSize = 2 << 20
+
+// allowedTemplateImageMIMETypes is the set of content types accepted for receipt
+// template brand-image uploads (letterhead/seal/signature/watermark). Deliberately
+// narrower than allowedMIMETypes (slips) — NO application/pdf, since every brand asset
+// is rendered as an <img> tag in the receipt HTML template (D-58).
+// Checked against magic-byte detection — not the caller-provided Content-Type header.
+var allowedTemplateImageMIMETypes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+}
+
+// ErrUnsupportedTemplateImageType is returned when a template brand-image upload has an
+// unsupported MIME type (anything other than image/jpeg or image/png, including
+// application/pdf which IS allowed for slips but not here). Magic-byte detection is used,
+// never the Content-Type header or filename extension (D-58, mirrors T-03-14).
+//
+// Deliberately a DISTINCT sentinel from ErrUnsupportedFileType: that error's message text
+// names "application/pdf" as an allowed type (correct for slips, wrong for brand images),
+// and reusing it here would produce a factually incorrect error message.
+var ErrUnsupportedTemplateImageType = errors.New("storage: unsupported file type — only image/jpeg, image/png are allowed for template images")
+
+// ErrTemplateImageTooLarge is returned when a template brand-image upload exceeds the
+// maximum allowed size (2 MB). Deliberately a DISTINCT sentinel from ErrFileTooLarge: that
+// error's message text names "10 MB" (the slip cap), which would be factually incorrect
+// for the 2 MB template-image cap.
+var ErrTemplateImageTooLarge = errors.New("storage: template image exceeds maximum allowed size of 2 MB")
+
 // StorageClient wraps a MinIO client with the donnarec slip-storage contract.
 // Use NewStorageClient to construct.
 type StorageClient struct {
@@ -102,6 +134,39 @@ func validateSlip(r io.Reader, size int64) (*mimetype.MIME, []byte, error) {
 	return detected, buf[:n], nil
 }
 
+// validateTemplateImage checks declared size and magic bytes of a brand-image upload
+// (letterhead/seal/signature/watermark) against the narrower image-only allowlist and the
+// smaller 2 MB cap (D-58). Mirrors validateSlip's shape exactly — see its comment for the
+// buffering/detection rationale.
+func validateTemplateImage(r io.Reader, size int64) (*mimetype.MIME, []byte, error) {
+	if size > maxTemplateImageSize {
+		return nil, nil, ErrTemplateImageTooLarge
+	}
+
+	buf := make([]byte, 512)
+	n, err := io.ReadFull(r, buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, nil, fmt.Errorf("storage: read template image header: %w", err)
+	}
+
+	detected := mimetype.Detect(buf[:n])
+
+	if !allowedTemplateImageMIMETypes[detected.String()] {
+		return nil, nil, ErrUnsupportedTemplateImageType
+	}
+
+	return detected, buf[:n], nil
+}
+
+// ValidateTemplateImage validates the MIME type (via magic bytes) and declared size of a
+// receipt template brand-image upload (letterhead/seal/signature/watermark, D-58).
+//
+// Exported for unit testing without a live MinIO client. PutTemplateImage calls this
+// internally. Mirrors ValidateSlip's exported-wrapper shape.
+func ValidateTemplateImage(r io.Reader, size int64) (*mimetype.MIME, []byte, error) {
+	return validateTemplateImage(r, size)
+}
+
 // ValidateSlip validates the MIME type (via magic bytes) and declared size of a slip.
 // Returns the detected MIME type, the consumed header bytes (for io.MultiReader reassembly),
 // and any error.
@@ -144,6 +209,40 @@ func (s *StorageClient) PutSlip(ctx context.Context, r io.Reader, size int64, do
 	return objectKey, detected.String(), nil
 }
 
+// PutTemplateImage validates (magic-byte + 2 MB cap, D-58) and uploads a receipt template
+// brand-image (letterhead/seal/signature/watermark) to the client's bound bucket — in
+// production this is the SAME receipts bucket the outbox worker (04-05) reads frozen PDFs
+// and branding assets from (04-05-SUMMARY.md decision: "template branding assets fetched
+// via the same receipts bucket/ReceiptsStore as frozen PDFs"), so an object key written
+// here is immediately readable by GetObject.
+//
+// objectKey format: "template-assets/{slot}/{uuid}{ext}" — slot is the caller-validated
+// brand-image name (letterhead/seal/signature/watermark); the UUID prevents guessing
+// (mirrors PutSlip's T-03-16 rationale).
+//
+// Returns (objectKey, mimeType, error). mimeType is the magic-byte-detected MIME string
+// (e.g. "image/png") — callers do not need it today but it mirrors PutSlip's contract.
+func (s *StorageClient) PutTemplateImage(ctx context.Context, r io.Reader, size int64, slot string) (string, string, error) {
+	detected, head, err := validateTemplateImage(r, size)
+	if err != nil {
+		return "", "", err
+	}
+
+	remaining := io.LimitReader(r, maxTemplateImageSize-int64(len(head))+1)
+	combined := io.MultiReader(bytes.NewReader(head), remaining)
+
+	objectKey := fmt.Sprintf("template-assets/%s/%s%s", slot, uuid.NewString(), detected.Extension())
+
+	_, err = s.client.PutObject(ctx, s.bucket, objectKey, combined, size, minio.PutObjectOptions{
+		ContentType: detected.String(),
+	})
+	if err != nil {
+		return "", "", fmt.Errorf("storage: put template image object: %w", err)
+	}
+
+	return objectKey, detected.String(), nil
+}
+
 // PresignedGet returns a short-lived presigned URL for reading an object (T-03-16).
 // TTL should be 15 minutes for UI display (UI-SPEC Screen 5).
 // The URL is time-limited and the key is not publicly guessable (contains UUID).
@@ -153,4 +252,38 @@ func (s *StorageClient) PresignedGet(ctx context.Context, objectKey string, ttl 
 		return "", fmt.Errorf("storage: presign slip get: %w", err)
 	}
 	return u.String(), nil
+}
+
+// PutObject writes arbitrary bytes to the client's bound bucket under the given
+// object key (Phase 4, D-56 — frozen receipt PDFs). Unlike PutSlip, PutObject
+// performs no magic-byte/size validation: callers are trusted internal callers
+// (the outbox worker), not raw end-user uploads, so the validate-then-upload
+// contract that protects slip uploads does not apply here.
+func (s *StorageClient) PutObject(ctx context.Context, objectKey string, data []byte, contentType string) error {
+	_, err := s.client.PutObject(ctx, s.bucket, objectKey, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+	if err != nil {
+		return fmt.Errorf("storage: put object: %w", err)
+	}
+	return nil
+}
+
+// GetObject reads the full bytes of an object from the client's bound bucket.
+// Used by the outbox worker (04-05) to reuse a previously frozen receipt PDF
+// (D-56 freeze idempotency — resend never re-renders) and to fetch template
+// branding images (letterhead/seal/signature/watermark) referenced by
+// receipt_template_config.
+func (s *StorageClient) GetObject(ctx context.Context, objectKey string) ([]byte, error) {
+	obj, err := s.client.GetObject(ctx, s.bucket, objectKey, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("storage: get object: %w", err)
+	}
+	defer obj.Close()
+
+	data, err := io.ReadAll(obj)
+	if err != nil {
+		return nil, fmt.Errorf("storage: read object: %w", err)
+	}
+	return data, nil
 }

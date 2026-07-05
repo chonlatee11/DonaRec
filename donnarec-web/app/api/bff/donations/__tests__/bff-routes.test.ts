@@ -32,6 +32,8 @@ const { GET: piiGET } = await import("../[id]/pii/route");
 const { POST: approvePOST } = await import("../[id]/approve/route");
 const { POST: returnPOST } = await import("../[id]/return/route");
 const { POST: rejectPOST } = await import("../[id]/reject/route");
+const { POST: resendPOST } = await import("../[id]/resend/route");
+const { GET: receiptPdfGET } = await import("../[id]/receipt-pdf/route");
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(body === null ? null : JSON.stringify(body), {
@@ -192,6 +194,80 @@ describe("BFF donation [id] routes — trust boundary", () => {
 
     expect(res.status).toBe(200);
     expect(body.data.slip_url).toBeNull();
+  });
+
+  it("forwards a Bearer token to the Go API on resend (plan 04-06)", async () => {
+    mockGetServerSession.mockResolvedValue({ accessToken: "tok" });
+    mockFetch.mockResolvedValue(
+      jsonResponse({ data: { donation_id: "1", status: "resend_enqueued" } }, 200)
+    );
+
+    const req = makeRequest(
+      "POST",
+      "http://localhost/api/bff/donations/1/resend"
+    );
+    const res = await resendPOST(req, makeParams("1"));
+
+    expect(res.status).toBe(200);
+    const [calledUrl, calledInit] = mockFetch.mock.calls[0] as [
+      string,
+      RequestInit
+    ];
+    expect(calledUrl).toContain("/api/donations/1/resend");
+    expect(
+      (calledInit.headers as Record<string, string>).Authorization
+    ).toBe("Bearer tok");
+  });
+
+  it("passes through Go 409 receipt_not_ready on resend unchanged (plan 04-06)", async () => {
+    mockGetServerSession.mockResolvedValue({ accessToken: "tok" });
+    mockFetch.mockResolvedValue(jsonResponse({ error: "receipt_not_ready" }, 409));
+
+    const req = makeRequest(
+      "POST",
+      "http://localhost/api/bff/donations/1/resend"
+    );
+    const res = await resendPOST(req, makeParams("1"));
+
+    expect(res.status).toBe(409);
+  });
+
+  it("forwards a Bearer token to the Go API on receipt-pdf download (plan 04-06)", async () => {
+    mockGetServerSession.mockResolvedValue({ accessToken: "tok" });
+    mockFetch.mockResolvedValue(
+      jsonResponse({ data: { url: "https://minio.local/receipt.pdf" } }, 200)
+    );
+
+    const req = makeRequest(
+      "GET",
+      "http://localhost/api/bff/donations/1/receipt-pdf"
+    );
+    const res = await receiptPdfGET(req, makeParams("1"));
+    const body = (await res.json()) as { data: { url: string } };
+
+    expect(res.status).toBe(200);
+    expect(body.data.url).toBe("https://minio.local/receipt.pdf");
+    const [calledUrl, calledInit] = mockFetch.mock.calls[0] as [
+      string,
+      RequestInit
+    ];
+    expect(calledUrl).toContain("/api/donations/1/receipt-pdf");
+    expect(
+      (calledInit.headers as Record<string, string>).Authorization
+    ).toBe("Bearer tok");
+  });
+
+  it("returns 401 and does NOT call the Go API on receipt-pdf without a session (plan 04-06)", async () => {
+    mockGetServerSession.mockResolvedValue(null);
+
+    const req = makeRequest(
+      "GET",
+      "http://localhost/api/bff/donations/1/receipt-pdf"
+    );
+    const res = await receiptPdfGET(req, makeParams("1"));
+
+    expect(res.status).toBe(401);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("never leaks the access token into any route response body", async () => {

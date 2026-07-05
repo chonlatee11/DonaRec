@@ -17,6 +17,7 @@
 //	ErrUserNotProvisioned  → 403 Forbidden (defensive: identity resolution now happens in
 //	                         auth.ResolveAppUser middleware, which 403s before the handler runs;
 //	                         these switch arms remain as defense-in-depth)
+//	ErrReceiptNotReady     → 409 Conflict (Resend/DownloadReceipt — worker has not frozen the PDF yet)
 //	default                → 500 (log donation_id + operation only — Pattern C)
 package donation
 
@@ -765,6 +766,117 @@ func (h *DonationHandler) RevealPII(c *gin.Context) {
 
 	// audit_after: AuditMiddleware captures the response for the immutable trail (Pattern D).
 	c.Set("audit_after", resp)
+	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// Resend re-enqueues an outbox issue_receipt job for an already-issued donation so the
+// worker resends the ALREADY-FROZEN receipt PDF via email (D-56/D-57, FR-27).
+// POST /api/donations/:id/resend
+//
+// Checker and Admin only (checkerGroup route guard + service-layer defense-in-depth).
+// Resend never allocates a new receipt number and never re-renders the PDF.
+// ErrForbidden         → 403 Forbidden
+// ErrInvalidTransition → 409 Conflict (donation is not currently 'issued')
+// ErrReceiptNotReady   → 409 Conflict (worker has not yet frozen the PDF)
+// ErrNotFound          → 404 Not Found
+func (h *DonationHandler) Resend(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	id := c.Param("id")
+
+	// app_user_id: caller's resolved users.id, set by auth.ResolveAppUser middleware
+	// (created-by-fk-mismatch). Passed explicitly to the service (Pattern A).
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	if err := h.svc.Resend(c.Request.Context(), id, appUserID, claims); err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		case errors.Is(err, ErrInvalidTransition):
+			c.JSON(http.StatusConflict, gin.H{"error": "status_conflict"})
+		case errors.Is(err, ErrReceiptNotReady):
+			c.JSON(http.StatusConflict, gin.H{"error": "receipt_not_ready"})
+		case errors.Is(err, ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		default:
+			// Pattern C: log donation_id only — no PII
+			h.logger.Error("failed to resend receipt email",
+				zap.String("operation", "ResendReceipt"),
+				zap.String("donation_id", id),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "resend_failed"})
+		}
+		return
+	}
+
+	resp := gin.H{"donation_id": id, "status": "resend_enqueued"}
+	c.Set("audit_after", resp)
+	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// DownloadReceipt returns a short-lived presigned URL for the donation's frozen receipt
+// PDF (FR-28). GET /api/donations/:id/receipt-pdf
+//
+// Any staff role (Maker/Checker/Admin) may download — donationGroup route guard only,
+// no additional role check (D-57 "staff download always", mirrors RevealPII's routing).
+// ErrReceiptNotReady → 409 Conflict (worker has not yet frozen the PDF)
+// ErrNotFound        → 404 Not Found
+func (h *DonationHandler) DownloadReceipt(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	id := c.Param("id")
+
+	url, err := h.svc.DownloadReceipt(c.Request.Context(), id, claims)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrReceiptNotReady):
+			c.JSON(http.StatusConflict, gin.H{"error": "receipt_not_ready"})
+		case errors.Is(err, ErrNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "not_found"})
+		default:
+			// Pattern C: log donation_id only — no PII, no object key
+			h.logger.Error("failed to presign receipt download",
+				zap.String("operation", "DownloadReceipt"),
+				zap.String("donation_id", id),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "download_failed"})
+		}
+		return
+	}
+
+	resp := gin.H{"url": url}
+	c.Set("audit_after", gin.H{"donation_id": id, "action": "receipt_download"})
 	c.JSON(http.StatusOK, gin.H{"data": resp})
 }
 

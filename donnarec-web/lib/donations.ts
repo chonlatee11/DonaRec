@@ -24,6 +24,24 @@ export interface ReviewHistoryEntry {
   acted_at: string; // ISO datetime
 }
 
+/** Document language driving PDF/email rendering (D-55, FR-23) */
+export type DonorLanguage = "th" | "en";
+
+/**
+ * EmailDeliveryInfo — the latest email send attempt for an issued/cancelled
+ * donation's receipt PDF (Screen 3b, FR-27). Null on DonationDetail when the
+ * worker (04-05) has not recorded any send attempt yet — NOT a failure state,
+ * just "not yet processed".
+ */
+export interface EmailDeliveryInfo {
+  status: "sent" | "failed" | "no_email";
+  sent_to?: string | null;
+  attempts: number;
+  provider_message_id?: string | null;
+  last_error?: string | null;
+  last_attempt_at: string; // ISO datetime
+}
+
 /** Summarised donation row used on the list screen (Screen 1) */
 export interface DonationSummary {
   id: string;
@@ -66,6 +84,12 @@ export interface DonationDetail extends DonationSummary {
   can_reject: boolean;
   /** True for Checker and Admin roles (T-03-32: reveal is audited server-side) */
   can_reveal_pii: boolean;
+  /** Frozen document language driving PDF/email rendering (D-55, FR-23) */
+  donor_language: DonorLanguage;
+  /** Non-null once the outbox worker (04-05) has frozen the receipt PDF (D-56) */
+  receipt_pdf_object_key: string | null;
+  /** Latest email send attempt (Screen 3b) — see EmailDeliveryInfo doc comment */
+  email_delivery: EmailDeliveryInfo | null;
 }
 
 export interface DonationListResponse {
@@ -222,6 +246,18 @@ function mapBffError(status: number, body: Record<string, unknown>): ApiError {
         details: body,
       };
     case 409:
+      // Resend/download before the worker (04-05) has frozen the PDF (D-56, FR-27/28)
+      // — UI-SPEC "PDF not yet available for download" copy, distinct from the
+      // generic "already actioned" conflict message below.
+      if (body?.error === "receipt_not_ready") {
+        return {
+          type: "statusConflict",
+          status: 409,
+          message:
+            "ยังไม่มีไฟล์ PDF ให้ดาวน์โหลด — กรุณารอให้ระบบสร้างใบเสร็จให้เสร็จสิ้นก่อน",
+          details: body,
+        };
+      }
       return {
         type: "statusConflict",
         status: 409,
@@ -417,6 +453,32 @@ export async function revealPII(id: string): Promise<{ national_id: string }> {
   return bffClientFetch<{ national_id: string }>(`/api/bff/donations/${id}/pii`);
 }
 
+/**
+ * resendReceipt — CLIENT-side mutation via the BFF (D-56/D-57, FR-27, plan 04-06).
+ * Checker/Admin only (Go re-enforces RBAC — this is a proxy, not the authority).
+ * Re-enqueues an outbox job for the ALREADY-FROZEN PDF: never allocates a new
+ * receipt number, never re-renders. 409 receipt_not_ready if the worker has not
+ * frozen the PDF yet.
+ */
+export async function resendReceipt(
+  id: string
+): Promise<{ donation_id: string; status: string }> {
+  return bffClientFetch<{ donation_id: string; status: string }>(
+    `/api/bff/donations/${id}/resend`,
+    { method: "POST" }
+  );
+}
+
+/**
+ * downloadReceipt — CLIENT-side fetcher for the frozen receipt PDF's short-lived
+ * presigned URL (FR-28, plan 04-06). Any staff role (Maker/Checker/Admin) may
+ * call this — D-57 "staff download always". 409 receipt_not_ready if the worker
+ * has not frozen the PDF yet.
+ */
+export async function downloadReceipt(id: string): Promise<{ url: string }> {
+  return bffClientFetch<{ url: string }>(`/api/bff/donations/${id}/receipt-pdf`);
+}
+
 // ---------------------------------------------------------------------------
 // Request types (03-08 additions)
 // ---------------------------------------------------------------------------
@@ -435,6 +497,8 @@ export interface CreateDonationRequest {
   consent_given: boolean;
   /** e.g. "1.0" — shown in ConsentBlock per D-49 */
   consent_text_version?: string;
+  /** D-55/FR-23: document language for PDF/email; omitted defaults to "th" server-side */
+  donor_language?: DonorLanguage;
 }
 
 /**
@@ -458,6 +522,8 @@ export interface UpdateDraftRequest {
   note?: string;
   consent_given: boolean;
   consent_text_version?: string;
+  /** D-55/FR-23: document language for PDF/email; omitted defaults to "th" server-side */
+  donor_language?: DonorLanguage;
 }
 
 export interface SlipViewResponse {

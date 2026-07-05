@@ -49,6 +49,26 @@ SELECT separator, running_no_padding, year_format, prefix
 FROM receipt_number_config
 LIMIT 1;
 
+-- name: UpdateReceiptNumberConfig :exec
+-- Update the single number-format config row (Admin-only, Phase 4 D-58 settings
+-- UI — CONTEXT.md canonical_refs note: consolidate number-format editing into
+-- the same Admin settings screen as the template config, rather than a
+-- separate page). Frozen ledger entries (D-42) are NEVER affected by this —
+-- only the NEXT allocation picks up the new format. Callers MUST validate
+-- separator/prefix against the same safe-character allowlist
+-- receiptno.formatReceiptNo enforces at allocation time (mirrored in
+-- internal/settings/service.go) BEFORE calling this, so a bad save cannot
+-- silently corrupt the next issuance instead of failing fast at save-time.
+UPDATE receipt_number_config
+SET
+    separator          = @separator,
+    running_no_padding = @running_no_padding,
+    year_format        = @year_format,
+    prefix             = @prefix,
+    updated_at         = now(),
+    updated_by         = @updated_by
+WHERE id = true;
+
 -- name: InsertReceiptNumberLedger :one
 -- Record the allocated receipt number in the append-only ledger (D-37, D-42).
 -- allocated_at uses DB-side now() for clock consistency across application instances.

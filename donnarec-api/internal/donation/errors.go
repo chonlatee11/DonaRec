@@ -60,4 +60,11 @@ var (
 	// created-by-fk-mismatch).
 	// HTTP mapping: 403 Forbidden.
 	ErrUserNotProvisioned = errors.New("donation: authenticated identity is not a provisioned application user")
+
+	// ErrReceiptNotReady is returned by Resend and DownloadReceipt when the donation's
+	// receipt PDF has not yet been frozen to object storage by the outbox worker
+	// (donations.receipt_pdf_object_key is still nil) — the worker has not finished
+	// processing the issue_receipt job yet (D-56, FR-27/28).
+	// HTTP mapping: 409 Conflict.
+	ErrReceiptNotReady = errors.New("donation: receipt PDF is not yet available — the worker has not finished processing")
 )

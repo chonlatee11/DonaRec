@@ -1,9 +1,9 @@
 ---
 slug: fe-be-audience-mismatch
-status: awaiting_human_verify
+status: resolved
 trigger: "Back-office auth chain never wired: Keycloak tokens issued to the donnarec-frontend client carry aud=account, but the Go backend's OIDC middleware enforces aud must include donnarec-backend, so every UI->API call returns 401 invalid_token. Additionally the frontend NextAuth config requires a confidential client (KEYCLOAK_CLIENT_SECRET) but realm client donnarec-frontend is public, and no web .env.local exists. Blocks the entire Phase 3 UI walkthrough and real back-office usage."
 created: 2026-07-02
-updated: 2026-07-02T08:35Z
+updated: 2026-07-05T00:00:00Z
 phase: 03-donation-lifecycle-maker-checker-issuance
 tdd_mode: true
 goal: find_and_fix
@@ -147,3 +147,16 @@ next_action: Add Audience protocol mapper on donnarec-frontend (live via admin A
       to match via admin API)
     - donnarec-web/.env.local (new, gitignored — not a git change)
     - donnarec-web/.env.example (new, untracked — ready to commit)
+
+## Human-verify closure (2026-07-05)
+
+Marked **resolved**. The deferred browser OAuth/PKCE walkthrough was subsequently
+exercised and passed during Phase 3 UI UAT and Phase 4 UAT (Screen 3b + Screen 6,
+2/2 walkthroughs — see commits `3d808a3`, `03157c1`). A real Keycloak-issued token
+now authenticates against the Go API end-to-end through the browser, which is only
+possible if G1 (audience mapper), G2 (confidential client), and G3 (web env) are all
+in effect — confirming this session's fix in the live stack.
+
+The separate out-of-scope RBAC AND-bug flagged here (`RequireRoles` AND-vs-OR on
+`/api/donations`) was also resolved before Phase 3/4 UAT could pass; see CLAUDE.md
+CONVENTIONS integration-test gate note listing all three Phase-3 seam bugs as fixed.

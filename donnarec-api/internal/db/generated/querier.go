@@ -18,6 +18,26 @@ type Querier interface {
 	// for 'cancelled' status — preserving the sequence without a gap (D-47).
 	// cancel_reason is mandatory at service layer before this call.
 	CancelDonation(ctx context.Context, arg CancelDonationParams) error
+	// Atomically claim exactly one pending job that is due for (re)processing,
+	// race-free across N worker instances/goroutines (04-RESEARCH Pattern 1, verified).
+	// Single round-trip UPDATE...WHERE id=(SELECT...FOR UPDATE SKIP LOCKED) — no
+	// separate SELECT-then-UPDATE step that could race between two workers.
+	// next_attempt_at <= now() excludes jobs still in their backoff window (D-57).
+	//
+	// WR-05 fix (04-REVIEW.md): status = 'pending' ONLY — 'failed' is NEVER
+	// claimable here. MarkOutboxJobFailed's own CASE logic already treats
+	// 'failed' as terminal (a retriable failure with attempts remaining stays
+	// 'pending'; only a truly exhausted job becomes 'failed'), so a job that
+	// reaches 'failed' must stay dead-lettered forever — staff-triggered resend
+	// (which enqueues a brand-new outbox_jobs row, internal/donation/service.go
+	// Resend) is the only way to retry it. Previously this WHERE also matched
+	// 'failed' (relying solely on attempts < @max_attempts to keep it
+	// unclaimable), which silently "resurrected" a dead-lettered job the moment
+	// an operator raised WORKER_MAX_ATTEMPTS after the fact.
+	//
+	// Returns pgx.ErrNoRows when there is no eligible job — caller treats this as
+	// "nothing to do this tick", not an error.
+	ClaimNextOutboxJob(ctx context.Context, maxAttempts int32) (ClaimNextOutboxJobRow, error)
 	// Count donations matching the SAME filter predicate as SearchDonations (D-R2).
 	// Used to compute `total` for the pagination envelope — NEVER derived from len(items),
 	// since a page only contains up to @limit_n rows (T-09 mitigation: real COUNT).
@@ -81,6 +101,11 @@ type Querier interface {
 	// until the current transaction releases this lock (Pitfall 2 mitigation, D-17).
 	// Returns pgx.ErrNoRows if audit_log is empty (caller sets prevHash = "GENESIS").
 	GetLastAuditRowForUpdate(ctx context.Context) (GetLastAuditRowForUpdateRow, error)
+	// Returns the most recent send attempt for a donation — drives the delivery
+	// status panel on the donation detail screen (Screen 3b, FR-27).
+	// Returns pgx.ErrNoRows if no email has ever been attempted for this donation
+	// (e.g. donor has no email address — caller distinguishes this from a failure).
+	GetLatestEmailDeliveryForDonation(ctx context.Context, donationID pgtype.UUID) (EmailDelivery, error)
 	// Read the number format config row (called within the same allocation transaction — D-32).
 	// Reading inside the tx ensures the allocator sees config consistent with its own snapshot;
 	// the formatted snapshot is frozen in the ledger at this moment (D-42).
@@ -89,6 +114,15 @@ type Querier interface {
 	// replaces/replaced_by self-FK pointers (D-50) into nested objects for the detail
 	// response (D-R3 detail contract).
 	GetReceiptRefByID(ctx context.Context, id pgtype.UUID) (GetReceiptRefByIDRow, error)
+	// internal/db/queries/settings.sql
+	// sqlc queries for Phase 4: receipt template / branding config store
+	// (D-58 full config store + admin UI, D-59 global 1x/2x deduction).
+	// Single-row table (receipt_template_config, id BOOLEAN PRIMARY KEY DEFAULT
+	// true) — same single-row CRUD shape as internal/db/queries/receiptno.sql's
+	// GetReceiptNumberConfig (Phase 2).
+	// Read the single template/branding config row. Called by the worker (04-05,
+	// to render receipts) and the settings API (04-07, to populate the editor).
+	GetReceiptTemplateConfig(ctx context.Context) (GetReceiptTemplateConfigRow, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	GetUserByKeycloakSubject(ctx context.Context, keycloakSubject string) (User, error)
 	// Returns a user's display_name by users.id — used to enrich the donation detail
@@ -107,6 +141,15 @@ type Querier interface {
 	// The losing session then proceeds to LockCounterForUpdate (row now exists) and blocks
 	// until the winning session commits, ensuring correct serialization (D-41, Pitfall 1).
 	InitCounterRow(ctx context.Context, fiscalYear int32) error
+	// internal/db/queries/email_delivery.sql
+	// sqlc queries for Phase 4: email delivery status tracking (D-57, FR-27).
+	// One row is inserted per send attempt (auto-retry AND manual resend both
+	// insert a new row — never overwrite a prior attempt's record), so the full
+	// delivery history for a donation is reconstructable for staff/audit.
+	// Record one email send attempt (worker auto-retry or staff-triggered resend).
+	// provider_message_id is "" for the dev/local EmailSender (D-60); populated
+	// once a real provider is wired.
+	InsertEmailDelivery(ctx context.Context, arg InsertEmailDeliveryParams) (InsertEmailDeliveryRow, error)
 	// Record the allocated receipt number in the append-only ledger (D-37, D-42).
 	// allocated_at uses DB-side now() for clock consistency across application instances.
 	// The UNIQUE(fiscal_year, running_no) backstop fires here if a logic bug produces a
@@ -174,6 +217,42 @@ type Querier interface {
 	//
 	// Returns pgx.ErrNoRows if the donation does not exist (caller maps to 404).
 	LockDonationForUpdate(ctx context.Context, id pgtype.UUID) (LockDonationForUpdateRow, error)
+	// Mark a claimed job as successfully processed (render + store + email all
+	// completed). Terminal state — a done job is never reclaimed.
+	MarkOutboxJobDone(ctx context.Context, id int64) error
+	// Record a failed processing attempt and either re-arm the job for retry
+	// (status stays 'pending', next_attempt_at pushed out per the caller's backoff
+	// schedule — D-57 Pitfall 5: 1m/5m/15m/1h/4h) or, once attempts reaches
+	// @max_attempts, transition to the terminal 'failed' state (dead-letter — no
+	// further auto-retry; staff see the failure and can resend manually, FR-27).
+	MarkOutboxJobFailed(ctx context.Context, arg MarkOutboxJobFailedParams) error
+	// CR-01 fix (04-REVIEW.md): a job that was claimed (status='processing') but
+	// never reached MarkOutboxJobDone/MarkOutboxJobFailed — because the worker
+	// process was killed, panicked (see CR-02), OOM-killed, or evicted between
+	// the claim and the completion write — would otherwise stay 'processing'
+	// forever: ClaimNextOutboxJob's own filter (status = 'pending') deliberately
+	// excludes 'processing' rows so two workers never double-process the same
+	// job, but that same exclusion means a truly abandoned job had no way back
+	// into the claimable set.
+	//
+	// Any row whose updated_at is older than @cutoff (now() - StuckJobTimeout,
+	// computed in Go so the threshold is configurable via WORKER_STUCK_JOB_TIMEOUT)
+	// is reclaimed — safe because updated_at is bumped by BOTH the claim
+	// (ClaimNextOutboxJob) and the completion writes (MarkOutboxJobDone/Failed), so
+	// a row this old can only mean the job is genuinely abandoned, never a
+	// healthy in-flight render/email still within its normal ~2-3s budget
+	// (NFR-07) — the default timeout is minutes, several orders of magnitude
+	// above that budget.
+	//
+	// BW-01 fix (04-REVIEW-PRESHIP.md): the reclaim MUST increment attempts and
+	// apply the SAME terminal CASE as MarkOutboxJobFailed. ProcessOnceSafe (CR-02)
+	// recovers a panic and leaves the job 'processing' WITHOUT incrementing
+	// attempts; a deterministically-panicking job would otherwise be reclaimed to
+	// 'pending' and retried forever, never dead-lettering — defeating the
+	// bounded-retry invariant. Incrementing here bounds the panic+reclaim path
+	// exactly like the returned-error path: once attempts reaches @max_attempts the
+	// job transitions to terminal 'failed' (dead-letter) instead of 'pending'.
+	ReclaimStuckOutboxJobs(ctx context.Context, arg ReclaimStuckOutboxJobsParams) (int64, error)
 	// Checker permanently rejects pending_review → rejected with a mandatory reason (D-45, FR-12).
 	// 'rejected' is a terminal state — no further transitions are allowed.
 	// review_reason is enforced as non-empty at service layer before this call.
@@ -191,6 +270,11 @@ type Querier interface {
 	// (D-R2 remediation — list envelope carries created_by/created_by_id).
 	// Pagination: caller passes @limit_n rows starting at @offset_n.
 	SearchDonations(ctx context.Context, arg SearchDonationsParams) ([]SearchDonationsRow, error)
+	// Record the frozen receipt PDF's MinIO object key after the worker (04-05)
+	// renders and stores it (D-56, FR-24 immutability). Called exactly once per
+	// donation, outside the issuance transaction (worker's own commit) — resend
+	// (04-06) reads this same key and never re-renders.
+	SetReceiptPDFObjectKey(ctx context.Context, arg SetReceiptPDFObjectKeyParams) error
 	// Link a cancelled record to its reissued successor (D-50 Void & Reissue).
 	// Called after the replacement donation has been created and committed.
 	// Only updates the replaced_by pointer — no status change here.
@@ -210,6 +294,37 @@ type Querier interface {
 	// Checker-set fields (reviewed_by/at/reason) are NOT included here.
 	// PII columns accept ciphertext — re-encrypt at service layer before calling.
 	UpdateDraftDonation(ctx context.Context, arg UpdateDraftDonationParams) error
+	// Update the single number-format config row (Admin-only, Phase 4 D-58 settings
+	// UI — CONTEXT.md canonical_refs note: consolidate number-format editing into
+	// the same Admin settings screen as the template config, rather than a
+	// separate page). Frozen ledger entries (D-42) are NEVER affected by this —
+	// only the NEXT allocation picks up the new format. Callers MUST validate
+	// separator/prefix against the same safe-character allowlist
+	// receiptno.formatReceiptNo enforces at allocation time (mirrored in
+	// internal/settings/service.go) BEFORE calling this, so a bad save cannot
+	// silently corrupt the next issuance instead of failing fast at save-time.
+	UpdateReceiptNumberConfig(ctx context.Context, arg UpdateReceiptNumberConfigParams) error
+	// Update the single config row (Admin-only, D-58). updated_by is set to the
+	// acting admin's app-user id for the audit trail (Pattern D, FR-13).
+	// Callers MUST validate template_html/template_html_en parse successfully via
+	// html/template.Parse BEFORE calling this (surfaces as "Template save failed"
+	// per UI-SPEC) — this query does not validate template syntax itself.
+	UpdateReceiptTemplateConfig(ctx context.Context, arg UpdateReceiptTemplateConfigParams) error
+	// BW-04 fix (04-REVIEW-PRESHIP.md): the "save all tabs" write path
+	// (SaveSettings) updates ONLY the admin-editable text/compliance fields and
+	// NEVER the image object keys. Those keys are owned solely by the upload
+	// endpoint (UpdateTemplateImageKey) — writing them from the settings PUT body
+	// would let a stale/omitted key silently null or revert a freshly-uploaded
+	// asset. Deliberately omits letterhead/seal/signature/watermark_object_key so
+	// their current DB values are left untouched.
+	UpdateReceiptTemplateContent(ctx context.Context, arg UpdateReceiptTemplateContentParams) error
+	// BW-03 fix (04-REVIEW-PRESHIP.md): persist ONE brand-image slot key with a
+	// single atomic per-column write, replacing SaveTemplateImage's former
+	// read-whole-row / mutate-one-slot / write-whole-row path (which had no
+	// tx/lock and lost a sibling slot's fresh key under concurrent uploads). Each
+	// non-target slot column is set to its OWN current value (read in the same
+	// statement), so a concurrent write to a different slot is never clobbered.
+	UpdateTemplateImageKey(ctx context.Context, arg UpdateTemplateImageKeyParams) error
 }
 
 var _ Querier = (*Queries)(nil)
