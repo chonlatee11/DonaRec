@@ -5,9 +5,10 @@ milestone_name: milestone
 current_phase: 5
 current_phase_name: e-Donation Export, Reports & Admin Settings
 status: "Phase 04 shipped — PR #4"
-stopped_at: Phase 5 context gathered
-last_updated: "2026-07-06T16:10:05.389Z"
-last_activity: 2026-07-05
+stopped_at: Phase 05 UI-SPEC approved
+last_updated: "2026-07-06T17:14:37.469Z"
+last_activity: 2026-07-06
+last_activity_desc: Phase 05 planning complete
 progress:
   total_phases: 6
   completed_phases: 4
@@ -31,7 +32,7 @@ Phase: 5 — e-Donation Export, Reports & Admin Settings
 Plan: Not started (no plans yet)
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 has one deferred human UI walkthrough (04-06 Task 4) pending phase-end /gsd-verify-work.
 Status: Phase 04 shipped — PR #4
-Last activity: 2026-07-05
+Last activity: 2026-07-06 — Phase 05 planning complete
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -160,7 +161,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T16:10:05.378Z
-Stopped at: Phase 5 context gathered
+Last session: 2026-07-06T16:20:06.407Z
+Stopped at: Phase 05 UI-SPEC approved
 Resume file: 
-.planning/phases/05-e-donation-export-reports-admin-settings/05-CONTEXT.md
+.planning/phases/05-e-donation-export-reports-admin-settings/05-UI-SPEC.md

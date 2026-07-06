@@ -306,7 +306,7 @@ Table (`AgingTable`, wraps the existing `DonationTable` column-definition patter
 | Column | Width | Notes |
 |--------|-------|-------|
 | ☑ (select) | 40px | shadcn `Checkbox`; header checkbox is tri-state (all/none/indeterminate) |
-| วันที่ออกใบเสร็จ | 120px | `issued_at`, BE calendar display |
+| วันที่ออกใบเสร็จ / วันอนุมัติ | 120px | source field `approved_at` (donations has no `issued_at` column), BE calendar display |
 | ชื่อผู้บริจาค | flexible | `donor_name` |
 | เลขที่ใบเสร็จ | 140px | `receipt_formatted`, `font-mono` |
 | เดดไลน์คีย์ | 140px | "5 {เดือนถัดจากเดือนออกใบเสร็จ}" per D-68, `font-mono` date |
@@ -341,7 +341,9 @@ nav item or route (D-71: no PII in this report, transparent to everyone).
 680px-capped donation form). Page heading "รายงานสรุปการบริจาค" (28px/600) at top.
 
 **Filter bar** (reuses the Calendar Popover date-range pattern):
-- Date range: ช่วงเวลา ตั้งแต่ / ถึง (two Calendar Popover fields, default: current fiscal year)
+- Date range (วันที่บริจาค): ช่วงเวลา ตั้งแต่ / ถึง (two Calendar Popover fields, default: current
+  fiscal year) — the range keys off the donation date (`donated_at`, A1 default basis), labeled
+  explicitly so the basis is visible to users
 - "แสดงรายงาน" (accent) — explicit apply button, consistent with Screen 1's Search/Clear
   pattern (not a live-update-on-change filter, to avoid re-querying aggregates on every
   keystroke/date-pick)

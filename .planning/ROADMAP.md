@@ -171,12 +171,29 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 7 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 05-01-PLAN.md — Wave 1: shared data + file-writer foundation (migrations 000013/000014, sqlc export/aging/report/config queries, excelize, stream-only xlsx/csv writer, edonation_config accessor)
-- [ ] 05-02-PLAN.md — Wave 2: e-Donation export backend (TDD) — audited stream-only xlsx/csv of issued donations, Checker/Admin gate, config-driven mapping, E2E (FR-30)
 - [ ] 05-03-PLAN.md — Wave 1: verified backup/restore (NFR-08) — pg_dump -Fc + mc-mirror companion services + restore-proof integration test + runbook evidence
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-02-PLAN.md — Wave 2: e-Donation export backend (TDD) — audited stream-only xlsx/csv of issued donations, Checker/Admin gate, config-driven mapping, E2E (FR-30)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 05-04-PLAN.md — Wave 3: keyed-flag + aging backend (TDD) — bulk/per-row mark with per-record audit, Bangkok-aware 3-bucket aging, E2E (FR-31)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 05-05-PLAN.md — Wave 4: donation summary report backend (TDD) — PII-free aggregate + all-staff ungated route + export, E2E (FR-32)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 05-06-PLAN.md — Wave 5: frontend Screen 7 (Export + Aging tabs) + BFF proxies + nav + config tab prep (FR-30, FR-31)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 05-07-PLAN.md — Wave 6: frontend Screen 8 (Reports) + report BFF + e-Donation config admin tab (FR-32, D-75)
 
 **UI hint**: yes
