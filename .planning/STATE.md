@@ -4,9 +4,9 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 5
 current_phase_name: e-Donation Export, Reports & Admin Settings
-status: "Phase 04 shipped — PR #4"
-stopped_at: Phase 05 UI-SPEC approved
-last_updated: "2026-07-06T17:14:37.469Z"
+status: "Phase 05 planned — 7 plans, ready to execute"
+stopped_at: Phase 05 planned (7 plans, verified)
+last_updated: "2026-07-06T17:20:00.000Z"
 last_activity: 2026-07-06
 last_activity_desc: Phase 05 planning complete
 progress:
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** ออกใบเสร็จบริจาคที่มีเลขที่รันต่อเนื่องไม่ซ้ำ ห้ามข้ามเลข (gap-less) ตามปีงบประมาณ หลังผ่านการอนุมัติโดยมนุษย์ และส่งถึงผู้บริจาคได้อย่างถูกต้องน่าเชื่อถือ
-**Current focus:** Phase 05 — e-Donation Export, Reports & Admin Settings (not started)
+**Current focus:** Phase 05 — e-Donation Export, Reports & Admin Settings (planned — 7 plans, ready to execute)
 
 ## Current Position
 
 Phase: 5 — e-Donation Export, Reports & Admin Settings
-Plan: Not started (no plans yet)
+Plan: 7 plans ready (Waves 1–6); verified (1 revision — issued_at→approved_at fix + report date-basis locked)
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 has one deferred human UI walkthrough (04-06 Task 4) pending phase-end /gsd-verify-work.
-Status: Phase 04 shipped — PR #4
+Status: Phase 05 planned — ready to execute
 Last activity: 2026-07-06 — Phase 05 planning complete
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
