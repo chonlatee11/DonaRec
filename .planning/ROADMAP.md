@@ -106,6 +106,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 > Note: the issue transaction enqueues an outbox job here, but the worker that consumes it (PDF + email) is built in Phase 4. Consent capture for Flow A donors is recorded here against the Phase 1 retention model (NFR-03).
 
 > ⚠️ **REOPENED 2026-07-02 — integration gate not met.** Criteria 1–5 passed unit/service-level verification (5/5), but driving the real stack with a real Keycloak token surfaced three runtime-seam bugs the unit tests could not catch: (1) `created-by-fk-mismatch` — claims.Subject (KC sub) written into `users(id)` FKs → **FIXED + committed** (ef7ede6); (2) `fe-be-audience-mismatch` — no audience mapper (aud=account → 401) + public/confidential client mismatch + missing web env → **FIXED, uncommitted** (realm-donnarec.json, web .env.example); (3) **RBAC AND-bug** — `RequireRoles(Maker,Checker,Admin)`/`(Checker,Admin)` enforce AND where "any of" was intended → 403 for every user → **OPEN**. Phase 3 stays open until criterion 6 (integration gate) is satisfied: bugs 2–3 fixed+committed, an E2E HTTP integration test added, and the human UI walkthrough passes.
+>
+> ✅ **RE-CLOSED 2026-07-04 — integration gate MET.** All three seam bugs fixed+committed (bug #1 ef7ede6, bug #2 8604caa, bug #3 b10fae8); automated E2E HTTP-path test added (`cmd/server/e2e_test.go`, 7/7 subtests pass, c5b0c4f); human UI walkthrough run against the live full stack — **7/7 checkpoints passed** (`03-UAT.md`, verification `status: passed`, f1f5b0e). Phase 3 is **Complete**.
 
 ### Phase 4: Receipt PDF + Email Delivery (Outbox Worker)
 
@@ -166,7 +168,17 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Staff can view donation summary reports by date range and total amount.
   4. A backup runs on a regular schedule and a documented restore has been performed successfully (restore verified, not just configured).
 
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+- [ ] 05-01-PLAN.md — Wave 1: shared data + file-writer foundation (migrations 000013/000014, sqlc export/aging/report/config queries, excelize, stream-only xlsx/csv writer, edonation_config accessor)
+- [ ] 05-02-PLAN.md — Wave 2: e-Donation export backend (TDD) — audited stream-only xlsx/csv of issued donations, Checker/Admin gate, config-driven mapping, E2E (FR-30)
+- [ ] 05-03-PLAN.md — Wave 1: verified backup/restore (NFR-08) — pg_dump -Fc + mc-mirror companion services + restore-proof integration test + runbook evidence
+- [ ] 05-04-PLAN.md — Wave 3: keyed-flag + aging backend (TDD) — bulk/per-row mark with per-record audit, Bangkok-aware 3-bucket aging, E2E (FR-31)
+- [ ] 05-05-PLAN.md — Wave 4: donation summary report backend (TDD) — PII-free aggregate + all-staff ungated route + export, E2E (FR-32)
+- [ ] 05-06-PLAN.md — Wave 5: frontend Screen 7 (Export + Aging tabs) + BFF proxies + nav + config tab prep (FR-30, FR-31)
+- [ ] 05-07-PLAN.md — Wave 6: frontend Screen 8 (Reports) + report BFF + e-Donation config admin tab (FR-32, D-75)
+
 **UI hint**: yes
 
 > Note: admin settings UI for templates/signature/number-format is delivered in Phase 4 with the config store (FR-33/NFR-09); this phase adds reporting and export-specific admin views. e-Donation export is manual Excel/CSV this milestone — no direct RD API.
