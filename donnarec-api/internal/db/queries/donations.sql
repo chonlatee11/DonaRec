@@ -101,7 +101,9 @@ SELECT
     replaces,
     replaced_by,
     donor_language,
-    receipt_pdf_object_key
+    receipt_pdf_object_key,
+    edonation_keyed_at,
+    edonation_keyed_by
 FROM donations
 WHERE id = @id;
 

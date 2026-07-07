@@ -222,7 +222,9 @@ SELECT
     replaces,
     replaced_by,
     donor_language,
-    receipt_pdf_object_key
+    receipt_pdf_object_key,
+    edonation_keyed_at,
+    edonation_keyed_by
 FROM donations
 WHERE id = $1
 `
@@ -268,6 +270,8 @@ func (q *Queries) GetDonationByID(ctx context.Context, id pgtype.UUID) (Donation
 		&i.ReplacedBy,
 		&i.DonorLanguage,
 		&i.ReceiptPdfObjectKey,
+		&i.EdonationKeyedAt,
+		&i.EdonationKeyedBy,
 	)
 	return i, err
 }
