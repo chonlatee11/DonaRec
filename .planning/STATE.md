@@ -6,14 +6,14 @@ current_phase: 05
 current_phase_name: e-Donation Export, Reports & Admin Settings
 status: executing
 stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-07-07T14:32:57.611Z"
+last_updated: "2026-07-07T14:53:31.519Z"
 last_activity: 2026-07-07
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 37
-  completed_plans: 36
+  completed_plans: 37
   percent: 67
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 05 (e-Donation Export, Reports & Admin Settings) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 has one deferred human UI walkthrough (04-06 Task 4) pending phase-end /gsd-verify-work.
 Status: Ready to execute
 Last activity: 2026-07-07 — Phase 05 execution started
@@ -80,6 +80,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 05 P02 | 40min | 3 tasks | 10 files |
 | Phase 05 P04 | 30min | 3 tasks | 8 files |
 | Phase 05 P05 | 8min | 3 tasks | 10 files |
+| Phase 05 P06 | 6min | 3 tasks | 19 files |
 
 ## Accumulated Context
 
@@ -140,6 +141,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-04: Service.Aging stays pure/testable (now + near_due_days as explicit params, never reads wall clock/config internally); the handler resolves now (default wall clock, overridable via ?now=RFC3339) and near_due_days (via Config.GetConfig), mirroring Export's handler-owns-config-resolution precedent
 - [Phase 05]: 05-05: SUM(amount) in reports.sql needed an explicit ::numeric cast — sqlc v1.31.1 mis-infers SUM() over NUMERIC(15,2) as int64, which cannot losslessly hold a fractional (satang) total; regenerated sqlc after the fix
 - [Phase 05]: 05-05: report.Service takes only *db.Queries (no keyProvider/auditSvc) — reportGroup carries NO RequireAnyRole/RequireRoles gate (D-71), and Export writes zero audit_log rows since there is no PII to reveal
+- [Phase 05]: Record-count preview (Export tab) derives an exact client-side count from the shared aging query for the default not_keyed filter; hidden (not fabricated) for all/keyed since no backend count endpoint exists for those scopes
+- [Phase 05]: AgingTable is the Tab B smart container owning the shared aging query/mutation/selection state; AgingStatCards/BulkActionBar stay presentational
 
 ### Pending Todos
 
@@ -177,7 +180,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-07T14:32:57.599Z
+Last session: 2026-07-07T14:53:00.087Z
 Stopped at: Completed 05-05-PLAN.md
 Resume file: 
 None

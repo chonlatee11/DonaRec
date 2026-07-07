@@ -168,7 +168,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Staff can view donation summary reports by date range and total amount.
   4. A backup runs on a regular schedule and a documented restore has been performed successfully (restore verified, not just configured).
 
-**Plans**: 5/7 plans executed
+**Plans**: 6/7 plans executed
 
 Plans:
 **Wave 1**
@@ -190,7 +190,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 05-06-PLAN.md — Wave 5: frontend Screen 7 (Export + Aging tabs) + BFF proxies + nav + config tab prep (FR-30, FR-31)
+- [x] 05-06-PLAN.md — Wave 5: frontend Screen 7 (Export + Aging tabs) + BFF proxies + nav + config tab prep (FR-30, FR-31)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
@@ -231,5 +231,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
-| 5. e-Donation Export, Reports & Admin Settings | 5/7 | In Progress|  |
+| 5. e-Donation Export, Reports & Admin Settings | 6/7 | In Progress|  |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
