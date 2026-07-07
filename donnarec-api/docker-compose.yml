@@ -10,6 +10,9 @@
 #               compose network at ws://chrome:9222 only.
 #   migrate   — golang-migrate init-service (runs DB migrations before api starts)
 #   api       — donnarec-api Go backend
+#   backup    — scheduled pg_dump -Fc + mc mirror of both MinIO buckets, with
+#               retention (NFR-08, D-72/D-73; Plan 05-03). See
+#               docs/BACKUP_RESTORE_RUNBOOK.md for the restore procedure.
 #
 # Usage:
 #   1. Copy .env.example to .env and fill in DB_PASSWORD, KC_ADMIN_PASSWORD,
@@ -251,6 +254,48 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # ----------------------------------------------------------------
+  # backup — scheduled Postgres + MinIO backup companion (NFR-08, D-72/D-73)
+  #
+  # Runs scripts/backup.sh (pg_dump -Fc + `mc mirror` of BOTH buckets, D-72) on a
+  # cron schedule ($BACKUP_CRON) inside docker/backup.Dockerfile, retaining dump
+  # artifacts for $BACKUP_RETENTION_DAYS (.env.example). Deliberately a SEPARATE
+  # image/service from `api` (same "small custom image from an official base"
+  # precedent as `chrome`) — a backup companion has a very different lifecycle/
+  # crash domain than the API.
+  #
+  # Dump artifacts (ciphertext + KEK-adjacent PII) live ONLY in the `backups`
+  # named volume below — never bind-mounted into the repo, never committed
+  # (T-05-03-DUMPLEAK). See docs/BACKUP_RESTORE_RUNBOOK.md for the restore
+  # procedure and D-73's recorded restore-proof evidence
+  # (internal/backupverify/restore_test.go).
+  # ----------------------------------------------------------------
+  backup:
+    build:
+      context: .
+      dockerfile: docker/backup.Dockerfile
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-donnarec}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      DB_NAME: donnarec_app
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-donnarec-slips}
+      MINIO_RECEIPTS_BUCKET: ${MINIO_RECEIPTS_BUCKET:-donnarec-receipts}
+      BACKUP_CRON: ${BACKUP_CRON:-0 2 * * *}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
 networks:
   # chrome-internal (WR-01 fix, 04-REVIEW.md): internal:true tells Docker to
   # NEVER add a default route / NAT rule for this network — containers
@@ -265,4 +310,9 @@ volumes:
   postgres_data:
     driver: local
   minio_data:
+    driver: local
+  # backups — Postgres dump + MinIO mirror artifacts (NFR-08, D-72/D-73). NEVER a
+  # bind mount into the repo: dump artifacts contain ciphertext + KEK-adjacent PII
+  # (T-05-03-DUMPLEAK) and must never enter VCS (see .gitignore).
+  backups:
     driver: local

@@ -1,0 +1,6 @@
+# Backup dump artifacts (NFR-08, D-72/D-73, T-05-03-DUMPLEAK): pg_dump -Fc snapshots +
+# mirrored MinIO objects contain ciphertext + KEK-adjacent PII and must NEVER enter VCS.
+# Mirrors the root .gitignore entry — kept here too since docker-compose.yml (this
+# directory's build context) is where a local bind-mount extraction would most likely
+# land during manual debugging.
+backups/
