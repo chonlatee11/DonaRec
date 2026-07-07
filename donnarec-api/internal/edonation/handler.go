@@ -296,3 +296,191 @@ func (h *Handler) UpdateConfig(c *gin.Context) {
 func parseExportDate(s string) (time.Time, error) {
 	return time.ParseInLocation("2006-01-02", s, time.UTC)
 }
+
+// KeyedRequestBody is the JSON request body for POST /api/edonation/keyed
+// (FR-31/D-67). DonationIDs are validated as well-formed UUID strings by the
+// `validate:"...,uuid"` tag BEFORE any DB call — a malformed id must 4xx, never
+// reach the ANY($1::uuid[]) query as a 500 (T-05-04-SQLI).
+type KeyedRequestBody struct {
+	DonationIDs []string `json:"donation_ids" validate:"required,min=1,dive,uuid"`
+	Keyed       bool     `json:"keyed"`
+}
+
+// SetKeyed marks or unmarks "คีย์เข้า e-Donation แล้ว" for a bulk or per-row
+// selection of donations (FR-31/SC#2, D-67).
+// POST /api/edonation/keyed
+//
+// RBAC: enforced by the route guard (RequireAnyRole(Checker,Admin)) AND
+// service-layer defense-in-depth (Service.SetKeyed's role gate).
+func (h *Handler) SetKeyed(c *gin.Context) {
+	// Pattern A: auth claims extraction
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	rawUserID, userExists := c.Get(auth.AppUserIDContextKey)
+	if !userExists {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	appUserID, userOK := rawUserID.(pgtype.UUID)
+	if !userOK {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_user_id"})
+		return
+	}
+
+	var body KeyedRequestBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_request_body"})
+		return
+	}
+	if err := h.validate.Struct(body); err != nil {
+		// T-05-04-SQLI: malformed/missing donation_ids never reach the query — 4xx here.
+		c.JSON(http.StatusUnprocessableEntity, gin.H{
+			"error":   "validation_failed",
+			"details": err.Error(),
+		})
+		return
+	}
+
+	donationIDs := make([]pgtype.UUID, 0, len(body.DonationIDs))
+	for _, idStr := range body.DonationIDs {
+		var id pgtype.UUID
+		if scanErr := id.Scan(idStr); scanErr != nil {
+			// Defense-in-depth: the validator already checked "uuid" format above,
+			// so this should be unreachable, but never let a bad id fall through
+			// to a 500 (T-05-04-SQLI).
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "invalid_donation_id", "detail": idStr})
+			return
+		}
+		donationIDs = append(donationIDs, id)
+	}
+
+	err := h.svc.SetKeyed(c.Request.Context(), KeyedRequest{
+		DonationIDs: donationIDs,
+		Keyed:       body.Keyed,
+	}, claims, appUserID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		default:
+			h.logger.Error("failed to set edonation keyed status",
+				zap.String("operation", "EdonationSetKeyed"),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "set_keyed_failed"})
+		}
+		return
+	}
+
+	resp := gin.H{"saved": true, "keyed": body.Keyed}
+	c.Set("audit_after", resp)
+	c.JSON(http.StatusOK, gin.H{"data": resp})
+}
+
+// AgingRowResponse is the JSON representation of one bucketed unkeyed issued
+// donation (FR-31/SC#2, D-68) — a handler-local snake_case DTO (AgingRow
+// itself carries no json tags, mirroring ConfigResponse/ConfigRequest's split
+// from edonation.Config).
+type AgingRowResponse struct {
+	ID               string    `json:"id"`
+	DonorName        string    `json:"donor_name"`
+	ReceiptFormatted string    `json:"receipt_formatted"`
+	ApprovedAt       time.Time `json:"approved_at"`
+	Deadline         time.Time `json:"deadline"`
+	Bucket           string    `json:"bucket"`
+	Keyed            bool      `json:"keyed"`
+}
+
+// AgingResponse is the JSON response body for GET /api/edonation/aging.
+type AgingResponse struct {
+	Rows   []AgingRowResponse `json:"rows"`
+	Counts map[string]int     `json:"counts"`
+}
+
+func toAgingResponse(result AgingResult) AgingResponse {
+	rows := make([]AgingRowResponse, 0, len(result.Rows))
+	for _, r := range result.Rows {
+		rows = append(rows, AgingRowResponse{
+			ID:               r.ID,
+			DonorName:        r.DonorName,
+			ReceiptFormatted: r.ReceiptFormatted,
+			ApprovedAt:       r.ApprovedAt,
+			Deadline:         r.Deadline,
+			Bucket:           string(r.Bucket),
+			Keyed:            r.Keyed,
+		})
+	}
+	counts := make(map[string]int, len(result.Counts))
+	for bucket, count := range result.Counts {
+		counts[string(bucket)] = count
+	}
+	return AgingResponse{Rows: rows, Counts: counts}
+}
+
+// Aging returns the 3-bucket (not_due/near_due/overdue) aging view of all
+// unkeyed issued donations against the config-driven near_due_days threshold
+// (FR-31/SC#2, D-68).
+// GET /api/edonation/aging?now=RFC3339 (now is optional — defaults to the
+// current wall-clock time; only ever used for test/preview reference dates,
+// never required by a real caller).
+//
+// RBAC: enforced by the route guard (RequireAnyRole(Checker,Admin)) AND
+// service-layer defense-in-depth (Service.Aging's role gate).
+func (h *Handler) Aging(c *gin.Context) {
+	raw, exists := c.Get("claims")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing_auth_context"})
+		return
+	}
+	claims, ok := raw.(auth.KeycloakClaims)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "invalid_claims_type"})
+		return
+	}
+
+	now := time.Now().UTC()
+	if nowParam := c.Query("now"); nowParam != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, nowParam)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_now"})
+			return
+		}
+		now = parsed
+	}
+
+	cfg, err := h.cfg.GetConfig(c.Request.Context())
+	if err != nil {
+		h.logger.Error("failed to load edonation config for aging",
+			zap.String("operation", "EdonationAging"),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "aging_failed"})
+		return
+	}
+
+	result, err := h.svc.Aging(c.Request.Context(), claims, now, cfg.NearDueDays)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrForbidden):
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		default:
+			h.logger.Error("failed to compute edonation aging view",
+				zap.String("operation", "EdonationAging"),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "aging_failed"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": toAgingResponse(result)})
+}

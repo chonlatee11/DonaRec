@@ -970,3 +970,120 @@ func TestE2E_EdonationExport(t *testing.T) {
 			"export calls must never write an object to any bucket (D-74)")
 	})
 }
+
+// TestE2E_EdonationKeyedAndAging drives POST /api/edonation/keyed and GET
+// /api/edonation/aging over the REAL HTTP path with real signed Keycloak-shaped
+// tokens (FR-31/SC#2, D-67/D-68/D-69) — the CLAUDE.md Conventions
+// integration-test gate: RBAC (Maker 403, Checker/Admin 200), per-donation
+// audit trail, and aging-bucket exclusion of just-keyed rows are all asserted
+// against real DB state reached through the real router, not a direct service
+// call.
+func TestE2E_EdonationKeyedAndAging(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E integration test in short mode: requires Docker")
+	}
+
+	h := newE2EHarness(t)
+
+	const subMaker = "99999999-1111-1111-1111-111111111111"
+	const subChecker = "99999999-2222-2222-2222-222222222222"
+	const subAdmin = "99999999-3333-3333-3333-333333333333"
+	_ = h.provisionUser(t, "maker-keyed-e2e@example.com", "Maker Keyed E2E", subMaker, db.UserRoleEnumMaker)
+	_ = h.provisionUser(t, "checker-keyed-e2e@example.com", "Checker Keyed E2E", subChecker, db.UserRoleEnumChecker)
+	_ = h.provisionUser(t, "admin-keyed-e2e@example.com", "Admin Keyed E2E", subAdmin, db.UserRoleEnumAdmin)
+
+	makerToken := h.kc.MintTokenForSubject(subMaker, backendClientID, "maker")
+	checkerToken := h.kc.MintTokenForSubject(subChecker, backendClientID, "checker")
+
+	// Seed 2 issued donations via the real approve path (HTTP, not a direct
+	// service call) — mirrors TestE2E_EdonationExport's seeding discipline.
+	w := h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาย ทดสอบ e-Donation Keyed หนึ่ง"))
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	created1 := decodeDonation(t, w)
+	w = h.do(t, http.MethodPost, "/api/donations/"+created1.ID+"/submit", makerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	w = h.do(t, http.MethodPost, "/api/donations/"+created1.ID+"/approve", checkerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	issued1 := decodeDonation(t, w)
+	require.Equal(t, "issued", issued1.Status)
+
+	w = h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาย ทดสอบ e-Donation Keyed สอง"))
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	created2 := decodeDonation(t, w)
+	w = h.do(t, http.MethodPost, "/api/donations/"+created2.ID+"/submit", makerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	w = h.do(t, http.MethodPost, "/api/donations/"+created2.ID+"/approve", checkerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	issued2 := decodeDonation(t, w)
+	require.Equal(t, "issued", issued2.Status)
+
+	keyedBody := map[string]any{
+		"donation_ids": []string{issued1.ID, issued2.ID},
+		"keyed":        true,
+	}
+
+	t.Run("Maker_Forbidden_403_Keyed", func(t *testing.T) {
+		w := h.do(t, http.MethodPost, "/api/edonation/keyed", makerToken, keyedBody)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"a Maker-only token must be rejected by RequireAnyRole(Checker,Admin) — body: %s", w.Body.String())
+	})
+
+	t.Run("Maker_Forbidden_403_Aging", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/aging", makerToken, nil)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"a Maker-only token must be rejected by RequireAnyRole(Checker,Admin) — body: %s", w.Body.String())
+	})
+
+	var auditBefore int
+	require.NoError(t, h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM audit_log WHERE action = 'edonation.mark_keyed'`).Scan(&auditBefore))
+
+	t.Run("Checker_200_MarksBothIssued", func(t *testing.T) {
+		w := h.do(t, http.MethodPost, "/api/edonation/keyed", checkerToken, keyedBody)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		// DB shows edonation_keyed=true for both donations.
+		for _, id := range []string{issued1.ID, issued2.ID} {
+			var keyed bool
+			require.NoError(t, h.pool.QueryRow(h.ctx,
+				`SELECT edonation_keyed FROM donations WHERE id = $1`, id).Scan(&keyed))
+			assert.True(t, keyed, "donation %s must be marked keyed after POST /keyed", id)
+		}
+
+		// One audit row PER donation — 2 donations → +2 audit rows (D-67), not 1.
+		var auditAfter int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM audit_log WHERE action = 'edonation.mark_keyed'`).Scan(&auditAfter))
+		assert.Equal(t, auditBefore+2, auditAfter,
+			"exactly one audit_log row per donation must be written for a 2-donation bulk mark")
+	})
+
+	t.Run("Malformed_DonationID_422NotDB500", func(t *testing.T) {
+		w := h.do(t, http.MethodPost, "/api/edonation/keyed", checkerToken, map[string]any{
+			"donation_ids": []string{"not-a-real-uuid"},
+			"keyed":        true,
+		})
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code,
+			"a malformed donation id must 4xx before the query runs, never 500 — body: %s", w.Body.String())
+	})
+
+	t.Run("Checker_200_AgingExcludesKeyedRows", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/aging", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		var resp struct {
+			Data struct {
+				Rows []struct {
+					ID string `json:"id"`
+				} `json:"rows"`
+				Counts map[string]int `json:"counts"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+		for _, row := range resp.Data.Rows {
+			assert.NotEqual(t, issued1.ID, row.ID, "a just-keyed donation must not appear in the aging view")
+			assert.NotEqual(t, issued2.ID, row.ID, "a just-keyed donation must not appear in the aging view")
+		}
+	})
+}

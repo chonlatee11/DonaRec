@@ -410,6 +410,10 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	edonationGroup.Use(auth.RequireAnyRole(auth.RoleChecker, auth.RoleAdmin))
 	edonationGroup.Use(auth.ResolveAppUser(appUserResolver, logger))
 	edonationGroup.GET("/export", edonationHandler.Export)
+	// POST /keyed + GET /aging (Phase 5, plan 05-04, FR-31, D-67/D-68) — same
+	// RequireAnyRole(Checker,Admin) OR-guard as /export; a Maker-only user gets 403.
+	edonationGroup.POST("/keyed", edonationHandler.SetKeyed)
+	edonationGroup.GET("/aging", edonationHandler.Aging)
 
 	return router
 }
