@@ -856,3 +856,117 @@ func TestE2E_AdminSettings(t *testing.T) {
 		assert.Contains(t, w.Body.String(), "invalid_image_slot")
 	})
 }
+
+// zipSignature is the 4-byte ZIP local file header signature every .xlsx (an OOXML
+// ZIP container) must start with.
+var zipSignature = []byte{0x50, 0x4B, 0x03, 0x04}
+
+// utf8BOM is the 3-byte UTF-8 byte-order-mark exportfile.StreamCSV writes before
+// any CSV content (05-RESEARCH.md Pattern 2).
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// TestE2E_EdonationExport drives the e-Donation export endpoint over the REAL
+// HTTP path: HTTP -> RequireAuth (real Keycloak-shaped token) ->
+// RequireAnyRole(Checker,Admin) -> ResolveAppUser -> edonation.Handler ->
+// edonation.Service (audited decrypt) -> exportfile stream (FR-30, plan 05-02,
+// satisfies the integration-test gate per CLAUDE.md Conventions).
+//
+// Requires Docker testcontainers (Postgres). Skip with -short.
+func TestE2E_EdonationExport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E integration test in short mode: requires Docker")
+	}
+
+	h := newE2EHarness(t)
+
+	const subMaker = "66666666-6666-6666-6666-666666666666"
+	const subChecker = "77777777-7777-7777-7777-777777777777"
+	const subAdmin = "88888888-8888-8888-8888-888888888888"
+	_ = h.provisionUser(t, "maker-edonation-e2e@example.com", "Maker eDonation E2E", subMaker, db.UserRoleEnumMaker)
+	_ = h.provisionUser(t, "checker-edonation-e2e@example.com", "Checker eDonation E2E", subChecker, db.UserRoleEnumChecker)
+	_ = h.provisionUser(t, "admin-edonation-e2e@example.com", "Admin eDonation E2E", subAdmin, db.UserRoleEnumAdmin)
+
+	makerToken := h.kc.MintTokenForSubject(subMaker, backendClientID, "maker")
+	checkerToken := h.kc.MintTokenForSubject(subChecker, backendClientID, "checker")
+	adminToken := h.kc.MintTokenForSubject(subAdmin, backendClientID, "admin")
+
+	// Seed one issued donation via the existing real approve path (HTTP, not a
+	// direct service call) — proves the export source is real DB state reached
+	// through the same lifecycle every other E2E test exercises.
+	w := h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาย ทดสอบ e-Donation Export"))
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	created := decodeDonation(t, w)
+
+	w = h.do(t, http.MethodPost, "/api/donations/"+created.ID+"/submit", makerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	w = h.do(t, http.MethodPost, "/api/donations/"+created.ID+"/approve", checkerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	issued := decodeDonation(t, w)
+	require.Equal(t, "issued", issued.Status)
+
+	// Baseline bucket state — no code path in the export flow accepts a
+	// ReceiptsStore/settings-image store reference at all (grep-verified in
+	// 05-02 Task 1: internal/edonation/*.go never imports internal/storage), so
+	// the harness's fake settings-image bucket is the only observable proxy for
+	// "no file was written to a bucket" (D-74).
+	baselineObjectCount := len(h.settingsStore.objects)
+
+	t.Run("Maker_Forbidden_403", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=xlsx", makerToken, nil)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"a Maker-only token must be rejected by RequireAnyRole(Checker,Admin) — body: %s", w.Body.String())
+	})
+
+	var auditCountBeforeChecker int
+	require.NoError(t, h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM audit_log WHERE action = 'edonation.export'`).Scan(&auditCountBeforeChecker))
+
+	t.Run("Checker_200_XLSX_ZipSignature", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=xlsx", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
+		body := w.Body.Bytes()
+		require.GreaterOrEqual(t, len(body), 4)
+		assert.Equal(t, zipSignature, body[:4], "xlsx export body must start with the ZIP signature")
+
+		// D-64/T-05-02-UNAUDITED: exactly ONE new audit_log row for this export.
+		var auditCountAfter int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM audit_log WHERE action = 'edonation.export'`).Scan(&auditCountAfter))
+		assert.Equal(t, auditCountBeforeChecker+1, auditCountAfter,
+			"exactly one new audit_log row with action edonation.export must be written per checker export")
+	})
+
+	t.Run("Admin_200_XLSX", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=xlsx", adminToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		body := w.Body.Bytes()
+		require.GreaterOrEqual(t, len(body), 4)
+		assert.Equal(t, zipSignature, body[:4], "xlsx export body must start with the ZIP signature")
+	})
+
+	t.Run("Checker_200_CSV_BOM", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=csv", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/csv")
+		body := w.Body.Bytes()
+		require.GreaterOrEqual(t, len(body), 3)
+		assert.Equal(t, utf8BOM, body[:3], "csv export body must start with the UTF-8 BOM")
+	})
+
+	t.Run("InvalidFormat_400", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=pdf", checkerToken, nil)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("NoBucketWrites_D74", func(t *testing.T) {
+		// D-74 stream-only assertion: none of the 5 export/format calls above wrote
+		// any object to the harness's fake settings-image bucket — the only
+		// observable "bucket" reference the wired router holds — proving the
+		// export path never persists a plaintext-PII file (stream-only to the
+		// ResponseWriter, per xlsx.go/csv.go/exportfile.StreamXLSX/StreamCSV).
+		assert.Equal(t, baselineObjectCount, len(h.settingsStore.objects),
+			"export calls must never write an object to any bucket (D-74)")
+	})
+}
