@@ -327,6 +327,15 @@ type Querier interface {
 	// donated_at. No PII columns are selected on this path — no decrypt/mask
 	// step needed anywhere here, matching donated_at's column type (DATE,
 	// migration 000005), so no timezone conversion is needed.
+	//
+	// SUM(amount)::numeric is an EXPLICIT cast (Rule 1 fix, plan 05-05): without
+	// it, sqlc v1.31.1's offline catalog inference for SUM() over a NUMERIC(15,2)
+	// column defaults to int64, which does not match Postgres's actual sum(numeric)
+	// -> numeric return type and would corrupt/fail to scan any total that has a
+	// fractional (satang) component — verified empirically (`SELECT SUM(amount),
+	// pg_typeof(SUM(amount))` on a scratch NUMERIC(15,2) table returns `numeric`).
+	// The explicit cast makes sqlc emit `pgtype.Numeric`, matching every other
+	// money column in this codebase (donations.amount, receiptfmt.FormatAmount).
 	// Aggregates issued donations by calendar month. Excludes non-issued statuses
 	// — cancelled/draft/rejected are not "donations received" (D-70 assumption).
 	SummaryByMonth(ctx context.Context, arg SummaryByMonthParams) ([]SummaryByMonthRow, error)

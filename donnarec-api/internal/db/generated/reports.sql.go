@@ -15,7 +15,7 @@ const summaryByDay = `-- name: SummaryByDay :many
 SELECT
     donated_at  AS period,
     COUNT(*)    AS receipt_count,
-    SUM(amount) AS total_amount
+    SUM(amount)::numeric AS total_amount
 FROM donations
 WHERE status = 'issued'
   AND ($1::DATE IS NULL OR donated_at >= $1)
@@ -30,9 +30,9 @@ type SummaryByDayParams struct {
 }
 
 type SummaryByDayRow struct {
-	Period       pgtype.Date `db:"period" json:"period"`
-	ReceiptCount int64       `db:"receipt_count" json:"receipt_count"`
-	TotalAmount  int64       `db:"total_amount" json:"total_amount"`
+	Period       pgtype.Date    `db:"period" json:"period"`
+	ReceiptCount int64          `db:"receipt_count" json:"receipt_count"`
+	TotalAmount  pgtype.Numeric `db:"total_amount" json:"total_amount"`
 }
 
 // Same shape, daily granularity — donated_at is already a DATE so no
@@ -62,7 +62,7 @@ const summaryByMonth = `-- name: SummaryByMonth :many
 SELECT
     date_trunc('month', donated_at)::date AS period,
     COUNT(*)    AS receipt_count,
-    SUM(amount) AS total_amount
+    SUM(amount)::numeric AS total_amount
 FROM donations
 WHERE status = 'issued'
   AND ($1::DATE IS NULL OR donated_at >= $1)
@@ -77,9 +77,9 @@ type SummaryByMonthParams struct {
 }
 
 type SummaryByMonthRow struct {
-	Period       pgtype.Date `db:"period" json:"period"`
-	ReceiptCount int64       `db:"receipt_count" json:"receipt_count"`
-	TotalAmount  int64       `db:"total_amount" json:"total_amount"`
+	Period       pgtype.Date    `db:"period" json:"period"`
+	ReceiptCount int64          `db:"receipt_count" json:"receipt_count"`
+	TotalAmount  pgtype.Numeric `db:"total_amount" json:"total_amount"`
 }
 
 // internal/db/queries/reports.sql
@@ -89,6 +89,15 @@ type SummaryByMonthRow struct {
 // donated_at. No PII columns are selected on this path — no decrypt/mask
 // step needed anywhere here, matching donated_at's column type (DATE,
 // migration 000005), so no timezone conversion is needed.
+//
+// SUM(amount)::numeric is an EXPLICIT cast (Rule 1 fix, plan 05-05): without
+// it, sqlc v1.31.1's offline catalog inference for SUM() over a NUMERIC(15,2)
+// column defaults to int64, which does not match Postgres's actual sum(numeric)
+// -> numeric return type and would corrupt/fail to scan any total that has a
+// fractional (satang) component — verified empirically (`SELECT SUM(amount),
+// pg_typeof(SUM(amount))` on a scratch NUMERIC(15,2) table returns `numeric`).
+// The explicit cast makes sqlc emit `pgtype.Numeric`, matching every other
+// money column in this codebase (donations.amount, receiptfmt.FormatAmount).
 // Aggregates issued donations by calendar month. Excludes non-issued statuses
 // — cancelled/draft/rejected are not "donations received" (D-70 assumption).
 func (q *Queries) SummaryByMonth(ctx context.Context, arg SummaryByMonthParams) ([]SummaryByMonthRow, error) {

@@ -5,6 +5,15 @@
 -- donated_at. No PII columns are selected on this path — no decrypt/mask
 -- step needed anywhere here, matching donated_at's column type (DATE,
 -- migration 000005), so no timezone conversion is needed.
+--
+-- SUM(amount)::numeric is an EXPLICIT cast (Rule 1 fix, plan 05-05): without
+-- it, sqlc v1.31.1's offline catalog inference for SUM() over a NUMERIC(15,2)
+-- column defaults to int64, which does not match Postgres's actual sum(numeric)
+-- -> numeric return type and would corrupt/fail to scan any total that has a
+-- fractional (satang) component — verified empirically (`SELECT SUM(amount),
+-- pg_typeof(SUM(amount))` on a scratch NUMERIC(15,2) table returns `numeric`).
+-- The explicit cast makes sqlc emit `pgtype.Numeric`, matching every other
+-- money column in this codebase (donations.amount, receiptfmt.FormatAmount).
 
 -- name: SummaryByMonth :many
 -- Aggregates issued donations by calendar month. Excludes non-issued statuses
@@ -12,7 +21,7 @@
 SELECT
     date_trunc('month', donated_at)::date AS period,
     COUNT(*)    AS receipt_count,
-    SUM(amount) AS total_amount
+    SUM(amount)::numeric AS total_amount
 FROM donations
 WHERE status = 'issued'
   AND (sqlc.narg('from_date')::DATE IS NULL OR donated_at >= sqlc.narg('from_date'))
@@ -26,7 +35,7 @@ ORDER BY period;
 SELECT
     donated_at  AS period,
     COUNT(*)    AS receipt_count,
-    SUM(amount) AS total_amount
+    SUM(amount)::numeric AS total_amount
 FROM donations
 WHERE status = 'issued'
   AND (sqlc.narg('from_date')::DATE IS NULL OR donated_at >= sqlc.narg('from_date'))
