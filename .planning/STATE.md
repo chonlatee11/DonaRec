@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 5
+current_phase: 05
 current_phase_name: e-Donation Export, Reports & Admin Settings
-status: "Phase 05 planned — 7 plans, ready to execute"
+status: executing
 stopped_at: Phase 05 planned (7 plans, verified)
-last_updated: "2026-07-06T17:20:00.000Z"
-last_activity: 2026-07-06
-last_activity_desc: Phase 05 planning complete
+last_updated: "2026-07-07T11:43:25.857Z"
+last_activity: 2026-07-07
+last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 30
-  completed_plans: 31
+  total_plans: 37
+  completed_plans: 32
   percent: 67
 ---
 
@@ -24,15 +24,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** ออกใบเสร็จบริจาคที่มีเลขที่รันต่อเนื่องไม่ซ้ำ ห้ามข้ามเลข (gap-less) ตามปีงบประมาณ หลังผ่านการอนุมัติโดยมนุษย์ และส่งถึงผู้บริจาคได้อย่างถูกต้องน่าเชื่อถือ
-**Current focus:** Phase 05 — e-Donation Export, Reports & Admin Settings (planned — 7 plans, ready to execute)
+**Current focus:** Phase 05 — e-Donation Export, Reports & Admin Settings
 
 ## Current Position
 
-Phase: 5 — e-Donation Export, Reports & Admin Settings
-Plan: 7 plans ready (Waves 1–6); verified (1 revision — issued_at→approved_at fix + report date-basis locked)
+Phase: 05 (e-Donation Export, Reports & Admin Settings) — EXECUTING
+Plan: 2 of 7
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 has one deferred human UI walkthrough (04-06 Task 4) pending phase-end /gsd-verify-work.
-Status: Phase 05 planned — ready to execute
-Last activity: 2026-07-06 — Phase 05 planning complete
+Status: Ready to execute
+Last activity: 2026-07-07 — Phase 05 execution started
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -75,6 +75,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 04 P06 | 35min | 3 tasks | 20 files |
 | Phase 04 P07 | 20min | 2 tasks | 11 files |
 | Phase 04 P08 | 13min | 2 tasks | 24 files |
+| Phase 05 P01 | 20min | 2 tasks | 20 files |
 
 ## Accumulated Context
 
@@ -124,6 +125,8 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-08: TemplateEditor.tsx split into TemplateEditorFields + TemplateLivePreview so the live preview persists across all four tabs, not just the template tab
 - [Phase 04]: 04-08: TH Sarabun New font remains unsourced (same open licensing item as backend) — preview iframe falls back to Google-Fonts Sarabun until public/fonts/THSarabunNew.woff2 is provided
 - [Phase 04]: [Phase 04] Code-review fixes (04-REVIEW.md): CR-01/CR-02 (blockers) and WR-01/02/04/05/06/07 fixed with RED/GREEN tests; WR-03 (deduction_multiplier frozen-at-approval) documented as a known limitation rather than reworking the Approve transaction — see 04-REVIEW-FIXES-SUMMARY.md
+- [Phase ?]: [Phase 05] 05-01: GetDonationByID's SELECT list extended to include edonation_keyed_at/edonation_keyed_by (physical column order) so sqlc keeps reusing the Donation model type after migration 000013's ALTER TABLE — required to keep go build green
+- [Phase ?]: [Phase 05] 05-01: edonation.Config merges DTO+accessor into one type (NewConfig(*db.Queries)); FieldMapping.RowValues takes a plain map[string]string, not a concrete ExportRow type owned by a later plan
 
 ### Pending Todos
 
@@ -161,7 +164,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-06T16:20:06.407Z
+Last session: 2026-07-07T11:42:39.624Z
 Stopped at: Phase 05 UI-SPEC approved
 Resume file: 
-.planning/phases/05-e-donation-export-reports-admin-settings/05-UI-SPEC.md
+None
