@@ -25,6 +25,7 @@ import (
 	"github.com/donnarec/donnarec-api/internal/mailer"
 	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/report"
 	"github.com/donnarec/donnarec-api/internal/settings"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/users"
@@ -218,6 +219,12 @@ func main() {
 	edonationSvc := edonation.NewService(pool, queries, auditSvc, keyProvider, logger)
 	edonationCfg := edonation.NewConfig(queries)
 
+	// Donation summary report service (Phase 5, plan 05-05, FR-32/D-70/D-71).
+	// Deliberately constructed with ONLY queries — no keyProvider, no auditSvc —
+	// since SummaryByMonth/SummaryByDay select no PII column and there is no
+	// decrypt/audit-reveal step anywhere on this path.
+	reportSvc := report.NewService(queries)
+
 	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
 	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
 	// (not in internal/auth) so the auth package stays DB-agnostic; pgx.ErrNoRows is
@@ -241,11 +248,12 @@ func main() {
 	slipHandler := donation.NewSlipHandler(slipSvc, logger)
 	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
 	edonationHandler := edonation.NewHandler(edonationSvc, edonationCfg, logger)
+	reportHandler := report.NewHandler(reportSvc, logger)
 
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -297,7 +305,10 @@ func main() {
 //  5. Protected /api group — RequireAuth()
 //  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin) + ResolveAppUser
 //  7. e-Donation /api/edonation group — RequireAuth() + RequireAnyRole(Checker,Admin) + ResolveAppUser
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, edonationHandler *edonation.Handler, logger *zap.Logger) *gin.Engine {
+//  8. Reports /api/reports group — RequireAuth() ONLY, deliberately NO role gate (D-71,
+//     Phase 5 plan 05-05) — the report has no PII column, so every authenticated staff
+//     member (Maker/Checker/Admin) may view/export it.
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, edonationHandler *edonation.Handler, reportHandler *report.Handler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -414,6 +425,15 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// RequireAnyRole(Checker,Admin) OR-guard as /export; a Maker-only user gets 403.
 	edonationGroup.POST("/keyed", edonationHandler.SetKeyed)
 	edonationGroup.GET("/aging", edonationHandler.Aging)
+
+	// ---- Reports /api/reports (Phase 5, plan 05-05, FR-32, D-71) ----
+	// Deliberately NO RequireAnyRole/RequireRoles — every authenticated staff
+	// member (Maker/Checker/Admin) may view/export this PII-free summary report.
+	// Region-scoped negative assertion (05-05 Task 2 acceptance criteria) relies
+	// on this block containing no role-guard call.
+	reportGroup := api.Group("/reports")
+	reportGroup.GET("/summary", reportHandler.Summary)
+	reportGroup.GET("/export", reportHandler.Export)
 
 	return router
 }
