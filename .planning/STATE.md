@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 05
 current_phase_name: e-Donation Export, Reports & Admin Settings
 status: executing
-stopped_at: Phase 05 planned (7 plans, verified)
-last_updated: "2026-07-07T12:03:53.285Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-07-07T12:31:04.407Z"
 last_activity: 2026-07-07
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 37
-  completed_plans: 33
+  completed_plans: 34
   percent: 67
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 05 (e-Donation Export, Reports & Admin Settings) — EXECUTING
-Plan: 3 of 7
+Plan: 4 of 7
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 has one deferred human UI walkthrough (04-06 Task 4) pending phase-end /gsd-verify-work.
 Status: Ready to execute
 Last activity: 2026-07-07 — Phase 05 execution started
@@ -77,6 +77,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 04 P08 | 13min | 2 tasks | 24 files |
 | Phase 05 P01 | 20min | 2 tasks | 20 files |
 | Phase 05 P03 | 20min | 3 tasks | 9 files |
+| Phase 05 P02 | 40min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -130,6 +131,8 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 05] 05-01: edonation.Config merges DTO+accessor into one type (NewConfig(*db.Queries)); FieldMapping.RowValues takes a plain map[string]string, not a concrete ExportRow type owned by a later plan
 - [Phase 05]: 05-03: pg_restore test-scope uses --no-owner --no-privileges (fresh unmigrated target has no roles); production restore.sh uses --role=donnarec_app and documents the role-provisioning prerequisite
 - [Phase 05]: 05-03: TestRestoreProof_MinIO uses minio-go SDK round trip instead of the mc CLI (not installed on test-runner host); functionally equivalent restore-completeness proof
+- [Phase ?]: [Phase 05] 05-02: Service.Export mirrors donation.RevealPII's audited-decrypt discipline (Pattern 3) — role gate before any DB call, one WithTx closure for query+decrypt+ONE summary audit row, commit, then return plaintext; never imports internal/exportfile (Pitfall 3: streaming stays outside the tx, in xlsx.go/csv.go/handler).
+- [Phase ?]: [Phase 05] 05-02: empty-result 404 check lives in the handler (len(rows)==0), not the service — Service.Export always returns rows plus a committed audit row; HTTP semantics stay out of the service layer.
 
 ### Pending Todos
 
@@ -167,7 +170,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-07T12:02:57.943Z
-Stopped at: Phase 05 UI-SPEC approved
+Last session: 2026-07-07T12:31:04.397Z
+Stopped at: Completed 05-02-PLAN.md
 Resume file: 
 None
