@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExportPanel } from "@/components/ExportPanel";
+import { AgingTable } from "@/components/AgingTable";
 import { isCheckerOrAdminViewer } from "@/lib/session-role";
 
 /**
@@ -43,7 +44,7 @@ export default async function EdonationPage() {
         </TabsContent>
 
         <TabsContent value="aging">
-          {/* Wired to AgingTable in plan 05-06 Task 3 */}
+          <AgingTable />
         </TabsContent>
       </Tabs>
     </div>
