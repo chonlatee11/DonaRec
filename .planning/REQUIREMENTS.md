@@ -58,7 +58,7 @@
 
 - [x] **FR-29**: จัดเก็บข้อมูลผู้บริจาค: ชื่อ, เลขผู้เสียภาษี/บัตรประชาชน, ที่อยู่, อีเมล [M]
 - [x] **FR-30**: ส่งออกข้อมูล (Excel/CSV) เพื่อรองรับการคีย์เข้า e-Donation ด้วยตนเอง [M]
-- [ ] **FR-31**: ติดสถานะ "คีย์เข้า e-Donation แล้ว" เพื่อกันคีย์ซ้ำ/ตกหล่น [S]
+- [x] **FR-31**: ติดสถานะ "คีย์เข้า e-Donation แล้ว" เพื่อกันคีย์ซ้ำ/ตกหล่น [S]
 
 ### PDPA & Compliance
 
@@ -157,7 +157,7 @@ Which phases cover which requirements.
 | FR-33 | Phase 4 | Complete |
 | NFR-09 | Phase 4 | Complete |
 | FR-30 | Phase 5 | Complete |
-| FR-31 | Phase 5 | Pending |
+| FR-31 | Phase 5 | Complete |
 | FR-32 | Phase 5 | Pending |
 | NFR-08 | Phase 5 | Complete |
 | FR-01 | Phase 6 | Pending |
