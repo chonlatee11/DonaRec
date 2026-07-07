@@ -54,6 +54,7 @@ import (
 	"github.com/donnarec/donnarec-api/internal/edonation"
 	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/report"
 	"github.com/donnarec/donnarec-api/internal/settings"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/testutil"
@@ -196,6 +197,11 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	edonationCfg := edonation.NewConfig(queries)
 	edonationHandler := edonation.NewHandler(edonationSvc, edonationCfg, logger)
 
+	// Donation summary report service + handler (Phase 5, plan 05-05, FR-32/D-70/
+	// D-71) — mirrors main.go wiring: queries only, no keyProvider/auditSvc.
+	reportSvc := report.NewService(queries)
+	reportHandler := report.NewHandler(reportSvc, logger)
+
 	// Handlers.
 	userHandler := users.NewUserHandler(userSvc, logger)
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
@@ -214,7 +220,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		return u.ID, nil
 	}
 
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, logger)
 
 	return &e2eHarness{router: router, kc: kc, queries: queries, pool: pool, ctx: ctx, settingsStore: settingsStore}
 }
@@ -318,6 +324,24 @@ func validDonorBody(name string) map[string]any {
 		"donor_address":        "123 ถนนทดสอบ กรุงเทพฯ",
 		"amount":               1500.00,
 		"donated_at":           "2026-03-15",
+		"consent_given":        true,
+		"consent_text_version": "v1",
+		"consent_purpose":      "tax-receipt",
+	}
+}
+
+// donorBodyWithAmountDate returns a valid Create donor payload with an
+// explicit amount/donated_at (mirrors validDonorBody's fixed-value shape) —
+// used by TestE2E_Reports to seed donations across distinct months/amounts
+// for the summary report's breakdown assertions.
+func donorBodyWithAmountDate(t *testing.T, name, taxID string, amount float64, donatedAt string) map[string]any {
+	t.Helper()
+	return map[string]any{
+		"donor_name":           name,
+		"donor_tax_id":         taxID,
+		"donor_address":        "123 ถนนทดสอบ กรุงเทพฯ",
+		"amount":               amount,
+		"donated_at":           donatedAt,
 		"consent_given":        true,
 		"consent_text_version": "v1",
 		"consent_purpose":      "tax-receipt",
@@ -1085,5 +1109,140 @@ func TestE2E_EdonationKeyedAndAging(t *testing.T) {
 			assert.NotEqual(t, issued1.ID, row.ID, "a just-keyed donation must not appear in the aging view")
 			assert.NotEqual(t, issued2.ID, row.ID, "a just-keyed donation must not appear in the aging view")
 		}
+	})
+}
+
+// TestE2E_Reports drives GET /api/reports/summary and GET /api/reports/export
+// over the REAL HTTP path: HTTP -> RequireAuth (real Keycloak-shaped token) ->
+// [no role gate — D-71] -> report.Handler -> report.Service -> DB (FR-32, plan
+// 05-05, satisfies the integration-test gate per CLAUDE.md Conventions).
+//
+// The central assertion is Maker access: unlike every other Checker/Admin-only
+// route this file exercises, /api/reports carries NO RequireAnyRole guard —
+// a Maker token must get 200, not 403, proving D-71's "all staff" access over
+// the real router (not just a code-review claim).
+//
+// Requires Docker testcontainers (Postgres). Skip with -short.
+func TestE2E_Reports(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E integration test in short mode: requires Docker")
+	}
+
+	h := newE2EHarness(t)
+
+	const subMaker = "aaaaaaaa-1111-1111-1111-111111111111"
+	const subChecker = "aaaaaaaa-2222-2222-2222-222222222222"
+	const subAdmin = "aaaaaaaa-3333-3333-3333-333333333333"
+	_ = h.provisionUser(t, "maker-report-e2e@example.com", "Maker Report E2E", subMaker, db.UserRoleEnumMaker)
+	_ = h.provisionUser(t, "checker-report-e2e@example.com", "Checker Report E2E", subChecker, db.UserRoleEnumChecker)
+	_ = h.provisionUser(t, "admin-report-e2e@example.com", "Admin Report E2E", subAdmin, db.UserRoleEnumAdmin)
+
+	makerToken := h.kc.MintTokenForSubject(subMaker, backendClientID, "maker")
+	checkerToken := h.kc.MintTokenForSubject(subChecker, backendClientID, "checker")
+	adminToken := h.kc.MintTokenForSubject(subAdmin, backendClientID, "admin")
+
+	// seedIssuedForReport drives Create->Submit->Approve over the REAL HTTP path
+	// (mirrors TestE2E_EdonationExport/TestE2E_EdonationKeyedAndAging's seeding
+	// discipline) — proves the report source is real DB state reached through
+	// the same lifecycle every other E2E test exercises.
+	seedIssuedForReport := func(name, taxID string, amount float64, donatedAt string) donation.DonationDetailResponse {
+		w := h.do(t, http.MethodPost, "/api/donations", makerToken, donorBodyWithAmountDate(t, name, taxID, amount, donatedAt))
+		require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+		created := decodeDonation(t, w)
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+created.ID+"/submit", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+created.ID+"/approve", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		issued := decodeDonation(t, w)
+		require.Equal(t, "issued", issued.Status)
+		return issued
+	}
+
+	// Two donations in July, one in August — mirrors report/service_test.go's
+	// monthly-breakdown fixture shape.
+	seedIssuedForReport("นาย รายงาน อีทูอี หนึ่ง", "9191919191911", 1000.00, "2026-07-05")
+	seedIssuedForReport("นาย รายงาน อีทูอี สอง", "9191919191912", 500.50, "2026-07-20")
+	seedIssuedForReport("นาย รายงาน อีทูอี สาม", "9191919191913", 2000.25, "2026-08-10")
+
+	type summaryEnvelope struct {
+		Data struct {
+			TotalAmount       float64 `json:"total_amount"`
+			ReceiptCount      int     `json:"receipt_count"`
+			AveragePerReceipt float64 `json:"average_per_receipt"`
+			Breakdown         []struct {
+				Period       string  `json:"period"`
+				ReceiptCount int     `json:"receipt_count"`
+				TotalAmount  float64 `json:"total_amount"`
+			} `json:"breakdown"`
+		} `json:"data"`
+	}
+
+	t.Run("Maker_200_AllStaffAccess", func(t *testing.T) {
+		// The central D-71 assertion: a Maker-only token — rejected by every
+		// Checker/Admin-only route in this file — must get 200 here, not 403.
+		w := h.do(t, http.MethodGet, "/api/reports/summary?group_by=month&from=2026-07-01&to=2026-08-31", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code,
+			"a Maker token must be accepted by the reports route — D-71 all-staff access, no RequireAnyRole gate — body: %s", w.Body.String())
+
+		var resp summaryEnvelope
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+		assert.Equal(t, 3, resp.Data.ReceiptCount)
+		assert.InDelta(t, 3500.75, resp.Data.TotalAmount, 0.001)
+		assert.InDelta(t, 3500.75/3, resp.Data.AveragePerReceipt, 0.001)
+		require.Len(t, resp.Data.Breakdown, 2, "two monthly buckets: July + August")
+
+		var julyCount, augustCount int
+		var julyTotal, augustTotal float64
+		for _, row := range resp.Data.Breakdown {
+			switch row.Period {
+			case "2026-07-01":
+				julyCount, julyTotal = row.ReceiptCount, row.TotalAmount
+			case "2026-08-01":
+				augustCount, augustTotal = row.ReceiptCount, row.TotalAmount
+			}
+		}
+		assert.Equal(t, 2, julyCount)
+		assert.InDelta(t, 1500.50, julyTotal, 0.001)
+		assert.Equal(t, 1, augustCount)
+		assert.InDelta(t, 2000.25, augustTotal, 0.001)
+	})
+
+	t.Run("Checker_200", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/reports/summary?group_by=month", checkerToken, nil)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("Admin_200", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/reports/summary?group_by=month", adminToken, nil)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("InvalidGroupBy_400", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/reports/summary?group_by=year", makerToken, nil)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("Export_200_XLSX_ZipSignature_NoAuditRow", func(t *testing.T) {
+		var auditBefore int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM audit_log`).Scan(&auditBefore))
+
+		// Maker token again — proves export is equally ungated (D-71).
+		w := h.do(t, http.MethodGet, "/api/reports/export?format=xlsx&group_by=month", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
+		body := w.Body.Bytes()
+		require.GreaterOrEqual(t, len(body), 4)
+		assert.Equal(t, zipSignature, body[:4], "xlsx export body must start with the ZIP signature")
+
+		// Report export is NOT an audited PII reveal (contrast with
+		// edonation.export, which writes exactly one summary audit row per
+		// call) — the report path has zero PII, so it writes NO audit row at all.
+		var auditAfter int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM audit_log`).Scan(&auditAfter))
+		assert.Equal(t, auditBefore, auditAfter,
+			"report export must never write an audit_log row — no PII reveal to audit")
 	})
 }
