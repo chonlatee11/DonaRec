@@ -330,5 +330,32 @@
     "ariaBucketFilterLabel": "Filter by deadline bucket: {bucket}",
     "ariaBucketLabel": "Deadline bucket: {bucket}",
     "ariaKeyedStatusLabel": "Keyed status: {status}"
+  },
+  "reports": {
+    "pageTitle": "Donation Summary Reports",
+    "filterFrom": "Period from",
+    "filterTo": "to",
+    "applyFilter": "Show Report",
+    "clearFilter": "Clear Filters",
+    "cardTotalAmount": "Total Donations (THB)",
+    "cardReceiptCount": "Receipt Count",
+    "cardAveragePerReceipt": "Average per Receipt (THB)",
+    "ariaCardTotalAmount": "Total donations {value} baht",
+    "ariaCardReceiptCount": "Receipt count {value}",
+    "ariaCardAveragePerReceipt": "Average per receipt {value} baht",
+    "breakdownHeading": "Breakdown by Period",
+    "groupByMonth": "Monthly",
+    "groupByDay": "Daily",
+    "columnPeriod": "Period",
+    "columnReceiptCount": "Receipt Count",
+    "columnTotalAmount": "Total (THB)",
+    "noDataHeading": "No donation data in this period",
+    "noDataBody": "Try a different date range",
+    "loadFailed": "Failed to load the report — please check your connection and try again",
+    "exportExcel": "Export Report (Excel)",
+    "exportCsv": "Export Report (CSV)",
+    "generating": "Generating file...",
+    "exportSuccessToast": "Report exported successfully",
+    "exportFailed": "Failed to export the report — please try again"
   }
 }

@@ -330,5 +330,32 @@
     "ariaBucketFilterLabel": "กรองตามกลุ่มเดดไลน์: {bucket}",
     "ariaBucketLabel": "กลุ่มเดดไลน์: {bucket}",
     "ariaKeyedStatusLabel": "สถานะคีย์: {status}"
+  },
+  "reports": {
+    "pageTitle": "รายงานสรุปการบริจาค",
+    "filterFrom": "ช่วงเวลา ตั้งแต่",
+    "filterTo": "ถึง",
+    "applyFilter": "แสดงรายงาน",
+    "clearFilter": "ล้างการกรอง",
+    "cardTotalAmount": "ยอดบริจาครวม (บาท)",
+    "cardReceiptCount": "จำนวนใบเสร็จ (ใบ)",
+    "cardAveragePerReceipt": "ยอดเฉลี่ยต่อใบ (บาท)",
+    "ariaCardTotalAmount": "ยอดบริจาครวม {value} บาท",
+    "ariaCardReceiptCount": "จำนวนใบเสร็จ {value} ใบ",
+    "ariaCardAveragePerReceipt": "ยอดเฉลี่ยต่อใบ {value} บาท",
+    "breakdownHeading": "รายละเอียดตามช่วงเวลา",
+    "groupByMonth": "รายเดือน",
+    "groupByDay": "รายวัน",
+    "columnPeriod": "ช่วงเวลา",
+    "columnReceiptCount": "จำนวนใบเสร็จ",
+    "columnTotalAmount": "ยอดรวม (บาท)",
+    "noDataHeading": "ไม่มีข้อมูลบริจาคในช่วงเวลานี้",
+    "noDataBody": "ลองเลือกช่วงเวลาอื่น",
+    "loadFailed": "โหลดรายงานไม่สำเร็จ — กรุณาตรวจสอบการเชื่อมต่อและลองอีกครั้ง",
+    "exportExcel": "ส่งออกรายงาน Excel (.xlsx)",
+    "exportCsv": "ส่งออกรายงาน CSV",
+    "generating": "กำลังสร้างไฟล์...",
+    "exportSuccessToast": "ส่งออกรายงานเรียบร้อยแล้ว",
+    "exportFailed": "ส่งออกรายงานไม่สำเร็จ — กรุณาลองใหม่อีกครั้ง"
   }
 }
