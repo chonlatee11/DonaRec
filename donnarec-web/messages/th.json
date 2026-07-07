@@ -6,7 +6,9 @@
   "nav": {
     "donations": "รายการบริจาค",
     "queue": "รอตรวจสอบ",
-    "settings": "ตั้งค่า"
+    "settings": "ตั้งค่า",
+    "eDonation": "ส่งออก e-Donation",
+    "reports": "รายงานสรุป"
   },
   "locale": {
     "th": "ภาษาไทย",
@@ -270,5 +272,63 @@
       "exampleLabel": "ตัวอย่าง",
       "freezeNote": "การเปลี่ยนรูปแบบมีผลกับใบเสร็จใหม่เท่านั้น ใบเสร็จที่ออกไปแล้วจะไม่เปลี่ยนรูปแบบ"
     }
+  },
+  "eDonationExport": {
+    "pageTitle": "ส่งออก e-Donation",
+    "tabExport": "ส่งออกข้อมูล",
+    "tabAging": "ติดตามสถานะคีย์",
+    "filterFrom": "วันที่ออกใบเสร็จ ตั้งแต่",
+    "filterTo": "ถึง",
+    "keyedStatusLabel": "สถานะคีย์",
+    "keyedStatusAll": "ทั้งหมด",
+    "keyedStatusNotKeyed": "ยังไม่คีย์",
+    "keyedStatusKeyed": "คีย์แล้ว",
+    "countPreview": "พบ {n} รายการที่ตรงเงื่อนไข",
+    "countPreviewUnavailable": "ตัวกรองนี้ไม่แสดงจำนวนตัวอย่างล่วงหน้า",
+    "exportExcel": "ส่งออก Excel (.xlsx)",
+    "exportCsv": "ส่งออก CSV",
+    "generating": "กำลังสร้างไฟล์...",
+    "noRecordsHeading": "ไม่พบรายการที่ตรงกับเงื่อนไข",
+    "noRecordsBody": "ลองเปลี่ยนช่วงวันที่หรือสถานะคีย์",
+    "exportFailed": "ส่งออกข้อมูลไม่สำเร็จ — กรุณาลองใหม่อีกครั้ง",
+    "noRecordsError": "ไม่มีรายการที่ตรงเงื่อนไขให้ส่งออก กรุณาเปลี่ยนตัวกรอง",
+    "successToast": "ส่งออกข้อมูลเรียบร้อยแล้ว — {n} รายการ",
+    "successToastNoCount": "ส่งออกข้อมูลเรียบร้อยแล้ว",
+    "confirmDialog": {
+      "title": "ยืนยันการส่งออกข้อมูล e-Donation",
+      "warning": "ไฟล์นี้มีเลขประจำตัวผู้เสียภาษี/บัตรประชาชนแบบเต็ม 13 หลักของผู้บริจาค {n} ราย การส่งออกจะถูกบันทึกในระบบ audit พร้อมชื่อผู้ดำเนินการ วันเวลา และช่วงข้อมูลที่เลือก กรุณาจัดเก็บและลบไฟล์อย่างปลอดภัยหลังใช้งาน ห้ามอัปโหลดไปยังระบบอื่นที่ไม่ปลอดภัย",
+      "warningNoCount": "ไฟล์นี้อาจมีเลขประจำตัวผู้เสียภาษี/บัตรประชาชนแบบเต็ม 13 หลักของผู้บริจาค การส่งออกจะถูกบันทึกในระบบ audit พร้อมชื่อผู้ดำเนินการ วันเวลา และช่วงข้อมูลที่เลือก กรุณาจัดเก็บและลบไฟล์อย่างปลอดภัยหลังใช้งาน ห้ามอัปโหลดไปยังระบบอื่นที่ไม่ปลอดภัย",
+      "confirm": "ยืนยันการส่งออก"
+    }
+  },
+  "aging": {
+    "bucketNotDue": "ยังไม่ถึงกำหนด",
+    "bucketNearDue": "ใกล้ครบกำหนด",
+    "bucketOverdue": "เกินกำหนด",
+    "clearBucketFilter": "ทั้งหมด",
+    "keyedStatusKeyedBadge": "คีย์เข้า e-Donation แล้ว",
+    "keyedStatusNotKeyedBadge": "ยังไม่คีย์",
+    "columnSelect": "เลือก",
+    "columnIssuedDate": "วันที่ออกใบเสร็จ / วันอนุมัติ",
+    "columnDonorName": "ชื่อผู้บริจาค",
+    "columnReceiptNo": "เลขที่ใบเสร็จ",
+    "columnDeadline": "เดดไลน์คีย์",
+    "columnBucket": "กลุ่ม",
+    "columnKeyedStatus": "สถานะคีย์",
+    "selectAllAria": "เลือกทั้งหมด",
+    "selectRowAria": "เลือกรายการ {receipt}",
+    "markKeyed": "ทำเครื่องหมายว่าคีย์แล้ว",
+    "unmarkKeyed": "ยกเลิกการทำเครื่องหมาย",
+    "clearSelection": "ล้างการเลือก",
+    "selectionCount": "เลือกแล้ว {n} รายการ",
+    "markSuccessToast": "ทำเครื่องหมายว่าคีย์เข้า e-Donation แล้ว {n} รายการ",
+    "unmarkSuccessToast": "ยกเลิกการทำเครื่องหมาย {n} รายการ",
+    "markFailed": "บันทึกสถานะคีย์ไม่สำเร็จ — กรุณาลองใหม่อีกครั้ง",
+    "loadFailed": "โหลดข้อมูลติดตามสถานะคีย์ไม่สำเร็จ — กรุณาลองอีกครั้ง",
+    "noUnkeyedHeading": "ทุกรายการคีย์เข้า e-Donation แล้ว",
+    "noUnkeyedBody": "ไม่มีรายการค้างคีย์ในขณะนี้",
+    "ariaBucketFilterLabel": "กรองตามกลุ่มเดดไลน์: {bucket}",
+    "ariaBucketLabel": "กลุ่มเดดไลน์: {bucket}",
+    "ariaKeyedStatusLabel": "สถานะคีย์: {status}"
   }
 }

@@ -6,7 +6,9 @@
   "nav": {
     "donations": "Donations",
     "queue": "Pending Review",
-    "settings": "Settings"
+    "settings": "Settings",
+    "eDonation": "e-Donation Export",
+    "reports": "Reports"
   },
   "locale": {
     "th": "ภาษาไทย",
@@ -270,5 +272,63 @@
       "exampleLabel": "Example",
       "freezeNote": "Changing the format only affects new receipts — already-issued receipts keep their original format"
     }
+  },
+  "eDonationExport": {
+    "pageTitle": "e-Donation Export",
+    "tabExport": "Export Data",
+    "tabAging": "Keyed-Status Tracking",
+    "filterFrom": "Issued date from",
+    "filterTo": "to",
+    "keyedStatusLabel": "Keyed status",
+    "keyedStatusAll": "All",
+    "keyedStatusNotKeyed": "Not keyed",
+    "keyedStatusKeyed": "Keyed",
+    "countPreview": "{n} records match",
+    "countPreviewUnavailable": "A count preview is not available for this filter",
+    "exportExcel": "Export Excel (.xlsx)",
+    "exportCsv": "Export CSV",
+    "generating": "Generating file...",
+    "noRecordsHeading": "No records match the filter",
+    "noRecordsBody": "Try a different date range or keyed status",
+    "exportFailed": "Export failed — please try again",
+    "noRecordsError": "No records match the filter to export — please change the filter",
+    "successToast": "Export complete — {n} records",
+    "successToastNoCount": "Export complete",
+    "confirmDialog": {
+      "title": "Confirm e-Donation Export",
+      "warning": "This file contains the full 13-digit national/tax ID of {n} donors. This export will be logged in the audit trail with the operator's name, time, and selected data range. Please store and delete the file securely after use. Do not upload it to any insecure system.",
+      "warningNoCount": "This file may contain the full 13-digit national/tax ID of donors. This export will be logged in the audit trail with the operator's name, time, and selected data range. Please store and delete the file securely after use. Do not upload it to any insecure system.",
+      "confirm": "Confirm Export"
+    }
+  },
+  "aging": {
+    "bucketNotDue": "Not due",
+    "bucketNearDue": "Near due",
+    "bucketOverdue": "Overdue",
+    "clearBucketFilter": "All",
+    "keyedStatusKeyedBadge": "Keyed",
+    "keyedStatusNotKeyedBadge": "Not keyed",
+    "columnSelect": "Select",
+    "columnIssuedDate": "Issued Date / Approved Date",
+    "columnDonorName": "Donor Name",
+    "columnReceiptNo": "Receipt No.",
+    "columnDeadline": "Keying Deadline",
+    "columnBucket": "Bucket",
+    "columnKeyedStatus": "Keyed Status",
+    "selectAllAria": "Select all",
+    "selectRowAria": "Select record {receipt}",
+    "markKeyed": "Mark as Keyed",
+    "unmarkKeyed": "Unmark as Keyed",
+    "clearSelection": "Clear Selection",
+    "selectionCount": "{n} selected",
+    "markSuccessToast": "Marked {n} records as keyed",
+    "unmarkSuccessToast": "Unmarked {n} records",
+    "markFailed": "Failed to save keyed status — please try again",
+    "loadFailed": "Failed to load keyed-status tracking data — please try again",
+    "noUnkeyedHeading": "All records are keyed",
+    "noUnkeyedBody": "No records pending keying at this time",
+    "ariaBucketFilterLabel": "Filter by deadline bucket: {bucket}",
+    "ariaBucketLabel": "Deadline bucket: {bucket}",
+    "ariaKeyedStatusLabel": "Keyed status: {status}"
   }
 }

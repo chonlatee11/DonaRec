@@ -48,3 +48,20 @@ export async function isAdminViewer(): Promise<boolean> {
   const roles = await getViewerRoles();
   return roles.includes("admin");
 }
+
+/**
+ * isCheckerOrAdminViewer — true when the current session's realm_access.roles
+ * includes "checker" OR "admin" (parallel structure to isAdminViewer).
+ *
+ * UX-layer only (T-05-06-UXGATE), same discipline as isAdminViewer's doc
+ * comment: drives the `/e-donation` nav-link visibility and the Screen 7
+ * server-component route redirect. The real authorization authority is Go's
+ * `edonationGroup.Use(RequireAnyRole(RoleChecker, RoleAdmin))` (05-02), which
+ * independently re-verifies the token's signature and re-checks the role on
+ * every request — a forged/stale client-side hint here can, at worst, show a
+ * nav link that 403s on the next request.
+ */
+export async function isCheckerOrAdminViewer(): Promise<boolean> {
+  const roles = await getViewerRoles();
+  return roles.includes("checker") || roles.includes("admin");
+}
