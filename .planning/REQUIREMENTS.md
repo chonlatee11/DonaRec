@@ -82,7 +82,7 @@
 ### Cross-cutting Non-functional
 
 - [ ] **NFR-06**: UI รองรับ 2 ภาษา ใช้งานบนเดสก์ท็อปและมือถือได้ (responsive) [M]
-- [ ] **NFR-08**: สำรองข้อมูล (backup) สม่ำเสมอและกู้คืนได้ [M]
+- [x] **NFR-08**: สำรองข้อมูล (backup) สม่ำเสมอและกู้คืนได้ [M]
 
 ## v2 Requirements
 
@@ -159,7 +159,7 @@ Which phases cover which requirements.
 | FR-30 | Phase 5 | Pending |
 | FR-31 | Phase 5 | Pending |
 | FR-32 | Phase 5 | Pending |
-| NFR-08 | Phase 5 | Pending |
+| NFR-08 | Phase 5 | Complete |
 | FR-01 | Phase 6 | Pending |
 | FR-02 | Phase 6 | Pending |
 | FR-03 | Phase 6 | Pending |

@@ -6,14 +6,14 @@ current_phase: 05
 current_phase_name: e-Donation Export, Reports & Admin Settings
 status: executing
 stopped_at: Phase 05 planned (7 plans, verified)
-last_updated: "2026-07-07T11:43:25.857Z"
+last_updated: "2026-07-07T12:03:53.285Z"
 last_activity: 2026-07-07
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 6
   completed_phases: 4
   total_plans: 37
-  completed_plans: 32
+  completed_plans: 33
   percent: 67
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 05 (e-Donation Export, Reports & Admin Settings) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 has one deferred human UI walkthrough (04-06 Task 4) pending phase-end /gsd-verify-work.
 Status: Ready to execute
 Last activity: 2026-07-07 — Phase 05 execution started
@@ -76,6 +76,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 04 P07 | 20min | 2 tasks | 11 files |
 | Phase 04 P08 | 13min | 2 tasks | 24 files |
 | Phase 05 P01 | 20min | 2 tasks | 20 files |
+| Phase 05 P03 | 20min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -127,6 +128,8 @@ Recent decisions affecting current work:
 - [Phase 04]: [Phase 04] Code-review fixes (04-REVIEW.md): CR-01/CR-02 (blockers) and WR-01/02/04/05/06/07 fixed with RED/GREEN tests; WR-03 (deduction_multiplier frozen-at-approval) documented as a known limitation rather than reworking the Approve transaction — see 04-REVIEW-FIXES-SUMMARY.md
 - [Phase ?]: [Phase 05] 05-01: GetDonationByID's SELECT list extended to include edonation_keyed_at/edonation_keyed_by (physical column order) so sqlc keeps reusing the Donation model type after migration 000013's ALTER TABLE — required to keep go build green
 - [Phase ?]: [Phase 05] 05-01: edonation.Config merges DTO+accessor into one type (NewConfig(*db.Queries)); FieldMapping.RowValues takes a plain map[string]string, not a concrete ExportRow type owned by a later plan
+- [Phase 05]: 05-03: pg_restore test-scope uses --no-owner --no-privileges (fresh unmigrated target has no roles); production restore.sh uses --role=donnarec_app and documents the role-provisioning prerequisite
+- [Phase 05]: 05-03: TestRestoreProof_MinIO uses minio-go SDK round trip instead of the mc CLI (not installed on test-runner host); functionally equivalent restore-completeness proof
 
 ### Pending Todos
 
@@ -164,7 +167,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-07T11:42:39.624Z
+Last session: 2026-07-07T12:02:57.943Z
 Stopped at: Phase 05 UI-SPEC approved
 Resume file: 
 None
