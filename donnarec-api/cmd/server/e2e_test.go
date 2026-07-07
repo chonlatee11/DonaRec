@@ -51,6 +51,7 @@ import (
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/edonation"
 	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
 	"github.com/donnarec/donnarec-api/internal/settings"
@@ -189,6 +190,12 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	settingsSvc := settings.NewSettingsService(pool, queries, settingsStore, logger)
 	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
 
+	// e-Donation export service + config accessor (Phase 5, plan 05-02, FR-30/D-75) —
+	// mirrors main.go wiring, reusing the SAME auditSvc + keyProvider as donationSvc.
+	edonationSvc := edonation.NewService(pool, queries, auditSvc, keyProvider, logger)
+	edonationCfg := edonation.NewConfig(queries)
+	edonationHandler := edonation.NewHandler(edonationSvc, edonationCfg, logger)
+
 	// Handlers.
 	userHandler := users.NewUserHandler(userSvc, logger)
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
@@ -207,7 +214,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		return u.ID, nil
 	}
 
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, logger)
 
 	return &e2eHarness{router: router, kc: kc, queries: queries, pool: pool, ctx: ctx, settingsStore: settingsStore}
 }

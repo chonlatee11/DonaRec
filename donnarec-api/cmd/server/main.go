@@ -20,6 +20,7 @@ import (
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/edonation"
 	"github.com/donnarec/donnarec-api/internal/i18n"
 	"github.com/donnarec/donnarec-api/internal/mailer"
 	"github.com/donnarec/donnarec-api/internal/pdf"
@@ -211,6 +212,12 @@ func main() {
 	// (D-61 — preview must go through the identical sandboxed pipeline as production).
 	settingsSvc := settings.NewSettingsService(pool, queries, receiptsStore, logger)
 
+	// e-Donation export service + config accessor (Phase 5, plan 05-02, FR-30/D-75).
+	// Reuses the SAME auditSvc + keyProvider as donationSvc — the export's audited
+	// decrypt (Service.Export) mirrors RevealPII's discipline exactly (D-64).
+	edonationSvc := edonation.NewService(pool, queries, auditSvc, keyProvider, logger)
+	edonationCfg := edonation.NewConfig(queries)
+
 	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
 	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
 	// (not in internal/auth) so the auth package stays DB-agnostic; pgx.ErrNoRows is
@@ -233,11 +240,12 @@ func main() {
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
 	slipHandler := donation.NewSlipHandler(slipSvc, logger)
 	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
+	edonationHandler := edonation.NewHandler(edonationSvc, edonationCfg, logger)
 
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -288,7 +296,8 @@ func main() {
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
 //  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin) + ResolveAppUser
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, logger *zap.Logger) *gin.Engine {
+//  7. e-Donation /api/edonation group — RequireAuth() + RequireAnyRole(Checker,Admin) + ResolveAppUser
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, edonationHandler *edonation.Handler, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -334,6 +343,11 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	adminGroup.POST("/settings/images/:slot", settingsHandler.UploadImage)
 	adminGroup.POST("/settings/preview", settingsHandler.Preview)
 	adminGroup.POST("/settings/preview/pdf", settingsHandler.PreviewPDF)
+
+	// ---- e-Donation field-mapping/threshold config: Admin-only (Phase 5, plan
+	// 05-02, D-75/NFR-09 — editable without a deploy) ----
+	adminGroup.GET("/edonation-config", edonationHandler.GetConfig)
+	adminGroup.PUT("/edonation-config", edonationHandler.UpdateConfig)
 
 	// ---- Maker/Checker/Admin — /api/donations (all staff) ----
 	// Pattern E: RequireRoles after RequireAuth — claims must already exist in context.
@@ -388,6 +402,14 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// POST /:id/resend — re-enqueue an outbox issue_receipt job for an issued donation
 	// (D-56/D-57, FR-27, plan 04-06). Never allocates a new number or re-renders.
 	checkerGroup.POST("/:id/resend", donationHandler.Resend)
+
+	// ---- Checker/Admin — /api/edonation (Phase 5, plan 05-02, FR-30, D-63) ----
+	// RequireAnyRole (OR-guard, not RequireRoles/AND — D-63) so a Checker-only or
+	// Admin-only user both pass; a Maker-only user gets 403.
+	edonationGroup := api.Group("/edonation")
+	edonationGroup.Use(auth.RequireAnyRole(auth.RoleChecker, auth.RoleAdmin))
+	edonationGroup.Use(auth.ResolveAppUser(appUserResolver, logger))
+	edonationGroup.GET("/export", edonationHandler.Export)
 
 	return router
 }
