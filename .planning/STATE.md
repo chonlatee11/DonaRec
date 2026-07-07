@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 current_phase_name: e-Donation Export, Reports & Admin Settings
-status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-07-07T14:53:31.519Z"
+status: verifying
+stopped_at: Completed 05-07-PLAN.md
+last_updated: "2026-07-07T15:12:52.153Z"
 last_activity: 2026-07-07
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 6
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 37
-  completed_plans: 37
-  percent: 67
+  completed_plans: 38
+  percent: 83
 ---
 
 # Project State
@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 Phase: 05 (e-Donation Export, Reports & Admin Settings) — EXECUTING
 Plan: 7 of 7
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 has one deferred human UI walkthrough (04-06 Task 4) pending phase-end /gsd-verify-work.
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-07-07 — Phase 05 execution started
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
@@ -81,6 +81,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 05 P04 | 30min | 3 tasks | 8 files |
 | Phase 05 P05 | 8min | 3 tasks | 10 files |
 | Phase 05 P06 | 6min | 3 tasks | 19 files |
+| Phase 05 P07 | 3min | 2 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -143,6 +144,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-05: report.Service takes only *db.Queries (no keyProvider/auditSvc) — reportGroup carries NO RequireAnyRole/RequireRoles gate (D-71), and Export writes zero audit_log rows since there is no PII to reveal
 - [Phase 05]: Record-count preview (Export tab) derives an exact client-side count from the shared aging query for the default not_keyed filter; hidden (not fabricated) for all/keyed since no backend count endpoint exists for those scopes
 - [Phase 05]: AgingTable is the Tab B smart container owning the shared aging query/mutation/selection state; AgingStatCards/BulkActionBar stay presentational
+- [Phase ?]: 05-07: added lib/reports.ts as shared typed client-fetcher module (mirrors 05-06 lib/edonation.ts precedent) plus currentFiscalYearDateRange() default for the Screen 8 filter bar
+- [Phase ?]: 05-07: EdonationConfigTab is a self-contained 5th SettingsTabs tab with its own save button, independent of the top-level 'save all tabs' button, since it persists edonation_config (not receipt settings)
 
 ### Pending Todos
 
@@ -180,7 +183,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-07T14:53:00.087Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-07-07T15:12:52.143Z
+Stopped at: Completed 05-07-PLAN.md
 Resume file: 
 None

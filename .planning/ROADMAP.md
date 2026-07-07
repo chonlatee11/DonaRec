@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Gap-less Receipt Numbering Core (★)** - Concurrency-proven, per-fiscal-year, gap-less number allocator built before any issuance flow (completed 2026-06-25)
 - [x] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt (completed 2026-07-01)
 - [x] **Phase 4: Receipt PDF + Email Delivery (Outbox Worker)** - Async Thai/EN tax-compliant PDF and email pipeline with retry, decoupled from the issuance transaction (completed 2026-07-04)
-- [ ] **Phase 5: e-Donation Export, Reports & Admin Settings** - Access-controlled e-Donation export, donation reports, no-deploy config, and verified backup/restore
+- [x] **Phase 5: e-Donation Export, Reports & Admin Settings** - Access-controlled e-Donation export, donation reports, no-deploy config, and verified backup/restore (completed 2026-07-07)
 - [ ] **Phase 6: Public Donation Web Form (Flow B)** - Public bilingual donation form with slip upload, consent, bot protection, and pending-review queue feeding the existing pipeline
 
 ## Phase Details
@@ -168,7 +168,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Staff can view donation summary reports by date range and total amount.
   4. A backup runs on a regular schedule and a documented restore has been performed successfully (restore verified, not just configured).
 
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans complete
 
 Plans:
 **Wave 1**
@@ -194,7 +194,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 05-07-PLAN.md — Wave 6: frontend Screen 8 (Reports) + report BFF + e-Donation config admin tab (FR-32, D-75)
+- [x] 05-07-PLAN.md — Wave 6: frontend Screen 8 (Reports) + report BFF + e-Donation config admin tab (FR-32, D-75)
 
 **UI hint**: yes
 
@@ -231,5 +231,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
-| 5. e-Donation Export, Reports & Admin Settings | 6/7 | In Progress|  |
+| 5. e-Donation Export, Reports & Admin Settings | 7/7 | Complete   | 2026-07-07 |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
