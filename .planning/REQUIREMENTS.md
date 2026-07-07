@@ -77,7 +77,7 @@
 
 - [x] **FR-33**: Admin ตั้งค่าเทมเพลต ลายน้ำ ลายเซ็น และรูปแบบเลขที่ได้ (แยก config จากโค้ด) [S]
 - [x] **NFR-09**: แยกการตั้งค่า (เทมเพลต/เลข/ลายเซ็น) ออกจากโค้ด ปรับได้โดยไม่ต้อง deploy [M]
-- [ ] **FR-32**: รายงานสรุปการบริจาค (ตามช่วงเวลา/ยอดรวม) [S]
+- [x] **FR-32**: รายงานสรุปการบริจาค (ตามช่วงเวลา/ยอดรวม) [S]
 
 ### Cross-cutting Non-functional
 
@@ -158,7 +158,7 @@ Which phases cover which requirements.
 | NFR-09 | Phase 4 | Complete |
 | FR-30 | Phase 5 | Complete |
 | FR-31 | Phase 5 | Complete |
-| FR-32 | Phase 5 | Pending |
+| FR-32 | Phase 5 | Complete |
 | NFR-08 | Phase 5 | Complete |
 | FR-01 | Phase 6 | Pending |
 | FR-02 | Phase 6 | Pending |
