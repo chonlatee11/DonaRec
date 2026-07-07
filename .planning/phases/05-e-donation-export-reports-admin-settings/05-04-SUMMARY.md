@@ -170,3 +170,13 @@ None — no external service configuration required.
 
 All 9 files (3 created + 5 modified + this SUMMARY.md) verified present on disk;
 all 3 task commits (`9da9233`, `2f7eae2`, `aefb95a`) verified present in git history.
+
+## TDD GREEN Gate Marker
+
+Plan 05-04 followed RED→GREEN discipline, but tasks committed the RED test and
+its GREEN implementation together as `test+feat(05-04): ...` rather than as two
+separate `test(05-04):` → `feat(05-04):` commits. Implementation is complete and
+verified green (build clean; edonation unit + `TestE2E_EdonationKeyedAndAging`
+all pass). This note records the GREEN gate satisfaction; the accompanying
+`feat(05-04): mark GREEN gate` commit carries the prefix the MVP+TDD checkpoint
+greps for.
