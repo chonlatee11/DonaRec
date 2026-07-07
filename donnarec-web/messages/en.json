@@ -213,7 +213,8 @@
       "template": "Receipt Template",
       "images": "Images",
       "taxText": "Tax Deduction Text",
-      "numberFormat": "Number Format"
+      "numberFormat": "Number Format",
+      "edonation": "e-Donation"
     },
     "save": "Save Settings",
     "saving": "Saving...",
@@ -271,6 +272,24 @@
       "prefixLabel": "Prefix (optional)",
       "exampleLabel": "Example",
       "freezeNote": "Changing the format only affects new receipts — already-issued receipts keep their original format"
+    },
+    "edonation": {
+      "heading": "e-Donation Config",
+      "save": "Save e-Donation Config",
+      "saving": "Saving...",
+      "saveSuccessToast": "e-Donation config saved successfully",
+      "saveError": "Failed to save e-Donation config — please try again",
+      "loadError": "Could not load e-Donation config — please try again",
+      "fieldMappingLabel": "Export field mapping",
+      "fieldMappingHelper": "Set the column order and Thai/English header labels for the e-Donation export file",
+      "columnKeyLabel": "Column key",
+      "headerThLabel": "Header (Thai)",
+      "headerEnLabel": "Header (English)",
+      "moveColumnUpAria": "Move column {column} up",
+      "moveColumnDownAria": "Move column {column} down",
+      "cashTypeLabelLabel": "Cash type label",
+      "nearDueDaysLabel": "Days before due (near-due threshold)",
+      "nearDueDaysHelper": "Number of days before the keying deadline to count as \"near due\""
     }
   },
   "eDonationExport": {

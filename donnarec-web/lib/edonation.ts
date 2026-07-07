@@ -160,3 +160,82 @@ export async function downloadExport(
   anchor.remove();
   URL.revokeObjectURL(url);
 }
+
+// ---------------------------------------------------------------------------
+// e-Donation admin config — CLIENT-side BFF fetchers (5th SettingsTabs tab,
+// D-75/NFR-09, plan 05-02/05-07).
+// ---------------------------------------------------------------------------
+
+/** One ordered export column — mirrors FieldMappingColumn (Go, internal/edonation/config.go). */
+export interface FieldMappingColumn {
+  column_key: string;
+  header_th: string;
+  header_en: string;
+}
+
+/**
+ * GET/PUT /api/bff/edonation-config response shape — mirrors ConfigResponse
+ * (Go, internal/edonation/handler.go).
+ */
+export interface EdonationConfig {
+  field_mapping: FieldMappingColumn[];
+  cash_type_label: string;
+  near_due_days: number;
+  updated_at: string;
+  updated_by: string;
+}
+
+/**
+ * PUT request body — mirrors ConfigRequest (Go). The server-owned
+ * updated_at/updated_by fields are never sent on save (mirrors
+ * lib/settings.ts's SettingsFormValues Omit<> discipline).
+ */
+export type EdonationConfigFormValues = Pick<
+  EdonationConfig,
+  "field_mapping" | "cash_type_label" | "near_due_days"
+>;
+
+/**
+ * fetchEdonationConfig — CLIENT-side fetcher for GET
+ * /api/bff/edonation-config (D-75/NFR-09). Admin-only in practice: the Go
+ * route this proxies is gated by adminGroup.RequireRoles(Admin); this
+ * fetcher is only ever called from EdonationConfigTab, which only renders
+ * inside the already-Admin-gated /admin/settings route.
+ */
+export async function fetchEdonationConfig(): Promise<EdonationConfig> {
+  const res = await fetch("/api/bff/edonation-config", {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+  if (!res.ok) {
+    throw new Error(
+      await parseErrorMessage(res, "โหลดการตั้งค่า e-Donation ไม่สำเร็จ — กรุณาลองอีกครั้ง")
+    );
+  }
+  const raw = (await res.json()) as { data?: EdonationConfig };
+  if (!raw.data) {
+    throw new Error("โหลดการตั้งค่า e-Donation ไม่สำเร็จ — กรุณาลองอีกครั้ง");
+  }
+  return raw.data;
+}
+
+/**
+ * saveEdonationConfig — CLIENT-side mutation for PUT
+ * /api/bff/edonation-config (D-75/NFR-09). Persists field mapping order/
+ * headers, cash_type_label (D-65), and near_due_days (D-68 aging threshold)
+ * with no deploy required.
+ */
+export async function saveEdonationConfig(
+  values: EdonationConfigFormValues
+): Promise<void> {
+  const res = await fetch("/api/bff/edonation-config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify(values),
+  });
+  if (!res.ok) {
+    throw new Error(
+      await parseErrorMessage(res, "บันทึกการตั้งค่า e-Donation ไม่สำเร็จ — กรุณาลองใหม่อีกครั้ง")
+    );
+  }
+}
