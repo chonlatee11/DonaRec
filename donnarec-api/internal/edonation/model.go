@@ -7,7 +7,11 @@
 // documents ("never expose raw DB rows to callers").
 package edonation
 
-import "time"
+import (
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
 
 // ExportFilter narrows the export source to an optional donated_at date range and/or
 // an optional keyed-status boolean (D-66). All fields are optional — nil/empty means
@@ -33,4 +37,38 @@ type ExportRow struct {
 	DonatedAt        string // "YYYY-MM-DD"
 	ReceiptFormatted string
 	DonorName        string
+}
+
+// KeyedRequest is the input DTO for Service.SetKeyed — bulk or per-row
+// mark/unmark of "คีย์เข้า e-Donation แล้ว" (FR-31/D-67). DonationIDs are
+// validated as well-formed UUID strings and converted to pgtype.UUID at the
+// HANDLER boundary, BEFORE this DTO is ever constructed (T-05-04-SQLI:
+// malformed IDs must 4xx before the ANY($1::uuid[]) query ever runs, never a
+// 500). Keyed=true marks; Keyed=false unmarks (D-67).
+type KeyedRequest struct {
+	DonationIDs []pgtype.UUID
+	Keyed       bool
+}
+
+// AgingRow is one unkeyed issued donation, bucketed by its e-Donation keying
+// deadline (FR-31/D-68). ApprovedAt (never DonatedAt or an "issued_at" —
+// donations has NO issued_at column) is the D-68 aging base date; Deadline is
+// computeDeadline(ApprovedAt); Bucket is computeBucket(ApprovedAt, now,
+// near_due_days from edonation_config).
+type AgingRow struct {
+	ID               string
+	DonorName        string
+	ReceiptFormatted string
+	ApprovedAt       time.Time
+	Deadline         time.Time
+	Bucket           AgingBucket
+	Keyed            bool
+}
+
+// AgingResult is the full aging view response: bucketed rows (ordered by
+// ApprovedAt, oldest first — inherited from SearchUnkeyedIssued's ORDER BY)
+// plus per-bucket counts (not_due/near_due/overdue) for summary cards.
+type AgingResult struct {
+	Rows   []AgingRow
+	Counts map[AgingBucket]int
 }

@@ -159,6 +159,169 @@ func (s *Service) Export(ctx context.Context, filter ExportFilter, claims auth.K
 	return rows, nil
 }
 
+// SetKeyed marks or unmarks "คีย์เข้า e-Donation แล้ว" for a bulk or per-row
+// selection of donations (FR-31/SC#2, D-67, T-05-04-AUDITGAP). Within ONE
+// WithTx:
+//
+//  1. Role gate: Checker/Admin only (service-layer defense-in-depth, mirrors
+//     Export's discipline).
+//  2. Determine which of req.DonationIDs are CURRENTLY status='issued' — the
+//     status='issued' scope guard lives on this pre-update SELECT, not just
+//     the UPDATE's WHERE clause, so the audit-write loop below can write
+//     exactly one row per donation THAT ACTUALLY MATCHED the guard (a
+//     cancelled/draft id passed in the same request is silently excluded
+//     from both the UPDATE and the audit trail — T-05-04-IDOR).
+//  3. SetKeyedBulk (plain boolean UPDATE, no allocator/locking machinery —
+//     05-RESEARCH.md Anti-Patterns) scoped to status='issued'.
+//  4. Append ONE audit row PER matched donation_id (action
+//     "edonation.mark_keyed" or "edonation.unmark_keyed", D-67 — distinct
+//     from Export's single-summary-row rationale, Pattern 4) — if any
+//     AppendAuditEntryTx call fails, the whole mutation rolls back (D-67
+//     "ทุกการติ๊ก/เอาออก audit" — never a silent partial write).
+//  5. Commit.
+func (s *Service) SetKeyed(ctx context.Context, req KeyedRequest, claims auth.KeycloakClaims, actorUserID pgtype.UUID) error {
+	// Role gate — reject before any DB call (mirrors Export's D-46 discipline).
+	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
+		return ErrForbidden
+	}
+
+	if len(req.DonationIDs) == 0 {
+		return nil
+	}
+
+	action := "edonation.mark_keyed"
+	if !req.Keyed {
+		action = "edonation.unmark_keyed"
+	}
+
+	var keyedAt pgtype.Timestamptz
+	var keyedBy pgtype.UUID
+	if req.Keyed {
+		keyedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+		keyedBy = actorUserID
+	}
+
+	return dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		qtx := s.queries.WithTx(tx)
+
+		// Step 2: pre-update issued-only scope guard (T-05-04-IDOR) — determines
+		// exactly which selected ids are eligible BEFORE the bulk UPDATE runs, so
+		// the per-donation audit loop below matches the UPDATE's actual blast
+		// radius precisely (a cancelled id in the same request produces neither a
+		// state change nor an audit row).
+		rows, queryErr := tx.Query(ctx,
+			`SELECT id FROM donations WHERE id = ANY($1::uuid[]) AND status = 'issued'`,
+			req.DonationIDs)
+		if queryErr != nil {
+			return fmt.Errorf("edonation: select issued scope for keyed mutation: %w", queryErr)
+		}
+		var issuedIDs []pgtype.UUID
+		for rows.Next() {
+			var id pgtype.UUID
+			if scanErr := rows.Scan(&id); scanErr != nil {
+				rows.Close()
+				return fmt.Errorf("edonation: scan issued scope row: %w", scanErr)
+			}
+			issuedIDs = append(issuedIDs, id)
+		}
+		rows.Close()
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return fmt.Errorf("edonation: iterate issued scope rows: %w", rowsErr)
+		}
+
+		if len(issuedIDs) == 0 {
+			// Nothing in the selection is currently issued — no-op (T-05-04-IDOR):
+			// no UPDATE, no audit rows, no error (mirrors the bulk-mark
+			// all-cancelled-ids case: a legitimate empty result, not a failure).
+			return nil
+		}
+
+		// Step 3: bulk UPDATE — status='issued' guard duplicated here as
+		// defense-in-depth (mirrors donations.sql's other lifecycle UPDATEs);
+		// the pre-update SELECT above is what the audit loop actually trusts.
+		if setErr := qtx.SetKeyedBulk(ctx, db.SetKeyedBulkParams{
+			Keyed:       req.Keyed,
+			KeyedAt:     keyedAt,
+			KeyedBy:     keyedBy,
+			DonationIds: issuedIDs,
+		}); setErr != nil {
+			return fmt.Errorf("edonation: set keyed bulk: %w", setErr)
+		}
+
+		// Step 4: exactly ONE audit row PER matched donation (D-67) — NOT one
+		// summary row (Pattern 4, distinct from Export's Pattern 3 rationale).
+		for _, id := range issuedIDs {
+			afterJSON, _ := json.Marshal(map[string]any{
+				"donation_id": id.String(),
+				"keyed":       req.Keyed,
+			})
+			if auditErr := s.auditSvc.AppendAuditEntryTx(ctx, tx, audit.AuditEntry{
+				ActorID:    claims.Subject,
+				ActorEmail: claims.ActorIdentity(),
+				Action:     action,
+				Resource:   "/api/edonation/keyed",
+				AfterJSON:  afterJSON,
+			}); auditErr != nil {
+				return fmt.Errorf("edonation: audit %s for donation %s: %w", action, id.String(), auditErr)
+			}
+		}
+
+		return nil
+	})
+}
+
+// Aging returns the 3-bucket (not_due/near_due/overdue) aging view of all
+// unkeyed issued donations (FR-31/SC#2, D-68). now and nearDueDays are always
+// caller-supplied (handler resolves now from an optional query param or the
+// wall clock, and nearDueDays from edonation_config via Config.GetConfig) —
+// Service.Aging itself never reads the wall clock or the config table
+// directly, keeping computeBucket's pure/testable discipline all the way up
+// to this method (mirrors aging.go's own "caller passes now" contract).
+//
+// Role gate: Checker/Admin only — ErrForbidden otherwise (T-05-04-RBAC
+// defense-in-depth; the real authority is the RequireAnyRole route guard).
+func (s *Service) Aging(ctx context.Context, claims auth.KeycloakClaims, now time.Time, nearDueDays int) (AgingResult, error) {
+	if !claims.HasRole(auth.RoleChecker) && !claims.HasRole(auth.RoleAdmin) {
+		return AgingResult{}, ErrForbidden
+	}
+
+	dbRows, err := s.queries.SearchUnkeyedIssued(ctx)
+	if err != nil {
+		return AgingResult{}, fmt.Errorf("edonation: search unkeyed issued: %w", err)
+	}
+
+	result := AgingResult{
+		Rows: make([]AgingRow, 0, len(dbRows)),
+		Counts: map[AgingBucket]int{
+			BucketNotDue:  0,
+			BucketNearDue: 0,
+			BucketOverdue: 0,
+		},
+	}
+	for _, r := range dbRows {
+		receiptFormatted := ""
+		if r.ReceiptFormatted != nil {
+			receiptFormatted = *r.ReceiptFormatted
+		}
+
+		approvedAt := r.ApprovedAt.Time
+		bucket := computeBucket(approvedAt, now, nearDueDays)
+		result.Counts[bucket]++
+
+		result.Rows = append(result.Rows, AgingRow{
+			ID:               r.ID.String(),
+			DonorName:        r.DonorName,
+			ReceiptFormatted: receiptFormatted,
+			ApprovedAt:       approvedAt,
+			Deadline:         computeDeadline(approvedAt),
+			Bucket:           bucket,
+			Keyed:            r.EdonationKeyed,
+		})
+	}
+
+	return result, nil
+}
+
 // dateStr converts a pgtype.Date to a "YYYY-MM-DD" string, or "" if invalid.
 // Duplicated (rather than imported) from internal/donation's private helper of the
 // same name/behavior — that helper is unexported in a different package.
