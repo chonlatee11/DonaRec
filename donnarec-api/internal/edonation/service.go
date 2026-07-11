@@ -204,14 +204,19 @@ func (s *Service) SetKeyed(ctx context.Context, req KeyedRequest, claims auth.Ke
 	return dbhelpers.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		qtx := s.queries.WithTx(tx)
 
-		// Step 2: pre-update issued-only scope guard (T-05-04-IDOR) — determines
-		// exactly which selected ids are eligible BEFORE the bulk UPDATE runs, so
-		// the per-donation audit loop below matches the UPDATE's actual blast
-		// radius precisely (a cancelled id in the same request produces neither a
-		// state change nor an audit row).
+		// Step 2: pre-update scope guard (T-05-04-IDOR + WR-01) — determines
+		// exactly which selected ids will ACTUALLY transition BEFORE the bulk
+		// UPDATE runs, so the per-donation audit loop below matches the UPDATE's
+		// real blast radius precisely. Two exclusions apply here:
+		//   - status <> 'issued' (a cancelled id in the same request)
+		//   - edonation_keyed already equals the requested target
+		// The second guard (WR-02) means marking a mixed selection of
+		// already-keyed + not-yet-keyed rows only rewrites the not-yet-keyed
+		// subset: already-keyed rows keep their original keyed_at/keyed_by
+		// provenance and produce no misleading "new keying event" audit row.
 		rows, queryErr := tx.Query(ctx,
-			`SELECT id FROM donations WHERE id = ANY($1::uuid[]) AND status = 'issued'`,
-			req.DonationIDs)
+			`SELECT id FROM donations WHERE id = ANY($1::uuid[]) AND status = 'issued' AND edonation_keyed <> $2`,
+			req.DonationIDs, req.Keyed)
 		if queryErr != nil {
 			return fmt.Errorf("edonation: select issued scope for keyed mutation: %w", queryErr)
 		}
@@ -230,9 +235,10 @@ func (s *Service) SetKeyed(ctx context.Context, req KeyedRequest, claims auth.Ke
 		}
 
 		if len(issuedIDs) == 0 {
-			// Nothing in the selection is currently issued — no-op (T-05-04-IDOR):
-			// no UPDATE, no audit rows, no error (mirrors the bulk-mark
-			// all-cancelled-ids case: a legitimate empty result, not a failure).
+			// Nothing in the selection actually transitions — every id is either
+			// not issued or already at the requested keyed value — so this is a
+			// no-op (T-05-04-IDOR / WR-02): no UPDATE, no audit rows, no error (a
+			// legitimate empty result, not a failure).
 			return nil
 		}
 
