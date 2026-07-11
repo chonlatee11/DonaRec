@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: public-donation-web-form-flow-b
 status: executing
 stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-07-11T06:35:24.071Z"
+last_updated: "2026-07-11T06:46:47.688Z"
 last_activity: 2026-07-11
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 46
-  completed_plans: 40
+  completed_plans: 41
   percent: 83
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 06 (public-donation-web-form-flow-b) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
 Status: Ready to execute
 Last activity: 2026-07-11 — Phase 06 execution started
@@ -83,6 +83,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 05 P06 | 6min | 3 tasks | 19 files |
 | Phase 05 P07 | 3min | 2 tasks | 12 files |
 | Phase 06 P01 | 25min | 2 tasks | 13 files |
+| Phase 06 P02 | 8min | 1 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -150,6 +151,9 @@ Recent decisions affecting current work:
 - [Phase ?]: [Phase 06] 06-01: donations.source is TEXT+CHECK (flow_a/flow_b), not an enum — matches existing sqlc.narg D-53 filter pattern; DEFAULT 'flow_a' backfills all pre-existing rows
 - [Phase ?]: [Phase 06] 06-01: public-web system user seeded with id=keycloak_subject=00000000-0000-4000-8000-000000000006 (SAME fixed UUID, not a readable sentinel) — prevents audit.parseUUID rollback (Pitfall 1); assigned least-privileged 'maker' role (T-06-03), never issued a real Keycloak credential
 - [Phase ?]: [Phase 06] 06-01: ListFilter.Source/DonationListItem.Source live in internal/donation/model.go (plan's files_modified inaccurately pointed to service.go); DonationListItem.Source exposed per-row for plan 07's queue screen
+- [Phase 06]: [Phase 06] 06-02: captcha.Middleware is a struct wrapping Verifier with a VerifyTurnstile() method, matching 06-PATTERNS.md's captchaMW.VerifyTurnstile() wiring call site for plan 03
+- [Phase 06]: [Phase 06] 06-02: TurnstileVerifier has two constructors (NewTurnstileVerifier for prod, NewTurnstileVerifierWithClient as test seam) instead of exported fields, preserving the black-box _test package convention
+- [Phase 06]: [Phase 06] 06-02: TURNSTILE_SECRET_KEY loaded into config but not added to validate()'s required-env map -- enforcement deferred to plan 03 when the route is wired
 
 ### Pending Todos
 
@@ -187,7 +191,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-11T06:35:24.060Z
+Last session: 2026-07-11T06:46:47.677Z
 Stopped at: Completed 06-01-PLAN.md
 Resume file: 
 None

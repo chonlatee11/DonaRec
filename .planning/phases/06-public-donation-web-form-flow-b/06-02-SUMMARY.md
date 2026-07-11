@@ -141,3 +141,7 @@ None - no external service configuration required by this plan. `TURNSTILE_SECRE
 ---
 *Phase: 06-public-donation-web-form-flow-b*
 *Completed: 2026-07-11*
+
+## Self-Check: PASSED
+
+All created files verified present on disk; all commit hashes (a081c01, f6b6cfb, 2227715) verified present in git log.

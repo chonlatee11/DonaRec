@@ -71,7 +71,7 @@
 - [ ] **FR-03**: แสดงและบันทึกการให้ความยินยอม (consent) ตาม PDPA ก่อนส่งข้อมูล [M]
 - [ ] **FR-06**: รองรับการเลือกภาษา ไทย/อังกฤษ บนเว็บฟอร์ม [M]
 - [ ] **FR-05**: แจ้งสถานะ/ส่งอีเมลว่าได้รับรายการแล้ว (ยังไม่ใช่ใบเสร็จ) [S]
-- [ ] **FR-04**: ป้องกันสแปม/บอท (CAPTCHA / rate limiting) [S]
+- [x] **FR-04**: ป้องกันสแปม/บอท (CAPTCHA / rate limiting) [S]
 
 ### Reports & Settings (รายงานและการตั้งค่า)
 
@@ -165,7 +165,7 @@ Which phases cover which requirements.
 | FR-03 | Phase 6 | Pending |
 | FR-06 | Phase 6 | Pending |
 | FR-05 | Phase 6 | Pending |
-| FR-04 | Phase 6 | Pending |
+| FR-04 | Phase 6 | Complete |
 | FR-08 | Phase 6 | Pending |
 | NFR-06 | Phase 6 | Pending |
 
