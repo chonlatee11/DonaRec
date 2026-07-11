@@ -219,7 +219,7 @@ Plans:
   4. The public form is protected against spam/bots via rate limiting and CAPTCHA, and the donor receives an acknowledgement email stating the request was received (explicitly not yet a receipt).
   5. Staff see a "รอตรวจสอบ" pending-review queue of web submissions, and the back-office UI is responsive and usable in Thai/English on desktop and mobile.
 
-**Plans**: 3/8 plans executed
+**Plans**: 4/8 plans executed
 
 **Wave 1** *(parallel — no cross-deps, disjoint files)*
 
@@ -229,7 +229,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 06-03-PLAN.md — Public submission core (TDD ★): CreatePublicSubmission atomic tx + public_handler + unauthenticated /api/public route group + E2E integration gate
+- [x] 06-03-PLAN.md — Public submission core (TDD ★): CreatePublicSubmission atomic tx + public_handler + unauthenticated /api/public route group + E2E integration gate
 - [ ] 06-07-PLAN.md — Staff pending-review queue (Screen 11) + SourceBadge + source filter + Screen 1/3 amendments (FR-08)
 
 **Wave 3** *(blocked on Wave 2)*
@@ -257,4 +257,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
 | 5. e-Donation Export, Reports & Admin Settings | 8/8 | Complete   | 2026-07-07 |
-| 6. Public Donation Web Form (Flow B) | 3/8 | In Progress|  |
+| 6. Public Donation Web Form (Flow B) | 4/8 | In Progress|  |
