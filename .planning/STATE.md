@@ -5,15 +5,15 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: public-donation-web-form-flow-b
 status: executing
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-07-11T06:46:47.688Z"
+stopped_at: Completed 06-05-PLAN.md
+last_updated: "2026-07-11T07:03:29.386Z"
 last_activity: 2026-07-11
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 46
-  completed_plans: 41
+  completed_plans: 42
   percent: 83
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 06 (public-donation-web-form-flow-b) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
 Status: Ready to execute
 Last activity: 2026-07-11 — Phase 06 execution started
@@ -84,6 +84,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 05 P07 | 3min | 2 tasks | 12 files |
 | Phase 06 P01 | 25min | 2 tasks | 13 files |
 | Phase 06 P02 | 8min | 1 tasks | 9 files |
+| Phase 06 P05 | 15min | 2 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -154,6 +155,9 @@ Recent decisions affecting current work:
 - [Phase 06]: [Phase 06] 06-02: captcha.Middleware is a struct wrapping Verifier with a VerifyTurnstile() method, matching 06-PATTERNS.md's captchaMW.VerifyTurnstile() wiring call site for plan 03
 - [Phase 06]: [Phase 06] 06-02: TurnstileVerifier has two constructors (NewTurnstileVerifier for prod, NewTurnstileVerifierWithClient as test seam) instead of exported fields, preserving the black-box _test package convention
 - [Phase 06]: [Phase 06] 06-02: TURNSTILE_SECRET_KEY loaded into config but not added to validate()'s required-env map -- enforcement deferred to plan 03 when the route is wired
+- [Phase 06]: [Phase 06] 06-05: public fonts live in app/fonts.ts (not app/layout.tsx) — Next.js rejects named exports from layout.tsx files; .variable applied only in (public)/layout.tsx, never globally
+- [Phase 06]: [Phase 06] 06-05: .theme-public HSL triplets recomputed from locked hex (not copied from UI-SPEC's HSL column, which had a transposed-digit typo on destructive text: 32 -> 3.2)
+- [Phase 06]: [Phase 06] 06-05: added --public-destructive-wash + scoped --card-foreground/--popover-foreground=ink in .theme-public beyond the plan's literal var list, for rendering-fidelity correctness
 
 ### Pending Todos
 
@@ -191,7 +195,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-11T06:46:47.677Z
-Stopped at: Completed 06-01-PLAN.md
+Last session: 2026-07-11T07:03:29.375Z
+Stopped at: Completed 06-05-PLAN.md
 Resume file: 
 None

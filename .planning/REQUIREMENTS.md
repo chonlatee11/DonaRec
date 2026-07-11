@@ -69,7 +69,7 @@
 - [ ] **FR-01**: ผู้บริจาคกรอกแบบฟอร์มบริจาค (ข้อมูลผู้บริจาค + จำนวนเงิน + วันที่บริจาค) [M]
 - [ ] **FR-02**: ผู้บริจาคอัปโหลดไฟล์สลิป (jpg/png/pdf, จำกัดขนาด, ตรวจชนิดไฟล์) [M]
 - [ ] **FR-03**: แสดงและบันทึกการให้ความยินยอม (consent) ตาม PDPA ก่อนส่งข้อมูล [M]
-- [ ] **FR-06**: รองรับการเลือกภาษา ไทย/อังกฤษ บนเว็บฟอร์ม [M]
+- [x] **FR-06**: รองรับการเลือกภาษา ไทย/อังกฤษ บนเว็บฟอร์ม [M]
 - [ ] **FR-05**: แจ้งสถานะ/ส่งอีเมลว่าได้รับรายการแล้ว (ยังไม่ใช่ใบเสร็จ) [S]
 - [x] **FR-04**: ป้องกันสแปม/บอท (CAPTCHA / rate limiting) [S]
 
@@ -81,7 +81,7 @@
 
 ### Cross-cutting Non-functional
 
-- [ ] **NFR-06**: UI รองรับ 2 ภาษา ใช้งานบนเดสก์ท็อปและมือถือได้ (responsive) [M]
+- [x] **NFR-06**: UI รองรับ 2 ภาษา ใช้งานบนเดสก์ท็อปและมือถือได้ (responsive) [M]
 - [x] **NFR-08**: สำรองข้อมูล (backup) สม่ำเสมอและกู้คืนได้ [M]
 
 ## v2 Requirements
@@ -163,11 +163,11 @@ Which phases cover which requirements.
 | FR-01 | Phase 6 | Pending |
 | FR-02 | Phase 6 | Pending |
 | FR-03 | Phase 6 | Pending |
-| FR-06 | Phase 6 | Pending |
+| FR-06 | Phase 6 | Complete |
 | FR-05 | Phase 6 | Pending |
 | FR-04 | Phase 6 | Complete |
 | FR-08 | Phase 6 | Pending |
-| NFR-06 | Phase 6 | Pending |
+| NFR-06 | Phase 6 | Complete |
 
 **Coverage:**
 
