@@ -1355,6 +1355,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 	var status *db.DonationStatus
 	var fromDate, toDate pgtype.Date
 	var receiptNo *string
+	var source *string
 
 	if filter.DonorName != nil {
 		donorName = filter.DonorName
@@ -1372,6 +1373,9 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 	if filter.ReceiptNo != nil {
 		receiptNo = filter.ReceiptNo
 	}
+	if filter.Source != nil {
+		source = filter.Source
+	}
 
 	rows, queryErr := s.queries.SearchDonations(ctx, db.SearchDonationsParams{
 		LimitN:    limit,
@@ -1381,6 +1385,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 		FromDate:  fromDate,
 		ToDate:    toDate,
 		ReceiptNo: receiptNo,
+		Source:    source,
 	})
 	if queryErr != nil {
 		return nil, 0, fmt.Errorf("search donations: %w", queryErr)
@@ -1392,6 +1397,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 		FromDate:  fromDate,
 		ToDate:    toDate,
 		ReceiptNo: receiptNo,
+		Source:    source,
 	})
 	if countErr != nil {
 		return nil, 0, fmt.Errorf("count donations: %w", countErr)
@@ -1412,6 +1418,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 			ReceiptFormatted: row.ReceiptFormatted,
 			CreatedBy:        createdByName,
 			CreatedByID:      row.CreatedBy.String(),
+			Source:           row.Source,
 		})
 	}
 	return result, total, nil

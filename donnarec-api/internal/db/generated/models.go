@@ -195,6 +195,7 @@ type Donation struct {
 	ReceiptPdfObjectKey *string            `db:"receipt_pdf_object_key" json:"receipt_pdf_object_key"`
 	EdonationKeyedAt    pgtype.Timestamptz `db:"edonation_keyed_at" json:"edonation_keyed_at"`
 	EdonationKeyedBy    pgtype.UUID        `db:"edonation_keyed_by" json:"edonation_keyed_by"`
+	Source              string             `db:"source" json:"source"`
 }
 
 type EdonationConfig struct {

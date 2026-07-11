@@ -485,7 +485,7 @@ func (h *DonationHandler) Reject(c *gin.Context) {
 }
 
 // List returns a paginated, PII-masked list of donations with optional search filters (FR-10, D-53).
-// GET /api/donations[?name=...&status=...&from=...&to=...&receipt_no=...&page=...]
+// GET /api/donations[?name=...&status=...&from=...&to=...&receipt_no=...&source=...&page=...]
 //
 // Supported query params (all optional):
 //
@@ -494,6 +494,8 @@ func (h *DonationHandler) Reject(c *gin.Context) {
 //	from       — from date (YYYY-MM-DD), inclusive
 //	to         — to date (YYYY-MM-DD), inclusive
 //	receipt_no — exact receipt formatted string
+//	source     — donation source filter (flow_a/flow_b, FR-08, D-77); any other
+//	             value is rejected with 400 invalid_source
 //	page       — 1-based page number (default 1, page size 20)
 //
 // Tax ID is NOT accepted as a filter (D-53, T-03-29).
@@ -534,6 +536,13 @@ func (h *DonationHandler) List(c *gin.Context) {
 	}
 	if receiptNo := c.Query("receipt_no"); receiptNo != "" {
 		filter.ReceiptNo = &receiptNo
+	}
+	if source := c.Query("source"); source != "" {
+		if source != "flow_a" && source != "flow_b" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_source"})
+			return
+		}
+		filter.Source = &source
 	}
 	page := int32(1)
 	if pageStr := c.Query("page"); pageStr != "" {

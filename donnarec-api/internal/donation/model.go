@@ -199,12 +199,16 @@ type ReviewRequest struct {
 // ListFilter holds optional search/filter criteria for listing donations (FR-10, D-53).
 // All fields are optional — nil/zero means no restriction applied to that dimension.
 // Tax ID is intentionally excluded as a filter parameter (D-53, T-03-29).
+// Source is nil = skip the filter (returns both flow_a and flow_b, D-53 nil-skip
+// semantics); otherwise must be "flow_a" or "flow_b" — enforced by the handler
+// before it reaches this struct (FR-08, D-77).
 type ListFilter struct {
 	DonorName *string
 	Status    *string
 	FromDate  *time.Time
 	ToDate    *time.Time
 	ReceiptNo *string
+	Source    *string
 	Offset    int32
 	Limit     int32
 }
@@ -217,6 +221,9 @@ type ListFilter struct {
 //     raw users.id UUID string (so the UI can route to "my drafts"). If the creator's
 //     user row is missing (LEFT JOIN NULL), CreatedBy falls back to "" while
 //     CreatedByID still carries the raw UUID from donations.created_by.
+//   - Source ("flow_a"/"flow_b", D-77) lets the pending-review queue (plan 07)
+//     separate staff-entered records from public web submissions without a
+//     second round-trip.
 type DonationListItem struct {
 	ID               string  `json:"id"`
 	Status           string  `json:"status"`
@@ -226,6 +233,7 @@ type DonationListItem struct {
 	ReceiptFormatted *string `json:"receipt_formatted,omitempty"`
 	CreatedBy        string  `json:"created_by"`
 	CreatedByID      string  `json:"created_by_id"`
+	Source           string  `json:"source"`
 }
 
 // DonationListResult is the D-R2 pagination envelope payload for GET /api/donations.

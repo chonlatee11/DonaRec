@@ -103,7 +103,8 @@ SELECT
     donor_language,
     receipt_pdf_object_key,
     edonation_keyed_at,
-    edonation_keyed_by
+    edonation_keyed_by,
+    source
 FROM donations
 WHERE id = @id;
 
@@ -244,6 +245,7 @@ SELECT
     d.approved_at,
     d.created_by,
     d.edonation_keyed,
+    d.source,
     u.display_name AS created_by_name
 FROM donations d
 LEFT JOIN users u ON u.id = d.created_by
@@ -253,6 +255,7 @@ WHERE
     AND (sqlc.narg('from_date')::DATE         IS NULL OR d.donated_at   >= sqlc.narg('from_date'))
     AND (sqlc.narg('to_date')::DATE           IS NULL OR d.donated_at   <= sqlc.narg('to_date'))
     AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'))
+    AND (sqlc.narg('source')::TEXT            IS NULL OR d.source        = sqlc.narg('source'))
 ORDER BY d.created_at DESC
 LIMIT  @limit_n
 OFFSET @offset_n;
@@ -274,7 +277,8 @@ WHERE
     AND (sqlc.narg('status')::donation_status IS NULL OR d.status        = sqlc.narg('status'))
     AND (sqlc.narg('from_date')::DATE         IS NULL OR d.donated_at   >= sqlc.narg('from_date'))
     AND (sqlc.narg('to_date')::DATE           IS NULL OR d.donated_at   <= sqlc.narg('to_date'))
-    AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'));
+    AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'))
+    AND (sqlc.narg('source')::TEXT            IS NULL OR d.source        = sqlc.narg('source'));
 
 -- name: GetUserDisplayName :one
 -- Returns a user's display_name by users.id — used to enrich the donation detail
