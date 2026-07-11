@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Sarabun, Inter } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
 import { getLocale, getMessages } from "next-intl/server";
-import { AppShell } from "@/components/AppShell";
 import { AuthSessionProvider } from "@/components/AuthSessionProvider";
 import { Providers } from "./providers";
 import "./globals.css";
@@ -12,6 +11,11 @@ import "./globals.css";
  * Thai text → Sarabun (closest web-safe equivalent of TH Sarabun New used in PDF/receipts)
  * Latin text → Inter (clean back-office sans-serif)
  * Font-family stack: 'Sarabun', 'Inter', system-ui, sans-serif (defined in globals.css body)
+ *
+ * 06-UI-SPEC "Architecture Change Required": root layout stays theme-neutral
+ * — html/body + font variable classes + providers only. The (app) route
+ * group renders AppShell (slate/blue, unchanged); the (public) route group
+ * renders its own warm-themed wrapper. No AppShell here.
  */
 const sarabun = Sarabun({
   subsets: ["thai", "latin"],
@@ -55,13 +59,10 @@ export default async function RootLayout({
           <AuthSessionProvider>
             {/*
              * Providers: mounts the TanStack Query QueryClientProvider (D-R1)
-             * so client components under AppShell can drive list/detail data
+             * so client components under AppShell/(public) can drive data
              * through the same-origin BFF routes.
              */}
-            <Providers>
-              {/* AppShell: slate-100 sidebar + slate-50 content + header with LocaleSwitcher */}
-              <AppShell>{children}</AppShell>
-            </Providers>
+            <Providers>{children}</Providers>
           </AuthSessionProvider>
         </NextIntlClientProvider>
       </body>
