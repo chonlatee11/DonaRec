@@ -196,6 +196,10 @@ Plans:
 
 - [x] 05-07-PLAN.md — Wave 6: frontend Screen 8 (Reports) + report BFF + e-Donation config admin tab (FR-32, D-75)
 
+**Wave 7** *(gap closure — 05-UAT.md Test 1)*
+
+- [ ] 05-08-PLAN.md — Gap closure: add missing aging.tabAging i18n key (th+en) so Aging tab sr-only caption resolves without MISSING_MESSAGE (FR-31)
+
 **UI hint**: yes
 
 > Note: admin settings UI for templates/signature/number-format is delivered in Phase 4 with the config store (FR-33/NFR-09); this phase adds reporting and export-specific admin views. e-Donation export is manual Excel/CSV this milestone — no direct RD API.
