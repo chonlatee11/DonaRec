@@ -20,6 +20,7 @@ import { DonnaRecApiError } from "@/lib/api";
 import { TemplateEditorFields, TemplateLivePreview } from "@/components/TemplateEditor";
 import { ImageUploadSlot } from "@/components/ImageUploadSlot";
 import { NumberFormatEditor } from "@/components/NumberFormatEditor";
+import { EdonationConfigTab } from "@/components/EdonationConfigTab";
 import {
   fetchSettingsClient,
   saveSettings,
@@ -233,6 +234,7 @@ export function SettingsTabs() {
               <TabsTrigger value="images">{t("tabs.images")}</TabsTrigger>
               <TabsTrigger value="taxText">{t("tabs.taxText")}</TabsTrigger>
               <TabsTrigger value="numberFormat">{t("tabs.numberFormat")}</TabsTrigger>
+              <TabsTrigger value="edonation">{t("tabs.edonation")}</TabsTrigger>
             </TabsList>
 
             <TabsContent value="template">
@@ -315,6 +317,16 @@ export function SettingsTabs() {
                 prefix={values.prefix}
                 onPrefixChange={(v) => update("prefix", v)}
               />
+            </TabsContent>
+
+            <TabsContent value="edonation">
+              {/*
+               * EdonationConfigTab is self-contained (own query/mutation/save
+               * button) — it persists edonation_config, a DIFFERENT config
+               * store than `values`/the top-level "Save" button above, which
+               * only ever PUTs receipt settings (D-58).
+               */}
+              <EdonationConfigTab />
             </TabsContent>
           </Tabs>
         </div>

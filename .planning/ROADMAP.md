@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Gap-less Receipt Numbering Core (★)** - Concurrency-proven, per-fiscal-year, gap-less number allocator built before any issuance flow (completed 2026-06-25)
 - [x] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt (completed 2026-07-01)
 - [x] **Phase 4: Receipt PDF + Email Delivery (Outbox Worker)** - Async Thai/EN tax-compliant PDF and email pipeline with retry, decoupled from the issuance transaction (completed 2026-07-04)
-- [ ] **Phase 5: e-Donation Export, Reports & Admin Settings** - Access-controlled e-Donation export, donation reports, no-deploy config, and verified backup/restore
+- [x] **Phase 5: e-Donation Export, Reports & Admin Settings** - Access-controlled e-Donation export, donation reports, no-deploy config, and verified backup/restore (completed 2026-07-07)
 - [ ] **Phase 6: Public Donation Web Form (Flow B)** - Public bilingual donation form with slip upload, consent, bot protection, and pending-review queue feeding the existing pipeline
 
 ## Phase Details
@@ -106,6 +106,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 > Note: the issue transaction enqueues an outbox job here, but the worker that consumes it (PDF + email) is built in Phase 4. Consent capture for Flow A donors is recorded here against the Phase 1 retention model (NFR-03).
 
 > ⚠️ **REOPENED 2026-07-02 — integration gate not met.** Criteria 1–5 passed unit/service-level verification (5/5), but driving the real stack with a real Keycloak token surfaced three runtime-seam bugs the unit tests could not catch: (1) `created-by-fk-mismatch` — claims.Subject (KC sub) written into `users(id)` FKs → **FIXED + committed** (ef7ede6); (2) `fe-be-audience-mismatch` — no audience mapper (aud=account → 401) + public/confidential client mismatch + missing web env → **FIXED, uncommitted** (realm-donnarec.json, web .env.example); (3) **RBAC AND-bug** — `RequireRoles(Maker,Checker,Admin)`/`(Checker,Admin)` enforce AND where "any of" was intended → 403 for every user → **OPEN**. Phase 3 stays open until criterion 6 (integration gate) is satisfied: bugs 2–3 fixed+committed, an E2E HTTP integration test added, and the human UI walkthrough passes.
+>
+> ✅ **RE-CLOSED 2026-07-04 — integration gate MET.** All three seam bugs fixed+committed (bug #1 ef7ede6, bug #2 8604caa, bug #3 b10fae8); automated E2E HTTP-path test added (`cmd/server/e2e_test.go`, 7/7 subtests pass, c5b0c4f); human UI walkthrough run against the live full stack — **7/7 checkpoints passed** (`03-UAT.md`, verification `status: passed`, f1f5b0e). Phase 3 is **Complete**.
 
 ### Phase 4: Receipt PDF + Email Delivery (Outbox Worker)
 
@@ -166,7 +168,38 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Staff can view donation summary reports by date range and total amount.
   4. A backup runs on a regular schedule and a documented restore has been performed successfully (restore verified, not just configured).
 
-**Plans**: TBD
+**Plans**: 8/8 plans complete
+
+Plans:
+**Wave 1**
+
+- [x] 05-01-PLAN.md — Wave 1: shared data + file-writer foundation (migrations 000013/000014, sqlc export/aging/report/config queries, excelize, stream-only xlsx/csv writer, edonation_config accessor)
+- [x] 05-03-PLAN.md — Wave 1: verified backup/restore (NFR-08) — pg_dump -Fc + mc-mirror companion services + restore-proof integration test + runbook evidence
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 05-02-PLAN.md — Wave 2: e-Donation export backend (TDD) — audited stream-only xlsx/csv of issued donations, Checker/Admin gate, config-driven mapping, E2E (FR-30)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 05-04-PLAN.md — Wave 3: keyed-flag + aging backend (TDD) — bulk/per-row mark with per-record audit, Bangkok-aware 3-bucket aging, E2E (FR-31)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 05-05-PLAN.md — Wave 4: donation summary report backend (TDD) — PII-free aggregate + all-staff ungated route + export, E2E (FR-32)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [x] 05-06-PLAN.md — Wave 5: frontend Screen 7 (Export + Aging tabs) + BFF proxies + nav + config tab prep (FR-30, FR-31)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [x] 05-07-PLAN.md — Wave 6: frontend Screen 8 (Reports) + report BFF + e-Donation config admin tab (FR-32, D-75)
+
+**Wave 7** *(gap closure — 05-UAT.md Test 1)*
+
+- [x] 05-08-PLAN.md — Gap closure: add missing aging.tabAging i18n key (th+en) so Aging tab sr-only caption resolves without MISSING_MESSAGE (FR-31)
+
 **UI hint**: yes
 
 > Note: admin settings UI for templates/signature/number-format is delivered in Phase 4 with the config store (FR-33/NFR-09); this phase adds reporting and export-specific admin views. e-Donation export is manual Excel/CSV this milestone — no direct RD API.
@@ -202,5 +235,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
-| 5. e-Donation Export, Reports & Admin Settings | 0/TBD | Not started | - |
+| 5. e-Donation Export, Reports & Admin Settings | 8/8 | Complete   | 2026-07-07 |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |

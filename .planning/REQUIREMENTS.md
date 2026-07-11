@@ -57,8 +57,8 @@
 ### Donor Data & e-Donation (ข้อมูลผู้บริจาคและ e-Donation)
 
 - [x] **FR-29**: จัดเก็บข้อมูลผู้บริจาค: ชื่อ, เลขผู้เสียภาษี/บัตรประชาชน, ที่อยู่, อีเมล [M]
-- [ ] **FR-30**: ส่งออกข้อมูล (Excel/CSV) เพื่อรองรับการคีย์เข้า e-Donation ด้วยตนเอง [M]
-- [ ] **FR-31**: ติดสถานะ "คีย์เข้า e-Donation แล้ว" เพื่อกันคีย์ซ้ำ/ตกหล่น [S]
+- [x] **FR-30**: ส่งออกข้อมูล (Excel/CSV) เพื่อรองรับการคีย์เข้า e-Donation ด้วยตนเอง [M]
+- [x] **FR-31**: ติดสถานะ "คีย์เข้า e-Donation แล้ว" เพื่อกันคีย์ซ้ำ/ตกหล่น [S]
 
 ### PDPA & Compliance
 
@@ -77,12 +77,12 @@
 
 - [x] **FR-33**: Admin ตั้งค่าเทมเพลต ลายน้ำ ลายเซ็น และรูปแบบเลขที่ได้ (แยก config จากโค้ด) [S]
 - [x] **NFR-09**: แยกการตั้งค่า (เทมเพลต/เลข/ลายเซ็น) ออกจากโค้ด ปรับได้โดยไม่ต้อง deploy [M]
-- [ ] **FR-32**: รายงานสรุปการบริจาค (ตามช่วงเวลา/ยอดรวม) [S]
+- [x] **FR-32**: รายงานสรุปการบริจาค (ตามช่วงเวลา/ยอดรวม) [S]
 
 ### Cross-cutting Non-functional
 
 - [ ] **NFR-06**: UI รองรับ 2 ภาษา ใช้งานบนเดสก์ท็อปและมือถือได้ (responsive) [M]
-- [ ] **NFR-08**: สำรองข้อมูล (backup) สม่ำเสมอและกู้คืนได้ [M]
+- [x] **NFR-08**: สำรองข้อมูล (backup) สม่ำเสมอและกู้คืนได้ [M]
 
 ## v2 Requirements
 
@@ -156,10 +156,10 @@ Which phases cover which requirements.
 | FR-28 | Phase 4 | Complete |
 | FR-33 | Phase 4 | Complete |
 | NFR-09 | Phase 4 | Complete |
-| FR-30 | Phase 5 | Pending |
-| FR-31 | Phase 5 | Pending |
-| FR-32 | Phase 5 | Pending |
-| NFR-08 | Phase 5 | Pending |
+| FR-30 | Phase 5 | Complete |
+| FR-31 | Phase 5 | Complete |
+| FR-32 | Phase 5 | Complete |
+| NFR-08 | Phase 5 | Complete |
 | FR-01 | Phase 6 | Pending |
 | FR-02 | Phase 6 | Pending |
 | FR-03 | Phase 6 | Pending |

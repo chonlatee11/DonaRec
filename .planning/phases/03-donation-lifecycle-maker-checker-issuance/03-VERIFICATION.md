@@ -24,8 +24,9 @@ re_verification:
     - "D-R3 all screens migrated: list, detail, PII reveal, approve/return/reject, cancel/reissue, create/update/submit, slip — all via TanStack Query/Table + BFF (03-10..03-13)"
     - "bug #5 (apiFetch does not unwrap `data`, causing `result.donations` crash) — root-fixed; apiFetch now unwraps the envelope; zero remaining `result.donations` property-access call sites"
     - "Automated E2E integration test covering the critical Maker/Checker flows over the REAL HTTP path with a real minted Keycloak token now exists and passes (cmd/server/e2e_test.go: TestE2E_MakerCheckerIssuancePipeline, 7 subtests)"
-  gaps_remaining:
-    - "Human UI walkthrough (criterion 6, part b) has not yet been performed against a live full stack with a real Keycloak session — every remediation plan's final checkpoint (03-10, 03-12, 03-13) explicitly defers this to a dedicated human pass"
+  gaps_remaining: []
+  gaps_closed_after_reverification:
+    - "Human UI walkthrough (criterion 6, part b) — RESOLVED 2026-07-04: ran the full-stack walkthrough, 7/7 checkpoints passed (03-UAT.md). At the time of the re_verification snapshot below it was still pending; it was subsequently completed and the phase flipped to passed (commit f1f5b0e). The HUMAN_NEEDED narrative in the report body below is the pre-walkthrough snapshot, retained for history and superseded by this frontmatter."
   regressions: []
 human_verification:
   - test: "Full-stack human UI walkthrough: bring up Go API + Postgres + Keycloak + MinIO + Next.js web app; sign in as two distinct Keycloak users (Maker A, Checker B)"
@@ -50,11 +51,13 @@ human_verification:
 
 # Phase 3: Donation Lifecycle & Maker-Checker Issuance — Verification Report (Remediation Re-Verification)
 
+> **⚠️ RECONCILIATION NOTE (2026-07-05):** This report body was written at the moment criterion 6a (automated E2E) had passed but the human UI walkthrough (6b) had not yet been run — hence the `HUMAN_NEEDED` verdict below. The walkthrough was **subsequently completed on 2026-07-04 with 7/7 checkpoints passing** (`03-UAT.md`, commit `f1f5b0e`), which is the authoritative outcome recorded in this file's frontmatter (`status: passed`) and in the ROADMAP (Phase 3 Complete). **The narrative below is a superseded historical snapshot — read the frontmatter for the final status.**
+
 **Phase Goal:** A Maker can create/submit a donation with encrypted donor PII; a Checker (never the Maker) can approve/return; approval issues a gap-less numbered receipt in one atomic transaction. Criterion 6 (added on reopen): an automated E2E test drives the REAL HTTP path (router → RequireAuth → RequireRoles/ResolveAppUser → handler → service → DB) with a realistic Keycloak token for the critical flows, AND the human UI walkthrough passes.
 
 **Verified:** 2026-07-04
 
-**Status:** HUMAN_NEEDED — the remediation slice (03-09..03-13) closes the integration gate's *automated* half (criterion 6a) and re-confirms criteria 1-5 are not regressed. Criterion 6's *human* half (6b, the UI walkthrough) has not been performed by any of the remediation plans — each one's final checkpoint explicitly defers it. This is not a code gap; it is the one remaining required gate before the phase can be marked Complete.
+**Status:** ~~HUMAN_NEEDED~~ → **PASSED** (reconciled 2026-07-05). *(Snapshot-time verdict, superseded:)* the remediation slice (03-09..03-13) closed the integration gate's *automated* half (criterion 6a) and re-confirmed criteria 1-5 are not regressed; at snapshot time criterion 6's *human* half (6b, the UI walkthrough) had not yet been performed. **It was subsequently run on 2026-07-04 — 7/7 checkpoints passed (03-UAT.md) — so criterion 6 is fully met and the phase is Complete.**
 
 **Re-verification:** Yes — after remediation of the 2026-07-02 reopen (bugs #1-#3 + the D-R1/D-R2/D-R3 frontend contract migration).
 
@@ -73,7 +76,7 @@ human_verification:
 | 5 | Integration gate 6a: automated E2E test drives the real HTTP path with a realistic Keycloak token, covering create/submit/approve/return + cancel, and PASSES | VERIFIED (independently re-run) | `cmd/server/e2e_test.go:TestE2E_MakerCheckerIssuancePipeline` builds the router via the production `setupRouter` (not a test-only router), mints tokens via a real local OIDC/JWKS test server (`testutil.KeycloakTestServer` + `MintTokenForSubject`), and drives every step via `httptest.NewRecorder()` + `router.ServeHTTP` (genuine HTTP request/response cycle) — NOT a hand-constructed-claims unit test. 7 subtests: `HappyPath_CreateSubmitApproveList`, `UnprovisionedSubject_403`, `RBAC_MakerRejectedFromCheckerOnlyRoute`, `SoD_SelfApprove_403`, `Audience_WrongClient_401`, `Cancel_RetainsReceiptNumber_RealPath`. Independently re-ran: **7/7 PASS** (`go test -run TestE2E_MakerCheckerIssuancePipeline ./cmd/server/...`, Docker/testcontainers) |
 | 6 | No regression to gap-less numbering / SoD / issuance invariants under the retyped `DonationDetailResponse` contract | VERIFIED | Independently re-ran `go test ./internal/donation/...` (Docker) — **31/31 PASS**, including `TestConcurrentApproval_ExactlyOneSucceeds`, `TestIssuanceTransaction_RollbackOnError`, `TestSoD_DBCheckConstraint`, `TestCancelRetainsReceiptNumber`, `TestVoidAndReissue`, `TestPII_RevealRequiresCheckerOrAdmin` — all retyped to `DonationDetailResponse` (03-11) and still green |
 
-**Score:** 6/6 remediation truths verified (all automated). Criterion 6's human-UI-walkthrough half remains outstanding (see Human Verification below) — this is the reason overall status is `human_needed`, not `passed`.
+**Score:** 6/6 remediation truths verified (all automated). *(Snapshot-time:)* criterion 6's human-UI-walkthrough half remained outstanding at the time of this pass — **subsequently run 2026-07-04, 7/7 passed (03-UAT.md)**, so the final overall status is `passed` (see reconciliation note at top and frontmatter).
 
 ---
 
@@ -181,6 +184,8 @@ No blockers in remediation-modified files:
 
 ### Human Verification Required
 
+> **RESOLVED 2026-07-04:** The walkthrough below WAS subsequently run against the live full stack — **7/7 checkpoints passed** (`03-UAT.md`), with 3 environment/UX issues found and fixed in-session (stale api container `3b3aeda`, federated logout `78b04f1`, hydration skeleton `88e82ff`). The "NOT been run" text below is the pre-walkthrough snapshot, retained for history.
+
 Criterion 6, part (b) — the human UI walkthrough — has explicitly NOT been run by any of the 5 remediation plans. Each plan's final checkpoint (`checkpoint:human-verify`, gate=blocking) was either auto-advanced with only automated evidence (03-10) or explicitly deferred/not-run (03-12: "NOT run in this execution pass... remains outstanding"; 03-13: "Ready for the Task 3 checkpoint... was not part of this executor's remaining work scope"). This is the single remaining gate before Phase 3 can be marked Complete. See the `human_verification` list in the frontmatter above for the precise checklist (6 items): full-stack walkthrough with two distinct Keycloak users, DevTools token-absence check, SoD DOM-removal check, PII reveal UX + audit row, filter/pagination interaction, and cancel/void-reissue dialogs including the `edonation_keyed` guard.
 
 ---
@@ -194,7 +199,7 @@ No code gaps. All automated evidence for criteria 1-5 (re-confirmed, not regress
 - Frontend: `tsc --noEmit` clean, `npm run build` clean (11 BFF routes + 4 donation pages registered), 8/8 Vitest BFF route tests pass
 - All three seam bugs from the 2026-07-02 reopen (FK mismatch, audience mismatch, RBAC AND-bug) are fixed, committed, and covered by E2E regression subtests
 
-The only remaining item is criterion 6, part (b): the live human UI walkthrough against a full running stack (Go API + Postgres + Keycloak + MinIO + Next.js) with two distinct real Keycloak-authenticated users. This was consistently and explicitly deferred by every remediation plan as "requires a live full-stack environment + human verification, out of scope for this automated completion pass" — it is not evidence of a code defect, but it is a required part of the phase's own done-criterion (Conventions.md Integration-test gate: "(a) an automated E2E integration test ... AND (b) the human UI walkthrough ... passing"). Status is therefore `human_needed`, not `passed`, until a human runs the checklist above.
+~~The only remaining item is criterion 6, part (b): the live human UI walkthrough~~ **[RESOLVED 2026-07-04 — walkthrough run, 7/7 passed, `03-UAT.md`.]** The live human UI walkthrough against a full running stack (Go API + Postgres + Keycloak + MinIO + Next.js) with two distinct real Keycloak-authenticated users was deferred by every remediation plan, then run in a dedicated human pass on 2026-07-04 and passed 7/7. With both halves of the Conventions.md Integration-test gate now satisfied — "(a) an automated E2E integration test ... AND (b) the human UI walkthrough ... passing" — the final status is **passed** (see frontmatter + reconciliation note at top).
 
 ---
 
