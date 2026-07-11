@@ -327,6 +327,7 @@
     "clearBucketFilter": "All",
     "keyedStatusKeyedBadge": "Keyed",
     "keyedStatusNotKeyedBadge": "Not keyed",
+    "tabAging": "Keyed-Status Tracking",
     "columnSelect": "Select",
     "columnIssuedDate": "Issued Date / Approved Date",
     "columnDonorName": "Donor Name",

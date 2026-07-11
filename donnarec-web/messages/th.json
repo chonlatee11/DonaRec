@@ -327,6 +327,7 @@
     "clearBucketFilter": "ทั้งหมด",
     "keyedStatusKeyedBadge": "คีย์เข้า e-Donation แล้ว",
     "keyedStatusNotKeyedBadge": "ยังไม่คีย์",
+    "tabAging": "ติดตามสถานะคีย์",
     "columnSelect": "เลือก",
     "columnIssuedDate": "วันที่ออกใบเสร็จ / วันอนุมัติ",
     "columnDonorName": "ชื่อผู้บริจาค",
