@@ -1426,6 +1426,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 			CreatedBy:        createdByName,
 			CreatedByID:      row.CreatedBy.String(),
 			Source:           row.Source,
+			CreatedAt:        row.CreatedAt.Time.Format(time.RFC3339),
 		})
 	}
 	return result, total, nil

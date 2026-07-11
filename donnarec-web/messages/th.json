@@ -16,6 +16,10 @@
   },
   "queue": {
     "title": "คิวรอตรวจสอบ",
+    "columns": {
+      "submittedAt": "วันที่ส่ง",
+      "source": "แหล่งที่มา"
+    },
     "filter": {
       "ariaLabel": "ตัวกรองแหล่งที่มา",
       "all": "ทั้งหมด",

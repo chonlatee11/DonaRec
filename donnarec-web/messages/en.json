@@ -16,6 +16,10 @@
   },
   "queue": {
     "title": "Pending Review Queue",
+    "columns": {
+      "submittedAt": "Submitted",
+      "source": "Source"
+    },
     "filter": {
       "ariaLabel": "Source filter",
       "all": "All",

@@ -1,5 +1,6 @@
 import { apiFetch, DonnaRecApiError } from "@/lib/api";
 import type { ApiError } from "@/lib/api";
+import type { DonationSource } from "@/components/SourceBadge";
 
 // ---------------------------------------------------------------------------
 // Status type (keep in sync with StatusBadge DonationStatus)
@@ -58,6 +59,10 @@ export interface DonationSummary {
   receipt_formatted: string | null;
   created_by: string;            // display name
   created_by_id: string;         // Keycloak UUID of creator
+  /** Donation source (flow_a=staff-entered / flow_b=public web form, D-77/FR-08) */
+  source: DonationSource;
+  /** Submission timestamp (ISO datetime) — distinct from donated_at (Screen 11 "วันที่ส่ง") */
+  created_at: string;
 }
 
 /** Full donation detail used on Screen 3 */
@@ -204,6 +209,70 @@ export async function fetchDonations(
     return payload as DonationListResponse;
   }
   throw new Error("รูปแบบข้อมูลรายการบริจาคไม่ถูกต้อง — กรุณาลองอีกครั้ง");
+}
+
+/**
+ * Queue source-filter token (Screen 11). Maps to the queue BFF's ?source=
+ * param, which pins status=pending_review and translates the token to plan
+ * 01's flow_a/flow_b server-side filter.
+ */
+export type QueueSource = "all" | "from-website" | "staff-entered";
+
+/**
+ * fetchQueue — CLIENT-side pending-review queue fetcher for TanStack Query
+ * (Screen 11, FR-08). Calls the same-origin authenticated BFF `/api/bff/queue`,
+ * which pins status=pending_review and forwards the mapped ?source= filter to
+ * the Go API. The access token never reaches the browser (D-R1). Reuses the
+ * same `{data:{items,...}}` envelope + defensive normalization as
+ * fetchDonations.
+ */
+export async function fetchQueue(
+  source: QueueSource,
+  page: number
+): Promise<DonationListResponse> {
+  const params = new URLSearchParams();
+  if (source !== "all") params.set("source", source);
+  if (page > 1) params.set("page", String(page));
+  const qs = params.toString();
+
+  const res = await fetch(`/api/bff/queue${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!res.ok) {
+    let message = "ไม่สามารถโหลดคิวรอตรวจสอบได้ — กรุณาลองอีกครั้ง";
+    try {
+      const body = (await res.json()) as { message?: string };
+      if (body?.message) message = body.message;
+    } catch {
+      // keep default message
+    }
+    throw new Error(message);
+  }
+
+  const raw = (await res.json()) as unknown;
+  const payload =
+    raw && typeof raw === "object" && "data" in (raw as Record<string, unknown>)
+      ? (raw as { data: unknown }).data
+      : raw;
+
+  if (Array.isArray(payload)) {
+    return {
+      items: payload as DonationSummary[],
+      total: payload.length,
+      page,
+      per_page: payload.length,
+    };
+  }
+  if (
+    payload &&
+    typeof payload === "object" &&
+    Array.isArray((payload as DonationListResponse).items)
+  ) {
+    return payload as DonationListResponse;
+  }
+  throw new Error("รูปแบบข้อมูลคิวรอตรวจสอบไม่ถูกต้อง — กรุณาลองอีกครั้ง");
 }
 
 /**

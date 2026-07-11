@@ -258,6 +258,11 @@ type DonationListItem struct {
 	CreatedBy        string  `json:"created_by"`
 	CreatedByID      string  `json:"created_by_id"`
 	Source           string  `json:"source"`
+	// CreatedAt is the submission timestamp (RFC3339) — the pending-review queue
+	// (Screen 11, plan 07) shows it as its "วันที่ส่ง" column, distinct from
+	// DonatedAt (the donation date). Already SELECTed by SearchDonations; exposed
+	// here so the queue needs no second round-trip.
+	CreatedAt string `json:"created_at"`
 }
 
 // DonationListResult is the D-R2 pagination envelope payload for GET /api/donations.
