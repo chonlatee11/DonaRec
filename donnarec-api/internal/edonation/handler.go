@@ -11,8 +11,11 @@
 //
 //	ErrForbidden  → 403 Forbidden (service-layer defense-in-depth; the real
 //	                authority is the RequireAnyRole route guard)
-//	ErrNoRecords  → 404 Not Found (D-74 spirit: never stream an empty file)
 //	default       → 500 (log operation + count only — Pattern C)
+//
+// The empty-export 404 (D-74 spirit: never stream an empty file) is NOT a
+// sentinel mapping — the handler emits it directly on len(rows)==0 after
+// Service.Export returns (IN-02).
 package edonation
 
 import (
