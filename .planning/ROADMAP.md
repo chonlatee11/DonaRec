@@ -168,7 +168,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Staff can view donation summary reports by date range and total amount.
   4. A backup runs on a regular schedule and a documented restore has been performed successfully (restore verified, not just configured).
 
-**Plans**: 7/7 plans complete
+**Plans**: 8/8 plans complete
 
 Plans:
 **Wave 1**
@@ -198,7 +198,7 @@ Plans:
 
 **Wave 7** *(gap closure — 05-UAT.md Test 1)*
 
-- [ ] 05-08-PLAN.md — Gap closure: add missing aging.tabAging i18n key (th+en) so Aging tab sr-only caption resolves without MISSING_MESSAGE (FR-31)
+- [x] 05-08-PLAN.md — Gap closure: add missing aging.tabAging i18n key (th+en) so Aging tab sr-only caption resolves without MISSING_MESSAGE (FR-31)
 
 **UI hint**: yes
 
@@ -235,5 +235,5 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 2. Gap-less Receipt Numbering Core | 4/4 | Complete   | 2026-06-25 |
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
-| 5. e-Donation Export, Reports & Admin Settings | 7/7 | Complete   | 2026-07-07 |
+| 5. e-Donation Export, Reports & Admin Settings | 8/8 | Complete   | 2026-07-07 |
 | 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
