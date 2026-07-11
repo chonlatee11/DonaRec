@@ -219,7 +219,28 @@ Plans:
   4. The public form is protected against spam/bots via rate limiting and CAPTCHA, and the donor receives an acknowledgement email stating the request was received (explicitly not yet a receipt).
   5. Staff see a "รอตรวจสอบ" pending-review queue of web submissions, and the back-office UI is responsive and usable in Thai/English on desktop and mobile.
 
-**Plans**: TBD
+**Plans**: 8 plans
+
+**Wave 1** *(parallel — no cross-deps, disjoint files)*
+
+- [ ] 06-01-PLAN.md — Backend data foundation: source column (000015) + public-web system-user seed (000016, fixed UUID) + source filter on Search/CountDonations
+- [ ] 06-02-PLAN.md — Backend anti-automation primitives (TDD): Turnstile verifier (fail-closed) + per-IP rate-limit middleware
+- [ ] 06-05-PLAN.md — Frontend (app)/(public) route-group split + scoped warm dual-theme + fonts + Turnstile dep
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 06-03-PLAN.md — Public submission core (TDD ★): CreatePublicSubmission atomic tx + public_handler + unauthenticated /api/public route group + E2E integration gate
+- [ ] 06-07-PLAN.md — Staff pending-review queue (Screen 11) + SourceBadge + source filter + Screen 1/3 amendments (FR-08)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 06-04-PLAN.md — ack_email outbox worker (TDD): bilingual "not a receipt" acknowledgement (FR-05)
+- [ ] 06-06-PLAN.md — Public /donate form + Turnstile widget + confirmation + session-less BFF passthrough (FR-01/02/03/05/06)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [ ] 06-08-PLAN.md — Mobile-nav retrofit + table scroll + responsive/bilingual human walkthrough (NFR-06)
+
 **UI hint**: yes
 
 > Note: NFR-06 (responsive + bilingual UI) is attached here as the natural completion point for full bilingual/responsive coverage across the now-complete UI surface.
@@ -236,4 +257,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
 | 5. e-Donation Export, Reports & Admin Settings | 8/8 | Complete   | 2026-07-07 |
-| 6. Public Donation Web Form (Flow B) | 0/TBD | Not started | - |
+| 6. Public Donation Web Form (Flow B) | 0/8 | Not started | - |
