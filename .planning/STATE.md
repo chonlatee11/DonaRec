@@ -3,11 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 05
-status: completed
+status: "Phase 05 shipped — PR #5"
 stopped_at: Completed 05-07-PLAN.md
-last_updated: "2026-07-11T02:15:52.508Z"
+last_updated: "2026-07-11T03:18:12.605Z"
 last_activity: 2026-07-11
-last_activity_desc: Phase 05 marked complete
 progress:
   total_phases: 6
   completed_phases: 5
@@ -31,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 Phase: 05 — COMPLETE
 Plan: 7 of 7
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
-Status: Phase 05 complete
-Last activity: 2026-07-11 — Phase 05 marked complete
+Status: Phase 05 shipped — PR #5
+Last activity: 2026-07-11
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
