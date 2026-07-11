@@ -67,11 +67,47 @@ func StreamXLSX(w io.Writer, sheetName string, headers []string, rows [][]string
 	return nil
 }
 
+// sanitizeCSVField neutralizes CSV/formula-injection payloads (CWE-1236,
+// OWASP) before a value is written to a .csv file. Donor-controlled free text
+// (e.g. donor_name) flows into the same exported row as the donor's plaintext
+// national ID; if such a value begins with a formula/DDE trigger character,
+// Excel/Google Sheets/LibreOffice would evaluate it as a live formula the
+// moment a Checker/Admin opens the file. Prefixing a leading apostrophe forces
+// every affected spreadsheet tool to treat the cell as literal text. This is
+// applied inside StreamCSV so every current and future CSV export in this
+// codebase is protected by construction, not by caller discipline. The .xlsx
+// path is not affected: excelize stores string cells with an explicit string
+// cell type, so Excel never reinterprets them as formulas.
+func sanitizeCSVField(v string) string {
+	if v == "" {
+		return v
+	}
+	switch v[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + v
+	}
+	return v
+}
+
+// sanitizeCSVRow returns a copy of fields with each element passed through
+// sanitizeCSVField, leaving the caller's slice untouched.
+func sanitizeCSVRow(fields []string) []string {
+	out := make([]string, len(fields))
+	for i, v := range fields {
+		out[i] = sanitizeCSVField(v)
+	}
+	return out
+}
+
 // StreamCSV writes the UTF-8 BOM, then a header row, then one row per entry
 // in rows, directly to w via encoding/csv — no filesystem path is ever
 // touched (D-74). The BOM MUST be written before csv.NewWriter touches w
 // (05-RESEARCH.md Pattern 2) — this is unrelated to encoding/csv's Reader-side
 // BOM-handling behavior (golang/go#33887), which only concerns parsing.
+//
+// Every cell (headers and data) is passed through sanitizeCSVField so
+// donor-controlled text cannot smuggle a spreadsheet formula/DDE payload into
+// the exported file (CWE-1236).
 func StreamCSV(w io.Writer, headers []string, rows [][]string) error {
 	if _, err := w.Write(utf8BOM); err != nil {
 		return fmt.Errorf("exportfile: write BOM: %w", err)
@@ -79,12 +115,12 @@ func StreamCSV(w io.Writer, headers []string, rows [][]string) error {
 
 	cw := csv.NewWriter(w)
 	if len(headers) > 0 {
-		if err := cw.Write(headers); err != nil {
+		if err := cw.Write(sanitizeCSVRow(headers)); err != nil {
 			return fmt.Errorf("exportfile: write csv header: %w", err)
 		}
 	}
 	for i, row := range rows {
-		if err := cw.Write(row); err != nil {
+		if err := cw.Write(sanitizeCSVRow(row)); err != nil {
 			return fmt.Errorf("exportfile: write csv row %d: %w", i, err)
 		}
 	}
