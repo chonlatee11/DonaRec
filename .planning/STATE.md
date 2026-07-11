@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 05
-status: "Phase 05 shipped — PR #5"
-stopped_at: Phase 6 UI-SPEC approved (dual-theme warm public + responsive)
-last_updated: "2026-07-11T06:19:58.943Z"
+current_phase: 06
+current_phase_name: public-donation-web-form-flow-b
+status: executing
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-07-11T06:35:24.071Z"
 last_activity: 2026-07-11
-last_activity_desc: Phase 6 planning complete
+last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 6
   completed_phases: 5
-  total_plans: 38
-  completed_plans: 39
+  total_plans: 46
+  completed_plans: 40
   percent: 83
-current_phase_name: e-Donation Export, Reports & Admin Settings
 ---
 
 # Project State
@@ -24,15 +24,15 @@ current_phase_name: e-Donation Export, Reports & Admin Settings
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** ออกใบเสร็จบริจาคที่มีเลขที่รันต่อเนื่องไม่ซ้ำ ห้ามข้ามเลข (gap-less) ตามปีงบประมาณ หลังผ่านการอนุมัติโดยมนุษย์ และส่งถึงผู้บริจาคได้อย่างถูกต้องน่าเชื่อถือ
-**Current focus:** Phase 05 — e-Donation Export, Reports & Admin Settings
+**Current focus:** Phase 06 — public-donation-web-form-flow-b
 
 ## Current Position
 
-Phase: 05 — COMPLETE
-Plan: 7 of 7
+Phase: 06 (public-donation-web-form-flow-b) — EXECUTING
+Plan: 2 of 8
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
-Status: Phase 05 shipped — PR #5
-Last activity: 2026-07-11 — Phase 6 planning complete
+Status: Ready to execute
+Last activity: 2026-07-11 — Phase 06 execution started
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -82,6 +82,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 05 P05 | 8min | 3 tasks | 10 files |
 | Phase 05 P06 | 6min | 3 tasks | 19 files |
 | Phase 05 P07 | 3min | 2 tasks | 12 files |
+| Phase 06 P01 | 25min | 2 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -146,6 +147,9 @@ Recent decisions affecting current work:
 - [Phase 05]: AgingTable is the Tab B smart container owning the shared aging query/mutation/selection state; AgingStatCards/BulkActionBar stay presentational
 - [Phase ?]: 05-07: added lib/reports.ts as shared typed client-fetcher module (mirrors 05-06 lib/edonation.ts precedent) plus currentFiscalYearDateRange() default for the Screen 8 filter bar
 - [Phase ?]: 05-07: EdonationConfigTab is a self-contained 5th SettingsTabs tab with its own save button, independent of the top-level 'save all tabs' button, since it persists edonation_config (not receipt settings)
+- [Phase ?]: [Phase 06] 06-01: donations.source is TEXT+CHECK (flow_a/flow_b), not an enum — matches existing sqlc.narg D-53 filter pattern; DEFAULT 'flow_a' backfills all pre-existing rows
+- [Phase ?]: [Phase 06] 06-01: public-web system user seeded with id=keycloak_subject=00000000-0000-4000-8000-000000000006 (SAME fixed UUID, not a readable sentinel) — prevents audit.parseUUID rollback (Pitfall 1); assigned least-privileged 'maker' role (T-06-03), never issued a real Keycloak credential
+- [Phase ?]: [Phase 06] 06-01: ListFilter.Source/DonationListItem.Source live in internal/donation/model.go (plan's files_modified inaccurately pointed to service.go); DonationListItem.Source exposed per-row for plan 07's queue screen
 
 ### Pending Todos
 
@@ -183,7 +187,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-11T04:05:39.355Z
-Stopped at: Phase 6 UI-SPEC approved (dual-theme warm public + responsive)
+Last session: 2026-07-11T06:35:24.060Z
+Stopped at: Completed 06-01-PLAN.md
 Resume file: 
-.planning/phases/06-public-donation-web-form-flow-b/06-UI-SPEC.md
+None
