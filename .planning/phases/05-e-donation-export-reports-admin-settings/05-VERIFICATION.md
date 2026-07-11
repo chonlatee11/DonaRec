@@ -1,7 +1,15 @@
 ---
 phase: 05-e-donation-export-reports-admin-settings
-verified: 2026-07-07T15:37:36Z
-status: human_needed
+verified: 2026-07-11T09:15:00Z
+status: passed
+human_verified_at: 2026-07-11T09:15:00Z
+human_verified_note: >
+  Human UI walkthrough completed via /gsd-verify-work 05 (see 05-UAT.md, 2/2 pass).
+  Both human_verification tests confirmed. Test 1 re-tested after 05-08 gap closure:
+  drove the browser (locale th) with an unkeyed row present so AgingTable.tsx:305
+  <caption> renders — zero console errors, no MISSING_MESSAGE; aging.tabAging now
+  resolves in both th/en catalogs. This supersedes the earlier stale/human_needed
+  state introduced by the 05-08-SUMMARY gap-closure artifact.
 score: 4/4 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
