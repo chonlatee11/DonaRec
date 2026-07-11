@@ -106,7 +106,8 @@ INSERT INTO donations (
     consent_purpose,
     retain_until,
     legal_basis,
-    donor_language
+    donor_language,
+    source
 ) VALUES (
     $1,
     $2,
@@ -123,7 +124,8 @@ INSERT INTO donations (
     $13,
     $14,
     $15,
-    $16
+    $16,
+    $17
 )
 RETURNING
     id, created_by, status, created_at, updated_at
@@ -146,6 +148,7 @@ type CreateDonationParams struct {
 	RetainUntil        pgtype.Date        `db:"retain_until" json:"retain_until"`
 	LegalBasis         string             `db:"legal_basis" json:"legal_basis"`
 	DonorLanguage      string             `db:"donor_language" json:"donor_language"`
+	Source             string             `db:"source" json:"source"`
 }
 
 type CreateDonationRow struct {
@@ -159,6 +162,11 @@ type CreateDonationRow struct {
 // Insert a new donation record in 'draft' status with donor snapshot + PII ciphertext.
 // created_at/updated_at omitted from VALUES — rely on DEFAULT now() (IN-01).
 // donor_tax_id_enc/dek accept ciphertext only — plaintext is encrypted at service layer (D-44).
+// source ('flow_a'|'flow_b', D-77) is passed EXPLICITLY by the caller: Flow A staff
+// entry passes 'flow_a'; Flow B public submission (CreatePublicSubmission, plan 06-03)
+// passes 'flow_b'. Set here at INSERT time so the row is born with the correct source
+// (no post-insert UPDATE) — the column still DEFAULTs 'flow_a' at the schema level as a
+// backstop for any path that does not select it.
 func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) (CreateDonationRow, error) {
 	row := q.db.QueryRow(ctx, createDonation,
 		arg.CreatedBy,
@@ -177,6 +185,7 @@ func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) 
 		arg.RetainUntil,
 		arg.LegalBasis,
 		arg.DonorLanguage,
+		arg.Source,
 	)
 	var i CreateDonationRow
 	err := row.Scan(

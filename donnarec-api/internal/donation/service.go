@@ -216,6 +216,9 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
 			DonorLanguage:      donorLanguage,
+			// D-77: staff-entered records are source='flow_a'. Flow B public
+			// submissions set 'flow_b' via CreatePublicSubmission (plan 06-03).
+			Source: "flow_a",
 		})
 		if txErr != nil {
 			return txErr
@@ -1060,6 +1063,10 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
 			DonorLanguage:      "th",
+			// D-77: a Void & Reissue replacement is staff-created — source='flow_a',
+			// even when the original was a Flow B public submission (the correction is
+			// authored by staff, not the donor).
+			Source: "flow_a",
 		})
 		if txErr != nil {
 			return fmt.Errorf("create replacement draft: %w", txErr)

@@ -29,6 +29,30 @@ type CreateDonationRequest struct {
 	DonorLanguage      string  `json:"donor_language"       validate:"omitempty,oneof=th en"` // D-55, FR-23
 }
 
+// PublicDonationRequest is the donor-supplied payload for a Flow B public web
+// submission (plan 06-03, FR-01/02/03). It is DELIBERATELY donor-fields-only:
+// the CAPTCHA token (turnstile_token) and any rate-limit concern are handled in
+// the middleware layer BEFORE the handler parses this struct — never as a
+// validated field here (Pitfall 3, 06-RESEARCH.md), mirroring how RequireAuth is
+// middleware and never a request-body field.
+//
+// Mirrors CreateDonationRequest's donor field set (D-79 keeps DonorTaxID
+// mandatory). ConsentTextVersion carries the Flow-B-specific consent string
+// (D-81). DonorLanguage drives the bilingual ack email / eventual receipt (D-55).
+type PublicDonationRequest struct {
+	DonorName          string  `json:"donor_name"           validate:"required,min=1,max=255"`
+	DonorTaxID         string  `json:"donor_tax_id"         validate:"required,len=13,numeric"` // D-79: mandatory
+	DonorAddress       string  `json:"donor_address"        validate:"max=1000"`
+	DonorEmail         string  `json:"donor_email"          validate:"omitempty,email,max=255"`
+	Amount             float64 `json:"amount"               validate:"required,gt=0"`
+	DonatedAt          string  `json:"donated_at"           validate:"required"` // "YYYY-MM-DD"
+	Notes              string  `json:"notes"                validate:"max=2000"`
+	ConsentGiven       bool    `json:"consent_given"`
+	ConsentTextVersion string  `json:"consent_text_version"`
+	ConsentPurpose     string  `json:"consent_purpose"`
+	DonorLanguage      string  `json:"donor_language"       validate:"omitempty,oneof=th en"` // D-55, FR-23
+}
+
 // UpdateDraftRequest is the JSON request body for editing a donation still in draft status (FR-09).
 // All donor fields may be changed while the record remains in draft.
 // Submitting after edit requires a separate Submit call.

@@ -25,6 +25,11 @@ FOR UPDATE;
 -- Insert a new donation record in 'draft' status with donor snapshot + PII ciphertext.
 -- created_at/updated_at omitted from VALUES — rely on DEFAULT now() (IN-01).
 -- donor_tax_id_enc/dek accept ciphertext only — plaintext is encrypted at service layer (D-44).
+-- source ('flow_a'|'flow_b', D-77) is passed EXPLICITLY by the caller: Flow A staff
+-- entry passes 'flow_a'; Flow B public submission (CreatePublicSubmission, plan 06-03)
+-- passes 'flow_b'. Set here at INSERT time so the row is born with the correct source
+-- (no post-insert UPDATE) — the column still DEFAULTs 'flow_a' at the schema level as a
+-- backstop for any path that does not select it.
 INSERT INTO donations (
     created_by,
     donor_name,
@@ -41,7 +46,8 @@ INSERT INTO donations (
     consent_purpose,
     retain_until,
     legal_basis,
-    donor_language
+    donor_language,
+    source
 ) VALUES (
     @created_by,
     @donor_name,
@@ -58,7 +64,8 @@ INSERT INTO donations (
     @consent_purpose,
     @retain_until,
     @legal_basis,
-    @donor_language
+    @donor_language,
+    @source
 )
 RETURNING
     id, created_by, status, created_at, updated_at;
