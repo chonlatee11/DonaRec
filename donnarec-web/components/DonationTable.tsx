@@ -27,6 +27,7 @@ import {
   PaginationPrevious,
 } from "@/components/ui/pagination";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SourceBadge } from "@/components/SourceBadge";
 import type { DonationSummary } from "@/lib/donations";
 
 interface DonationTableProps {
@@ -176,6 +177,12 @@ export function DonationTable({
           <StatusBadge status={row.original.status} locale={locale} />
         ),
         meta: { headClass: "w-[140px]", cellClass: "" },
+      },
+      {
+        id: "source",
+        header: () => t("fields.source"),
+        cell: ({ row }) => <SourceBadge source={row.original.source} />,
+        meta: { headClass: "w-[130px]", cellClass: "" },
       },
       {
         id: "receiptNumber",

@@ -1557,6 +1557,7 @@ func (s *DonationService) buildDetailResponse(ctx context.Context, row db.Donati
 		ReceiptFormatted:    row.ReceiptFormatted,
 		CreatedBy:           createdByName,
 		CreatedByID:         row.CreatedBy.String(),
+		Source:              row.Source,
 		CreatedAt:           row.CreatedAt.Time,
 		UpdatedAt:           row.UpdatedAt.Time,
 		EdonationKeyed:      row.EdonationKeyed,

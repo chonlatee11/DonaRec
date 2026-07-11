@@ -45,6 +45,7 @@
   },
   "detail": {
     "title": "Donation Detail",
+    "creatorSelfSubmitted": "Submitted by donor (via website)",
     "receiptLabel": "Receipt Number",
     "cancelledSuffix": "(Cancelled)",
     "noSlip": "No slip attached",
@@ -165,6 +166,7 @@
     "receiptNumber": "Receipt Number",
     "createdBy": "Created By",
     "status": "Status",
+    "source": "Source",
     "managedAt": "Manage",
     "donorLanguage": "Document Language",
     "donorLanguageTh": "Thai",

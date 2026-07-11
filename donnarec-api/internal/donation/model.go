@@ -177,6 +177,9 @@ type DonationDetailResponse struct {
 	// users.id UUID string so the UI can route to "my drafts" / compare identity.
 	CreatedBy   string     `json:"created_by"`
 	CreatedByID string     `json:"created_by_id"`
+	// Source ("flow_a"/"flow_b", D-77/FR-08) — lets Screen 3 render a source-aware
+	// creator label (never leak the public-web system user's name for flow_b).
+	Source      string     `json:"source"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	SubmittedAt *time.Time `json:"submitted_at,omitempty"`
