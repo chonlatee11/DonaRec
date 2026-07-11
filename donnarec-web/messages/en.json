@@ -10,6 +10,27 @@
     "eDonation": "e-Donation Export",
     "reports": "Reports"
   },
+  "source": {
+    "flow_a": "Staff-Entered",
+    "flow_b": "From Website"
+  },
+  "queue": {
+    "title": "Pending Review Queue",
+    "filter": {
+      "ariaLabel": "Source filter",
+      "all": "All",
+      "fromWebsite": "From Website",
+      "staffEntered": "Staff-Entered"
+    },
+    "empty": {
+      "heading": "No items pending review",
+      "body": "Records awaiting review — from both staff and the website — will appear here"
+    },
+    "emptyFiltered": {
+      "heading": "No records in this group",
+      "body": "Try changing the source filter"
+    }
+  },
   "locale": {
     "th": "ภาษาไทย",
     "en": "English",
