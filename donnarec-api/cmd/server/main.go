@@ -16,6 +16,7 @@ import (
 
 	"github.com/donnarec/donnarec-api/internal/audit"
 	"github.com/donnarec/donnarec-api/internal/auth"
+	"github.com/donnarec/donnarec-api/internal/captcha"
 	"github.com/donnarec/donnarec-api/internal/config"
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
@@ -24,6 +25,7 @@ import (
 	"github.com/donnarec/donnarec-api/internal/i18n"
 	"github.com/donnarec/donnarec-api/internal/mailer"
 	"github.com/donnarec/donnarec-api/internal/pdf"
+	"github.com/donnarec/donnarec-api/internal/ratelimit"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
 	"github.com/donnarec/donnarec-api/internal/report"
 	"github.com/donnarec/donnarec-api/internal/settings"
@@ -35,6 +37,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -251,9 +254,31 @@ func main() {
 	reportHandler := report.NewHandler(reportSvc, logger)
 
 	// --------------------------------------------------------
+	// Flow B public submission (Phase 6, plan 06-03): the FIRST unauthenticated
+	// route. Its handler holds the slip StorageClient + the resolved public-web
+	// system users.id (D-76). The route group swaps RequireAuth for a per-IP
+	// rate limiter + a Cloudflare Turnstile CAPTCHA verifier (D-78/82/83).
+	// --------------------------------------------------------
+	var publicWebUserID pgtype.UUID
+	if err := publicWebUserID.Scan(donation.PublicWebUserID); err != nil {
+		logger.Fatal("public-web system user id parse failed", zap.Error(err))
+	}
+	publicDonationHandler := donation.NewPublicDonationHandler(donationSvc, storageClient, publicWebUserID, logger)
+
+	// Cloudflare Turnstile verifier (fail-closed) + gin middleware. The secret is
+	// env-only (TURNSTILE_SECRET_KEY); an empty secret still fails closed against
+	// the real siteverify API (rejects every submission) rather than accepting bots.
+	captchaMW := captcha.NewMiddleware(captcha.NewTurnstileVerifier(cfg.TurnstileSecretKey))
+
+	// Per-IP token bucket: burst = SubmissionsPerWindow, sustained refill =
+	// SubmissionsPerWindow per Window (env-tunable, default 5 per 10 minutes).
+	rlRate := rate.Limit(float64(cfg.RateLimit.SubmissionsPerWindow) / cfg.RateLimit.Window.Seconds())
+	rlBurst := cfg.RateLimit.SubmissionsPerWindow
+
+	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, publicDonationHandler, captchaMW, rlRate, rlBurst, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -308,7 +333,7 @@ func main() {
 //  8. Reports /api/reports group — RequireAuth() ONLY, deliberately NO role gate (D-71,
 //     Phase 5 plan 05-05) — the report has no PII column, so every authenticated staff
 //     member (Maker/Checker/Admin) may view/export it.
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, edonationHandler *edonation.Handler, reportHandler *report.Handler, logger *zap.Logger) *gin.Engine {
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, edonationHandler *edonation.Handler, reportHandler *report.Handler, publicDonationHandler *donation.PublicDonationHandler, captchaMW *captcha.Middleware, rlRate rate.Limit, rlBurst int, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
 
 	// 1. Recover from panics — must be first
@@ -326,6 +351,22 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
+	// ---- Flow B unauthenticated public submission (Phase 6, plan 06-03, D-78) ----
+	// The FIRST route group WITHOUT authMW.RequireAuth. It hangs off the ROOT router
+	// (NOT the /api group, which applies RequireAuth), so donors reach it without a
+	// session. RequireAuth is substituted by two defensive middlewares, in order:
+	//   1. ratelimit.PerIP — cheapest rejection first, before any outbound siteverify
+	//   2. captcha.VerifyTurnstile — server-side Cloudflare token verification
+	// It still inherits the router-level Recovery/zapLogger/AuditMiddleware above.
+	//
+	// ASVS V4 (T-06-11): this group registers EXACTLY ONE handler (POST /donations,
+	// create one pending_review record) — no update/delete/reveal/approve is ever
+	// exposed unauthenticated.
+	publicGroup := router.Group("/api/public")
+	publicGroup.Use(ratelimit.PerIP(rlRate, rlBurst))
+	publicGroup.Use(captchaMW.VerifyTurnstile())
+	publicGroup.POST("/donations", publicDonationHandler.CreatePublic)
 
 	// ---- Protected /api group ----
 	api := router.Group("/api")

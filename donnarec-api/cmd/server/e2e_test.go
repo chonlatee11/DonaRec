@@ -45,9 +45,11 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/donnarec/donnarec-api/internal/audit"
 	"github.com/donnarec/donnarec-api/internal/auth"
+	"github.com/donnarec/donnarec-api/internal/captcha"
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
@@ -115,6 +117,37 @@ func (f *fakeSettingsStore) PutTemplateImage(_ context.Context, r io.Reader, siz
 	f.objects[key] = full
 	f.mu.Unlock()
 	return key, detected.String(), nil
+}
+
+// e2ePublicRateBurst is the per-IP token-bucket burst the E2E harness configures
+// for the public route group. Kept small + deterministic (near-zero refill rate)
+// so TestPublicDonationE2E's rate-limit subtest can exhaust one IP's bucket and
+// assert a 429 without a real-time wait.
+const e2ePublicRateBurst = 5
+
+// fakeCaptchaVerifier is a hermetic captcha.Verifier that always passes — it lets
+// the public-donation E2E exercise the REAL router chain
+// (ratelimit -> captcha(middleware) -> handler -> service -> DB) without any
+// outbound Cloudflare siteverify network call. The captcha middleware's own logic
+// (reading the turnstile_token field, aborting on Verify error) still runs for real;
+// only the network verdict is stubbed to nil (success).
+type fakeCaptchaVerifier struct{}
+
+func (fakeCaptchaVerifier) Verify(_ context.Context, _ string, _ string) error { return nil }
+
+// fakePublicSlipStore satisfies donation.SlipPutter. It runs the REAL
+// storage.ValidateSlip (magic-byte + 10 MB size check) so the bad-magic-byte
+// rejection path is genuinely exercised, and fakes only the MinIO network PUT
+// (mirrors fakeSettingsStore's rationale — this test's job is the HTTP seam, not a
+// MinIO round-trip, which internal/storage's own tests already cover).
+type fakePublicSlipStore struct{}
+
+func (fakePublicSlipStore) PutSlip(_ context.Context, r io.Reader, size int64, donationID string) (string, string, error) {
+	detected, _, err := storage.ValidateSlip(r, size)
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("slips/%s/fake%s", donationID, detected.Extension()), detected.String(), nil
 }
 
 // e2eHarness bundles the fully-wired router (via the production setupRouter) plus
@@ -207,6 +240,20 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
 	slipHandler := donation.NewSlipHandler(slipSvc, logger)
 
+	// Flow B public submission handler (Phase 6, plan 06-03): a fake slip store
+	// (real magic-byte validation, faked PUT) + the seeded public-web users.id.
+	var publicWebUserID pgtype.UUID
+	require.NoError(t, publicWebUserID.Scan(donation.PublicWebUserID),
+		"donation.PublicWebUserID must be a valid UUID")
+	publicDonationHandler := donation.NewPublicDonationHandler(donationSvc, fakePublicSlipStore{}, publicWebUserID, logger)
+
+	// Fake CAPTCHA verifier (always passes) + a deterministic per-IP rate limiter
+	// (near-zero refill, burst = e2ePublicRateBurst) so the public-donation E2E
+	// drives the real router chain without external egress and can exercise 429.
+	captchaMW := captcha.NewMiddleware(fakeCaptchaVerifier{})
+	rlRate := rate.Limit(0.0001)
+	rlBurst := e2ePublicRateBurst
+
 	// appUserResolver: identical closure to main.go — maps Keycloak sub -> users.id,
 	// translating pgx.ErrNoRows to auth.ErrSubjectNotProvisioned (403 in middleware).
 	appUserResolver := func(ctx context.Context, subject string) (pgtype.UUID, error) {
@@ -220,7 +267,7 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		return u.ID, nil
 	}
 
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, publicDonationHandler, captchaMW, rlRate, rlBurst, logger)
 
 	return &e2eHarness{router: router, kc: kc, queries: queries, pool: pool, ctx: ctx, settingsStore: settingsStore}
 }
