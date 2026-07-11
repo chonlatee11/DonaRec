@@ -6,14 +6,14 @@ current_phase: 06
 current_phase_name: public-donation-web-form-flow-b
 status: executing
 stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-07-11T12:40:37.693Z"
+last_updated: "2026-07-11T12:54:34.439Z"
 last_activity: 2026-07-11
 last_activity_desc: Phase 06 execution started
 progress:
   total_phases: 6
   completed_phases: 5
   total_plans: 46
-  completed_plans: 43
+  completed_plans: 44
   percent: 83
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 ## Current Position
 
 Phase: 06 (public-donation-web-form-flow-b) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
 Status: Ready to execute
 Last activity: 2026-07-11 — Phase 06 execution started
@@ -86,6 +86,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 06 P02 | 8min | 1 tasks | 9 files |
 | Phase 06 P05 | 15min | 2 tasks | 16 files |
 | Phase 06 P03 | 14min | 3 tasks | 11 files |
+| Phase 06 P07 | 35min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -161,6 +162,9 @@ Recent decisions affecting current work:
 - [Phase 06]: [Phase 06] 06-05: added --public-destructive-wash + scoped --card-foreground/--popover-foreground=ink in .theme-public beyond the plan's literal var list, for rendering-fidelity correctness
 - [Phase ?]: 06-03: CreateDonation carries an explicit source param; Flow A passes flow_a, CreatePublicSubmission passes flow_b
 - [Phase ?]: 06-03: PublicWebUserID Go constant mirrors migration 000016 UUID; used as created_by FK and in-tx audit actor (avoids parseUUID rollback, Pitfall 1)
+- [Phase ?]: Queue source-filter + pagination are local page state (not URL); QueueTable pagination is onPageChange-driven
+- [Phase ?]: Queue BFF pins status=pending_review server-side and maps UI token to plan 01 flow_a/flow_b filter (T-06-27)
+- [Phase ?]: Exposed created_at (list) and source (detail) — already selected by sqlc rows, no SQL/sqlc regen
 
 ### Pending Todos
 
@@ -198,7 +202,7 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-11T12:40:30.124Z
+Last session: 2026-07-11T12:54:06.261Z
 Stopped at: Completed 06-03-PLAN.md
 Resume file: 
 None
