@@ -296,7 +296,7 @@
     "pageTitle": "e-Donation Export",
     "tabExport": "Export Data",
     "tabAging": "Keyed-Status Tracking",
-    "filterFrom": "Issued date from",
+    "filterFrom": "Donation date from",
     "filterTo": "to",
     "keyedStatusLabel": "Keyed status",
     "keyedStatusAll": "All",

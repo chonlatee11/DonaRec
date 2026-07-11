@@ -59,10 +59,15 @@ type AgingRow struct {
 	ID               string
 	DonorName        string
 	ReceiptFormatted string
-	ApprovedAt       time.Time
-	Deadline         time.Time
-	Bucket           AgingBucket
-	Keyed            bool
+	// DonatedAt ("YYYY-MM-DD") is NOT the aging base date — it is surfaced only
+	// so the Export tab's client-side count preview can filter on the SAME
+	// field the export endpoint filters on (donated_at, D-66), eliminating the
+	// WR-01 label/preview/backend three-way date mismatch.
+	DonatedAt  string
+	ApprovedAt time.Time
+	Deadline   time.Time
+	Bucket     AgingBucket
+	Keyed      bool
 }
 
 // AgingResult is the full aging view response: bucketed rows (ordered by

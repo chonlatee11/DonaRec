@@ -18,6 +18,10 @@ export interface AgingRow {
   id: string;
   donor_name: string;
   receipt_formatted: string;
+  /** "YYYY-MM-DD" — the donation date; the SAME field the export endpoint
+   * filters on (donated_at, D-66). Used by the Export tab's count preview so it
+   * matches the actual export filter (WR-01). NOT the aging base date. */
+  donated_at: string;
   /** ISO datetime — D-68 base field (donations has no issued_at column) */
   approved_at: string;
   /** ISO datetime — the 5th of the month after approved_at's month */

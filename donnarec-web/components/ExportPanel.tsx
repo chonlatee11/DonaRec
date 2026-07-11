@@ -74,9 +74,12 @@ export function ExportPanel() {
     const fromStr = from ? format(from, "yyyy-MM-dd") : null;
     const toStr = to ? format(to, "yyyy-MM-dd") : null;
     return agingData.rows.filter((row) => {
-      const approvedDate = row.approved_at.slice(0, 10);
-      if (fromStr && approvedDate < fromStr) return false;
-      if (toStr && approvedDate > toStr) return false;
+      // Filter on donated_at — the SAME field the export endpoint filters on
+      // (donated_at, D-66) — so this preview count matches the rows the backend
+      // will actually stream (WR-01). donated_at is already "YYYY-MM-DD".
+      const donatedDate = row.donated_at.slice(0, 10);
+      if (fromStr && donatedDate < fromStr) return false;
+      if (toStr && donatedDate > toStr) return false;
       return true;
     }).length;
   }, [agingData, from, to, keyedStatus]);

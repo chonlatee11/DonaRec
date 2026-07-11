@@ -394,6 +394,7 @@ type AgingRowResponse struct {
 	ID               string    `json:"id"`
 	DonorName        string    `json:"donor_name"`
 	ReceiptFormatted string    `json:"receipt_formatted"`
+	DonatedAt        string    `json:"donated_at"`
 	ApprovedAt       time.Time `json:"approved_at"`
 	Deadline         time.Time `json:"deadline"`
 	Bucket           string    `json:"bucket"`
@@ -413,6 +414,7 @@ func toAgingResponse(result AgingResult) AgingResponse {
 			ID:               r.ID,
 			DonorName:        r.DonorName,
 			ReceiptFormatted: r.ReceiptFormatted,
+			DonatedAt:        r.DonatedAt,
 			ApprovedAt:       r.ApprovedAt,
 			Deadline:         r.Deadline,
 			Bucket:           string(r.Bucket),

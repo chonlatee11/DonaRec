@@ -312,6 +312,7 @@ func (s *Service) Aging(ctx context.Context, claims auth.KeycloakClaims, now tim
 			ID:               r.ID.String(),
 			DonorName:        r.DonorName,
 			ReceiptFormatted: receiptFormatted,
+			DonatedAt:        dateStr(r.DonatedAt),
 			ApprovedAt:       approvedAt,
 			Deadline:         computeDeadline(approvedAt),
 			Bucket:           bucket,

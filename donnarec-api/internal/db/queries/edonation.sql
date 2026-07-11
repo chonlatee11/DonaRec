@@ -30,7 +30,12 @@ ORDER BY donated_at ASC;
 -- their approval timestamp — approved_at is the D-68 aging base date (donations
 -- has NO issued_at column); the aging bucket itself is computed in Go
 -- (internal/edonation/aging.go, 05-RESEARCH.md Pattern 5), not in SQL.
-SELECT id, donor_name, receipt_formatted, approved_at, edonation_keyed
+-- donated_at is also returned so the Export tab's client-side count preview can
+-- filter on the SAME date field the export endpoint filters on (donated_at,
+-- D-66) — see WR-01: without it the preview filtered a different field than the
+-- actual export, so the count shown in the PII-warning dialog could diverge
+-- from the rows actually streamed.
+SELECT id, donor_name, receipt_formatted, donated_at, approved_at, edonation_keyed
 FROM donations
 WHERE status = 'issued' AND edonation_keyed = false
 ORDER BY approved_at ASC;

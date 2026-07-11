@@ -119,7 +119,7 @@ func (q *Queries) SearchIssuedForExport(ctx context.Context, arg SearchIssuedFor
 }
 
 const searchUnkeyedIssued = `-- name: SearchUnkeyedIssued :many
-SELECT id, donor_name, receipt_formatted, approved_at, edonation_keyed
+SELECT id, donor_name, receipt_formatted, donated_at, approved_at, edonation_keyed
 FROM donations
 WHERE status = 'issued' AND edonation_keyed = false
 ORDER BY approved_at ASC
@@ -129,6 +129,7 @@ type SearchUnkeyedIssuedRow struct {
 	ID               pgtype.UUID        `db:"id" json:"id"`
 	DonorName        string             `db:"donor_name" json:"donor_name"`
 	ReceiptFormatted *string            `db:"receipt_formatted" json:"receipt_formatted"`
+	DonatedAt        pgtype.Date        `db:"donated_at" json:"donated_at"`
 	ApprovedAt       pgtype.Timestamptz `db:"approved_at" json:"approved_at"`
 	EdonationKeyed   bool               `db:"edonation_keyed" json:"edonation_keyed"`
 }
@@ -150,6 +151,7 @@ func (q *Queries) SearchUnkeyedIssued(ctx context.Context) ([]SearchUnkeyedIssue
 			&i.ID,
 			&i.DonorName,
 			&i.ReceiptFormatted,
+			&i.DonatedAt,
 			&i.ApprovedAt,
 			&i.EdonationKeyed,
 		); err != nil {
