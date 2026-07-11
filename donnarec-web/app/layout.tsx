@@ -16,6 +16,13 @@ import "./globals.css";
  * — html/body + font variable classes + providers only. The (app) route
  * group renders AppShell (slate/blue, unchanged); the (public) route group
  * renders its own warm-themed wrapper. No AppShell here.
+ *
+ * 06-UI-SPEC "Dual-Theme Architecture" §3: the three (public)-only fonts
+ * (Trirong, IBM Plex Sans Thai, IBM Plex Mono) live in ./fonts.ts and are
+ * imported + their .variable className applied ONLY by
+ * app/(public)/layout.tsx's warm-scope wrapper div — not here. This root
+ * layout keeps loading just Sarabun+Inter, unchanged; the back-office body
+ * font-family in globals.css never references the three public fonts.
  */
 const sarabun = Sarabun({
   subsets: ["thai", "latin"],
