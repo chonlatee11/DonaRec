@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 Phase: 05 — COMPLETE
 Plan: 7 of 7
-Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 has one deferred human UI walkthrough (04-06 Task 4) pending phase-end /gsd-verify-work.
+Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
 Status: Phase 05 complete
 Last activity: 2026-07-11 — Phase 05 marked complete
 
