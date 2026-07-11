@@ -19,10 +19,19 @@ import (
 // FieldMappingColumn is one ordered column of the e-Donation export: a stable
 // identifier (ColumnKey, used to look up the actual value from an export row)
 // plus its Thai/English display header (D-75).
+//
+// The validate tags are enforced when this type is decoded via
+// handler.ConfigRequest's `dive` (IN-01): without them an Admin could save a
+// column with an empty column_key (which resolves to "" for every export row)
+// or an empty header (a blank spreadsheet/CSV column) with no error surfaced.
+// ColumnKey is additionally constrained to the known export keys so a typo is
+// rejected at save time instead of silently producing a blank column at export
+// time. Keep the oneof list in sync with the keys produced by the export
+// service's row map (national_id/donated_at/cash_type/receipt_no/donor_name).
 type FieldMappingColumn struct {
-	ColumnKey string `json:"column_key"`
-	HeaderTh  string `json:"header_th"`
-	HeaderEn  string `json:"header_en"`
+	ColumnKey string `json:"column_key" validate:"required,oneof=national_id donated_at cash_type receipt_no donor_name"`
+	HeaderTh  string `json:"header_th" validate:"required"`
+	HeaderEn  string `json:"header_en" validate:"required"`
 }
 
 // FieldMapping is the config-driven, ordered set of export columns (D-75) —
