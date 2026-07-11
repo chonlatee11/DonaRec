@@ -14,6 +14,7 @@ package report
 import (
 	"context"
 	"fmt"
+	"math/big"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -58,6 +59,35 @@ func (s *Service) Summary(ctx context.Context, filter SummaryFilter) (SummaryRes
 		toDate = pgtype.Date{Time: *filter.To, Valid: true}
 	}
 
+	// totalAmountRat accumulates the top-line total EXACTLY across breakdown
+	// rows (WR-03): each row's DB NUMERIC(15,2) is added as a big.Rat, so no
+	// base-10 currency fraction is lost and no IEEE-754 rounding drift can
+	// accumulate the way summing many float64 amounts would. The rational total
+	// (and the average derived from it) is converted to float64 only once, at
+	// the JSON/display boundary below — mirroring CLAUDE.md's money-precision
+	// convention (numeric source of truth; float only at the edge).
+	totalAmountRat := new(big.Rat)
+	var totalCount int
+
+	// accumulate converts one aggregate row's amount to an exact rational, adds
+	// it to the running total, and returns the per-row PeriodRow (the per-row
+	// display value is a single DB SUM, converted once — the drift risk is only
+	// in the cross-row accumulation, which stays rational).
+	accumulate := func(period pgtype.Date, count int64, amount pgtype.Numeric) (PeriodRow, error) {
+		rat, err := numericToRat(amount)
+		if err != nil {
+			return PeriodRow{}, err
+		}
+		totalAmountRat.Add(totalAmountRat, rat)
+		totalCount += int(count)
+		f, _ := rat.Float64()
+		return PeriodRow{
+			Period:       dateStr(period),
+			ReceiptCount: int(count),
+			TotalAmount:  f,
+		}, nil
+	}
+
 	var breakdown []PeriodRow
 	switch filter.GroupBy {
 	case "day":
@@ -67,15 +97,11 @@ func (s *Service) Summary(ctx context.Context, filter SummaryFilter) (SummaryRes
 		}
 		breakdown = make([]PeriodRow, 0, len(rows))
 		for _, r := range rows {
-			amount, convErr := numericToFloat64(r.TotalAmount)
+			row, convErr := accumulate(r.Period, r.ReceiptCount, r.TotalAmount)
 			if convErr != nil {
 				return SummaryResult{}, fmt.Errorf("report: convert day total amount: %w", convErr)
 			}
-			breakdown = append(breakdown, PeriodRow{
-				Period:       dateStr(r.Period),
-				ReceiptCount: int(r.ReceiptCount),
-				TotalAmount:  amount,
-			})
+			breakdown = append(breakdown, row)
 		}
 	case "month":
 		rows, err := s.queries.SummaryByMonth(ctx, db.SummaryByMonthParams{FromDate: fromDate, ToDate: toDate})
@@ -84,30 +110,22 @@ func (s *Service) Summary(ctx context.Context, filter SummaryFilter) (SummaryRes
 		}
 		breakdown = make([]PeriodRow, 0, len(rows))
 		for _, r := range rows {
-			amount, convErr := numericToFloat64(r.TotalAmount)
+			row, convErr := accumulate(r.Period, r.ReceiptCount, r.TotalAmount)
 			if convErr != nil {
 				return SummaryResult{}, fmt.Errorf("report: convert month total amount: %w", convErr)
 			}
-			breakdown = append(breakdown, PeriodRow{
-				Period:       dateStr(r.Period),
-				ReceiptCount: int(r.ReceiptCount),
-				TotalAmount:  amount,
-			})
+			breakdown = append(breakdown, row)
 		}
 	default:
 		return SummaryResult{}, ErrInvalidGroupBy
 	}
 
-	var totalAmount float64
-	var totalCount int
-	for _, row := range breakdown {
-		totalAmount += row.TotalAmount
-		totalCount += row.ReceiptCount
-	}
+	totalAmount, _ := totalAmountRat.Float64()
 
 	var average float64
 	if totalCount > 0 {
-		average = totalAmount / float64(totalCount)
+		avgRat := new(big.Rat).Quo(totalAmountRat, new(big.Rat).SetInt64(int64(totalCount)))
+		average, _ = avgRat.Float64()
 	}
 
 	return SummaryResult{
@@ -118,23 +136,38 @@ func (s *Service) Summary(ctx context.Context, filter SummaryFilter) (SummaryRes
 	}, nil
 }
 
-// numericToFloat64 converts a pgtype.Numeric aggregate (SUM(amount)::numeric —
-// see internal/db/queries/reports.sql's cast comment) to a float64. An
-// invalid/unset numeric (should not occur for an existing GROUP BY bucket,
-// since every returned row has at least one matching donation) converts to 0
-// rather than erroring.
-func numericToFloat64(n pgtype.Numeric) (float64, error) {
-	if !n.Valid {
-		return 0, nil
+// numericToRat converts a pgtype.Numeric aggregate (SUM(amount)::numeric — see
+// internal/db/queries/reports.sql's cast comment) to an EXACT math/big.Rat,
+// preserving every base-10 fractional digit (WR-03). The numeric's value is
+// Int × 10^Exp; a positive Exp scales up, a negative Exp scales down by an
+// exact power of ten — no float64 ever participates, so no currency fraction is
+// lost. An invalid/unset numeric (should not occur for an existing GROUP BY
+// bucket, since every returned row has at least one matching donation) converts
+// to 0 rather than erroring; a NaN/±Infinity aggregate (impossible for
+// SUM(amount) over finite money rows) is rejected explicitly.
+func numericToRat(n pgtype.Numeric) (*big.Rat, error) {
+	if !n.Valid || n.Int == nil {
+		return new(big.Rat), nil
 	}
-	f, err := n.Float64Value()
-	if err != nil {
-		return 0, fmt.Errorf("report: numeric to float64: %w", err)
+	if n.NaN || n.InfinityModifier != pgtype.Finite {
+		return nil, fmt.Errorf("report: non-finite numeric aggregate")
 	}
-	if !f.Valid {
-		return 0, nil
+	rat := new(big.Rat).SetInt(n.Int)
+	scale := new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(abs32(n.Exp))), nil)
+	if n.Exp >= 0 {
+		rat.Mul(rat, new(big.Rat).SetInt(scale))
+	} else {
+		rat.Quo(rat, new(big.Rat).SetInt(scale))
 	}
-	return f.Float64, nil
+	return rat, nil
+}
+
+// abs32 returns the absolute value of a signed 32-bit integer as an int32.
+func abs32(v int32) int32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // dateStr converts a pgtype.Date to a "YYYY-MM-DD" string, or "" if invalid.
