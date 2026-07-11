@@ -1,7 +1,8 @@
 ---
 phase: 6
 slug: public-donation-web-form-flow-b
-status: draft
+status: approved
+reviewed_at: 2026-07-11
 shadcn_initialized: true
 preset: "Dual-theme: (app) route group keeps Default slate base — blue primary (unchanged from Phase 3/4/5: style=default, baseColor=slate, cssVariables=yes). (public) route group scopes a second, warm token set over the same shadcn component primitives — see 'Dual-Theme Architecture' below."
 created: 2026-07-11

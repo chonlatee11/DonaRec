@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>มูลนิธิการุณยเวช — ร่วมบริจาค</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Trirong:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F5F3EC;        /* warm cream base */
+    --paper-2:#EFEBE0;      /* slightly deeper panel */
+    --pine:#1E4A43;         /* deep pine – trust */
+    --pine-2:#2C6157;       /* lighter pine */
+    --sage:#8AA79C;         /* muted sage */
+    --gold:#C39A44;         /* merit gold */
+    --gold-soft:#E7D6A8;
+    --ink:#17241F;          /* near-black green */
+    --muted:#5C6B63;
+    --line:#DAD4C4;
+    --white:#FCFBF6;
+    --radius:18px;
+    --shadow:0 18px 40px -22px rgba(23,36,31,.45);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:"IBM Plex Sans Thai",sans-serif;
+    background:var(--paper);
+    color:var(--ink);
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+  .mono{font-family:"IBM Plex Mono",monospace}
+  .serif{font-family:"Trirong",serif}
+  a{color:inherit;text-decoration:none}
+
+  /* ---------- Top bar ---------- */
+  header{
+    position:sticky;top:0;z-index:40;
+    background:rgba(245,243,236,.82);
+    backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);
+  }
+  .bar{display:flex;align-items:center;justify-content:space-between;height:70px}
+  .brand{display:flex;align-items:center;gap:11px;font-weight:600}
+  .mark{
+    width:38px;height:38px;border-radius:11px;
+    background:var(--pine);color:var(--gold-soft);
+    display:grid;place-items:center;font-family:"Trirong",serif;font-size:20px;
+    box-shadow:inset 0 0 0 1.5px rgba(227,214,168,.35);
+  }
+  .brand small{display:block;font-size:11.5px;color:var(--muted);font-weight:400;letter-spacing:.02em}
+  nav{display:flex;align-items:center;gap:28px}
+  nav a{font-size:14.5px;color:var(--muted);font-weight:500;transition:color .2s}
+  nav a:hover{color:var(--pine)}
+  .langtoggle{
+    display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font-size:12.5px;
+  }
+  .langtoggle button{
+    border:none;background:transparent;padding:6px 12px;cursor:pointer;
+    font-family:inherit;color:var(--muted);font-weight:600;
+  }
+  .langtoggle button.on{background:var(--pine);color:var(--gold-soft)}
+  .nav-links{display:flex;align-items:center;gap:28px}
+
+  /* ---------- Hero ---------- */
+  .hero{padding:74px 0 40px;position:relative;overflow:hidden}
+  .hero-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:13px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--gold);font-weight:600;margin-bottom:20px;
+  }
+  .eyebrow::before{content:"";width:26px;height:1.5px;background:var(--gold)}
+  h1.hero-title{
+    font-family:"Trirong",serif;font-weight:500;
+    font-size:clamp(38px,5.2vw,62px);line-height:1.08;
+    letter-spacing:-.01em;color:var(--pine);
+  }
+  h1.hero-title em{font-style:italic;color:var(--gold);font-weight:400}
+  .hero-sub{margin-top:22px;font-size:17.5px;color:var(--muted);max-width:30em}
+  .hero-cta{display:flex;gap:14px;margin-top:34px;flex-wrap:wrap}
+  .btn{
+    font-family:inherit;font-size:16px;font-weight:600;cursor:pointer;
+    padding:15px 30px;border-radius:999px;border:1.5px solid transparent;
+    transition:transform .15s ease, box-shadow .2s ease, background .2s;
+  }
+  .btn-primary{background:var(--pine);color:var(--gold-soft);box-shadow:var(--shadow)}
+  .btn-primary:hover{transform:translateY(-2px);background:var(--pine-2)}
+  .btn-ghost{background:transparent;border-color:var(--line);color:var(--pine)}
+  .btn-ghost:hover{border-color:var(--pine);background:rgba(30,74,67,.04)}
+  .trust-row{display:flex;gap:22px;margin-top:38px;flex-wrap:wrap}
+  .trust-row .t{display:flex;align-items:center;gap:9px;font-size:13.5px;color:var(--muted)}
+  .trust-row .t svg{flex:none}
+
+  /* hero art – layered care motif */
+  .hero-art{position:relative;height:420px}
+  .care-card{
+    position:absolute;background:var(--white);border-radius:var(--radius);
+    box-shadow:var(--shadow);border:1px solid var(--line);padding:22px;
+  }
+  .care-a{inset:0 90px 130px 0;display:flex;flex-direction:column;justify-content:space-between}
+  .care-b{right:0;top:60px;width:210px}
+  .care-c{left:30px;bottom:0;width:230px}
+  .pulse{display:flex;align-items:baseline;gap:6px}
+  .pulse .n{font-family:"Trirong",serif;font-size:44px;color:var(--pine);font-weight:600;line-height:1}
+  .pulse .u{font-size:14px;color:var(--muted)}
+  .care-label{font-size:13px;color:var(--muted);margin-top:2px}
+  .barmini{height:7px;border-radius:99px;background:var(--paper-2);overflow:hidden;margin-top:14px}
+  .barmini i{display:block;height:100%;width:72%;background:linear-gradient(90deg,var(--pine),var(--sage))}
+  .heartline{display:flex;align-items:center;gap:10px}
+  .heartline .dot{width:34px;height:34px;border-radius:10px;background:var(--paper-2);display:grid;place-items:center}
+  .avatars{display:flex}
+  .avatars span{
+    width:30px;height:30px;border-radius:50%;border:2px solid var(--white);
+    margin-left:-8px;background:var(--sage);display:grid;place-items:center;
+    color:var(--white);font-size:12px;font-weight:600;
+  }
+  .avatars span:first-child{margin-left:0}
+
+  /* ---------- Donate section ---------- */
+  .donate{padding:64px 0 80px}
+  .sec-head{max-width:640px;margin-bottom:40px}
+  .sec-head .eyebrow{margin-bottom:14px}
+  .sec-head h2{font-family:"Trirong",serif;font-weight:500;font-size:clamp(28px,3.4vw,40px);color:var(--pine);line-height:1.15}
+  .sec-head p{margin-top:12px;color:var(--muted);font-size:16px}
+
+  .donate-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:40px;align-items:start}
+
+  .form-card{
+    background:var(--white);border:1px solid var(--line);border-radius:var(--radius);
+    padding:30px;box-shadow:0 14px 34px -26px rgba(23,36,31,.4);
+  }
+  .field-label{font-size:13.5px;font-weight:600;color:var(--pine);margin-bottom:10px;display:block}
+  .freq{display:flex;gap:8px;background:var(--paper-2);padding:5px;border-radius:14px;margin-bottom:26px}
+  .freq button{
+    flex:1;border:none;background:transparent;cursor:pointer;font-family:inherit;
+    padding:10px;border-radius:10px;font-weight:600;font-size:14.5px;color:var(--muted);transition:.2s;
+  }
+  .freq button.on{background:var(--white);color:var(--pine);box-shadow:0 4px 12px -6px rgba(23,36,31,.35)}
+
+  .amounts{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+  .amt{
+    border:1.5px solid var(--line);background:var(--white);border-radius:13px;
+    padding:14px 8px;cursor:pointer;font-family:"IBM Plex Mono",monospace;font-size:16px;font-weight:500;
+    color:var(--pine);transition:.15s;text-align:center;
+  }
+  .amt small{display:block;font-family:"IBM Plex Sans Thai";font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+  .amt:hover{border-color:var(--sage)}
+  .amt.on{border-color:var(--gold);background:#FBF6E9;box-shadow:0 0 0 1px var(--gold)}
+  .custom-amt{position:relative;margin-bottom:24px}
+  .custom-amt span{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:var(--muted);font-family:"IBM Plex Mono"}
+  .custom-amt input{
+    width:100%;padding:14px 16px 14px 34px;border:1.5px solid var(--line);border-radius:13px;
+    font-family:"IBM Plex Mono",monospace;font-size:16px;color:var(--ink);background:var(--white);
+  }
+  .custom-amt input:focus{outline:none;border-color:var(--pine)}
+
+  .purpose{margin-bottom:24px}
+  select,.txt{
+    width:100%;padding:13px 15px;border:1.5px solid var(--line);border-radius:12px;
+    font-family:inherit;font-size:15px;color:var(--ink);background:var(--white);
+  }
+  select:focus,.txt:focus{outline:none;border-color:var(--pine)}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+  .fieldset{margin-bottom:16px}
+
+  .check{display:flex;gap:11px;align-items:flex-start;font-size:13.5px;color:var(--muted);margin-bottom:14px;cursor:pointer}
+  .check input{margin-top:3px;accent-color:var(--pine);width:16px;height:16px;flex:none}
+  .divider{height:1px;background:var(--line);margin:24px 0}
+
+  .submit{width:100%;justify-content:center;display:flex;align-items:center;gap:10px}
+  .safe-note{text-align:center;font-size:12.5px;color:var(--muted);margin-top:14px;display:flex;justify-content:center;gap:7px;align-items:center}
+
+  /* ---------- Receipt preview ---------- */
+  .receipt-wrap{position:sticky;top:96px}
+  .receipt-cap{font-size:13px;color:var(--muted);margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .receipt-cap::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--gold)}
+  .receipt{
+    background:var(--white);border-radius:12px;position:relative;overflow:hidden;
+    box-shadow:var(--shadow);border:1px solid var(--line);
+  }
+  .receipt::before{ /* perforated top edge */
+    content:"";position:absolute;top:-9px;left:0;right:0;height:18px;
+    background:radial-gradient(circle at 9px 9px, transparent 8px, var(--white) 8px);
+    background-size:18px 18px;background-position:0 -9px;
+  }
+  .rcp-body{padding:26px 26px 30px;position:relative}
+  .watermark{
+    position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;
+    font-family:"Trirong",serif;font-size:56px;color:rgba(195,154,68,.07);
+    transform:rotate(-16deg);font-weight:600;white-space:nowrap;letter-spacing:.05em;
+  }
+  .rcp-top{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px dashed var(--line);padding-bottom:16px}
+  .rcp-org{display:flex;gap:11px;align-items:center}
+  .rcp-org .mark{width:34px;height:34px;font-size:17px}
+  .rcp-org b{font-family:"Trirong",serif;font-size:15px;color:var(--pine);display:block;line-height:1.2}
+  .rcp-org small{font-size:10.5px;color:var(--muted)}
+  .rcp-tag{text-align:right}
+  .rcp-tag .th{font-family:"Trirong",serif;font-size:13px;color:var(--pine);font-weight:600}
+  .rcp-tag .en{font-size:9.5px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+  .rcp-meta{display:flex;justify-content:space-between;margin-top:16px;font-size:12px}
+  .rcp-meta .lbl{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
+  .rcp-meta .val{font-family:"IBM Plex Mono",monospace;color:var(--ink);font-size:13px;margin-top:2px}
+  .rcp-donor{margin-top:18px}
+  .rcp-donor .lbl{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em}
+  .rcp-donor .name{font-family:"Trirong",serif;font-size:19px;color:var(--pine);margin-top:3px}
+  .rcp-amount{
+    margin-top:20px;background:#FBF6E9;border:1px solid var(--gold-soft);border-radius:12px;
+    padding:16px 18px;display:flex;justify-content:space-between;align-items:center;
+  }
+  .rcp-amount .lbl{font-size:11px;color:var(--muted)}
+  .rcp-amount .big{font-family:"IBM Plex Mono",monospace;font-size:26px;font-weight:500;color:var(--pine)}
+  .rcp-baht{margin-top:10px;font-size:12.5px;color:var(--muted);font-style:italic}
+  .rcp-baht b{color:var(--pine);font-style:normal}
+  .rcp-foot{display:flex;justify-content:space-between;align-items:flex-end;margin-top:22px;padding-top:16px;border-top:1px dashed var(--line)}
+  .rcp-foot small{font-size:10.5px;color:var(--muted);max-width:56%;line-height:1.4}
+  .seal{
+    width:64px;height:64px;border-radius:50%;border:2px solid var(--gold);
+    color:var(--gold);display:grid;place-items:center;text-align:center;
+    font-family:"Trirong",serif;font-size:10px;line-height:1.15;transform:rotate(-8deg);
+    box-shadow:inset 0 0 0 3px rgba(195,154,68,.15);
+  }
+
+  /* ---------- Impact ---------- */
+  .impact{background:var(--pine);color:var(--paper);padding:78px 0}
+  .impact .eyebrow{color:var(--gold-soft)}
+  .impact .eyebrow::before{background:var(--gold-soft)}
+  .impact h2{font-family:"Trirong",serif;font-weight:500;font-size:clamp(28px,3.4vw,40px);color:var(--white);max-width:16em}
+  .impact-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:44px}
+  .icard{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:var(--radius);padding:28px}
+  .icard .pct{font-family:"Trirong",serif;font-size:40px;color:var(--gold-soft);font-weight:600}
+  .icard h3{font-size:17px;margin:6px 0 8px;color:var(--white);font-weight:600}
+  .icard p{font-size:14px;color:rgba(245,243,236,.72)}
+  .impact-note{margin-top:40px;display:flex;gap:14px;align-items:center;font-size:14px;color:rgba(245,243,236,.8);border-top:1px solid rgba(255,255,255,.13);padding-top:26px}
+
+  /* ---------- Footer ---------- */
+  footer{background:var(--ink);color:rgba(245,243,236,.6);padding:52px 0 34px;font-size:13.5px}
+  .foot-grid{display:flex;justify-content:space-between;gap:40px;flex-wrap:wrap;margin-bottom:30px}
+  footer .brand b{color:var(--paper)}
+  footer .brand small{color:rgba(245,243,236,.5)}
+  .foot-col b{color:var(--paper);display:block;margin-bottom:12px;font-size:14px}
+  .foot-col a{display:block;color:rgba(245,243,236,.6);margin-bottom:7px}
+  .foot-col a:hover{color:var(--gold-soft)}
+  .foot-bottom{border-top:1px solid rgba(255,255,255,.1);padding-top:22px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:12.5px;color:rgba(245,243,236,.45)}
+
+  /* toast */
+  .toast{
+    position:fixed;bottom:26px;left:50%;transform:translateX(-50%) translateY(120%);
+    background:var(--pine);color:var(--gold-soft);padding:15px 24px;border-radius:14px;
+    box-shadow:var(--shadow);font-size:14.5px;font-weight:500;z-index:80;transition:transform .4s cubic-bezier(.2,.8,.2,1);
+    display:flex;align-items:center;gap:10px;max-width:90vw;
+  }
+  .toast.show{transform:translateX(-50%) translateY(0)}
+
+  /* responsive */
+  @media(max-width:960px){
+    .hero-grid{grid-template-columns:1fr;gap:36px}
+    .hero-art{height:340px;max-width:440px}
+    .donate-grid{grid-template-columns:1fr;gap:32px}
+    .receipt-wrap{position:static}
+    .impact-cards{grid-template-columns:1fr}
+    .nav-links{display:none}
+  }
+  @media(max-width:560px){
+    .wrap{padding:0 18px}
+    .row2{grid-template-columns:1fr}
+    .amounts{grid-template-columns:repeat(2,1fr)}
+    .form-card{padding:22px}
+    .care-a{inset:0 40px 150px 0}
+  }
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto}}
+  :focus-visible{outline:2.5px solid var(--gold);outline-offset:2px;border-radius:6px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <div class="brand">
+      <div class="mark">ก</div>
+      <div>
+        <span data-i18n="brand">มูลนิธิการุณยเวช</span>
+        <small data-i18n="brandSub">โรงพยาบาลการุณยเวช · เพื่อผู้ป่วยทุกคน</small>
+      </div>
+    </div>
+    <nav>
+      <div class="nav-links">
+        <a href="#donate" data-i18n="navDonate">ร่วมบริจาค</a>
+        <a href="#impact" data-i18n="navImpact">เงินไปที่ไหน</a>
+        <a href="#" data-i18n="navContact">ติดต่อ</a>
+      </div>
+      <div class="langtoggle" role="group" aria-label="Language">
+        <button id="th" class="on" onclick="setLang('th')">ไทย</button>
+        <button id="en" onclick="setLang('en')">EN</button>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow" data-i18n="heroEyebrow">ทุกการให้ ช่วยต่อชีวิต</span>
+      <h1 class="hero-title" data-i18n="heroTitle">มอบโอกาสในการ<br>รักษา ให้กับ<em>คนที่รอ</em></h1>
+      <p class="hero-sub" data-i18n="heroSub">เงินบริจาคของคุณช่วยจัดหาอุปกรณ์การแพทย์ ค่ารักษาผู้ป่วยยากไร้ และดูแลผู้ป่วยที่ต้องการความช่วยเหลืออย่างเร่งด่วน พร้อมรับใบอนุโมทนาบุญเพื่อลดหย่อนภาษีได้ทันที</p>
+      <div class="hero-cta">
+        <a href="#donate"><button class="btn btn-primary" data-i18n="heroCta1">บริจาคเลย</button></a>
+        <a href="#impact"><button class="btn btn-ghost" data-i18n="heroCta2">ดูว่าเงินไปที่ไหน</button></a>
+      </div>
+      <div class="trust-row">
+        <div class="t">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2 4 5v6c0 5 3.4 8.5 8 10 4.6-1.5 8-5 8-10V5l-8-3Z" stroke="#C39A44" stroke-width="1.6"/><path d="m9 12 2 2 4-4" stroke="#C39A44" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span data-i18n="trust1">ลดหย่อนภาษีได้ 2 เท่า</span>
+        </div>
+        <div class="t">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="4" y="3" width="16" height="18" rx="2" stroke="#C39A44" stroke-width="1.6"/><path d="M8 8h8M8 12h8M8 16h5" stroke="#C39A44" stroke-width="1.6" stroke-linecap="round"/></svg>
+          <span data-i18n="trust2">เชื่อมระบบ e-Donation สรรพากร</span>
+        </div>
+        <div class="t">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2" stroke="#C39A44" stroke-width="1.6"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="#C39A44" stroke-width="1.6"/></svg>
+          <span data-i18n="trust3">ปลอดภัยตาม PDPA</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-art" aria-hidden="true">
+      <div class="care-card care-a">
+        <div>
+          <div class="care-label" data-i18n="artRaised">ยอดบริจาคเดือนนี้</div>
+          <div class="pulse"><span class="n mono">฿2.4M</span><span class="u" data-i18n="artGoal">จาก ฿3M</span></div>
+        </div>
+        <div class="barmini"><i></i></div>
+      </div>
+      <div class="care-card care-b">
+        <div class="heartline">
+          <div class="dot">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="#C39A44"><path d="M12 21s-7-4.6-9.3-9C1 8.7 2.6 5.5 6 5.5c2 0 3.2 1.2 4 2.4.8-1.2 2-2.4 4-2.4 3.4 0 5 3.2 3.3 6.5C19 16.4 12 21 12 21Z"/></svg>
+          </div>
+          <div style="font-size:13px;color:var(--muted)"><b style="color:var(--pine);font-family:Trirong">1,280</b><br><span data-i18n="artLives">ชีวิตที่ได้รับการดูแล</span></div>
+        </div>
+      </div>
+      <div class="care-card care-c">
+        <div class="care-label" data-i18n="artDonors">ผู้ร่วมบริจาคล่าสุด</div>
+        <div class="avatars" style="margin-top:10px">
+          <span>ก</span><span>ส</span><span>ณ</span><span>พ</span><span style="background:var(--pine)">+9</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- DONATE -->
+<section class="donate" id="donate">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow" data-i18n="donateEyebrow">ร่วมบริจาค</span>
+      <h2 data-i18n="donateTitle">เลือกจำนวนที่คุณอยากให้</h2>
+      <p data-i18n="donateSub">ทุกบาททุกสตางค์ถูกส่งต่อถึงผู้ป่วยโดยตรง — และคุณจะเห็นใบอนุโมทนาบุญของคุณเกิดขึ้นแบบเรียลไทม์ทางขวามือ</p>
+    </div>
+
+    <div class="donate-grid">
+      <!-- FORM -->
+      <div class="form-card">
+        <label class="field-label" data-i18n="fLabelFreq">รูปแบบการบริจาค</label>
+        <div class="freq" role="group">
+          <button class="on" data-freq="once" onclick="setFreq(this,'once')" data-i18n="freqOnce">บริจาคครั้งเดียว</button>
+          <button data-freq="monthly" onclick="setFreq(this,'monthly')" data-i18n="freqMonthly">รายเดือน</button>
+        </div>
+
+        <label class="field-label" data-i18n="fLabelAmount">เลือกจำนวนเงิน</label>
+        <div class="amounts" id="amounts">
+          <button class="amt" data-v="100" onclick="pick(this,100)">฿100</button>
+          <button class="amt on" data-v="500" onclick="pick(this,500)">฿500</button>
+          <button class="amt" data-v="1000" onclick="pick(this,1000)">฿1,000</button>
+          <button class="amt" data-v="2000" onclick="pick(this,2000)">฿2,000</button>
+          <button class="amt" data-v="5000" onclick="pick(this,5000)">฿5,000</button>
+          <button class="amt" data-v="10000" onclick="pick(this,10000)">฿10,000</button>
+        </div>
+        <div class="custom-amt">
+          <span>฿</span>
+          <input type="number" id="custom" min="1" placeholder="ระบุจำนวนอื่น" oninput="customAmt(this.value)" aria-label="จำนวนเงินอื่น">
+        </div>
+
+        <div class="purpose">
+          <label class="field-label" data-i18n="fLabelPurpose">สมทบทุนเพื่อ</label>
+          <select id="purpose" onchange="renderReceipt()">
+            <option value="กองทุนทั่วไป" data-en="General Fund">กองทุนทั่วไปของโรงพยาบาล</option>
+            <option value="จัดซื้ออุปกรณ์การแพทย์" data-en="Medical Equipment">จัดซื้ออุปกรณ์การแพทย์</option>
+            <option value="ช่วยเหลือผู้ป่วยยากไร้" data-en="Underprivileged Patients">ช่วยเหลือผู้ป่วยยากไร้</option>
+            <option value="กองทุนผู้ป่วยเด็ก" data-en="Children's Fund">กองทุนผู้ป่วยเด็ก</option>
+          </select>
+        </div>
+
+        <div class="divider"></div>
+        <label class="field-label" data-i18n="fLabelDonor">ข้อมูลผู้บริจาค (สำหรับออกใบอนุโมทนาบุญ)</label>
+        <div class="fieldset">
+          <input class="txt" type="text" id="donor" placeholder="ชื่อ–นามสกุล" oninput="renderReceipt()" aria-label="ชื่อผู้บริจาค">
+        </div>
+        <div class="row2">
+          <input class="txt" type="email" placeholder="อีเมล" aria-label="อีเมล">
+          <input class="txt" type="tel" placeholder="เบอร์โทรศัพท์" aria-label="เบอร์โทรศัพท์">
+        </div>
+        <div class="fieldset">
+          <input class="txt" type="text" id="taxid" maxlength="13" placeholder="เลขบัตรประชาชน / เลขผู้เสียภาษี (ไม่บังคับ)" aria-label="เลขผู้เสียภาษี">
+        </div>
+
+        <label class="check">
+          <input type="checkbox" checked>
+          <span data-i18n="checkReceipt">ต้องการรับใบอนุโมทนาบุญเพื่อลดหย่อนภาษี และส่งข้อมูลเข้าระบบ e-Donation ของกรมสรรพากร</span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="pdpa">
+          <span data-i18n="checkPdpa">ยินยอมให้จัดเก็บและใช้ข้อมูลส่วนบุคคลเพื่อออกใบเสร็จ ตามนโยบายความเป็นส่วนตัว (PDPA)</span>
+        </label>
+
+        <button class="btn btn-primary submit" onclick="donate()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 21s-7-4.6-9.3-9C1 8.7 2.6 5.5 6 5.5c2 0 3.2 1.2 4 2.4.8-1.2 2-2.4 4-2.4 3.4 0 5 3.2 3.3 6.5C19 16.4 12 21 12 21Z" fill="#E7D6A8"/></svg>
+          <span id="submitLabel" data-i18n="submitBtn">บริจาค ฿500</span>
+        </button>
+        <div class="safe-note">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2" stroke="#5C6B63" stroke-width="1.6"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="#5C6B63" stroke-width="1.6"/></svg>
+          <span data-i18n="safeNote">ชำระเงินผ่าน PromptPay / บัตรเครดิต อย่างปลอดภัย</span>
+        </div>
+      </div>
+
+      <!-- RECEIPT PREVIEW -->
+      <div class="receipt-wrap">
+        <div class="receipt-cap" data-i18n="rcpCap">ตัวอย่างใบอนุโมทนาบุญของคุณ</div>
+        <div class="receipt">
+          <div class="rcp-body">
+            <div class="watermark">อนุโมทนาบุญ</div>
+            <div class="rcp-top">
+              <div class="rcp-org">
+                <div class="mark">ก</div>
+                <div>
+                  <b>มูลนิธิการุณยเวช</b>
+                  <small>เลขประจำตัวผู้เสียภาษี 0-9999-99999-99-9</small>
+                </div>
+              </div>
+              <div class="rcp-tag">
+                <div class="th">ใบอนุโมทนาบุญ</div>
+                <div class="en">Donation Receipt</div>
+              </div>
+            </div>
+
+            <div class="rcp-meta">
+              <div>
+                <div class="lbl" data-i18n="rcpNo">เลขที่</div>
+                <div class="val" id="rNo">DN-2568/00417</div>
+              </div>
+              <div style="text-align:right">
+                <div class="lbl" data-i18n="rcpDate">วันที่</div>
+                <div class="val" id="rDate">—</div>
+              </div>
+            </div>
+
+            <div class="rcp-donor">
+              <div class="lbl" data-i18n="rcpDonor">ได้รับเงินบริจาคจาก</div>
+              <div class="name" id="rName" data-i18n="rcpPlaceholder">คุณ (กรอกชื่อของคุณ)</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:4px" id="rPurpose">เพื่อกองทุนทั่วไปของโรงพยาบาล</div>
+            </div>
+
+            <div class="rcp-amount">
+              <div>
+                <div class="lbl" data-i18n="rcpAmount">จำนวนเงิน</div>
+                <div class="big mono" id="rAmt">฿500.00</div>
+              </div>
+              <div class="seal" data-i18n="rcpSeal">ได้รับ<br>อนุโมทนา<br>บุญ</div>
+            </div>
+            <div class="rcp-baht"><span data-i18n="rcpBahtLabel">จำนวนเงิน </span><b id="rBaht">ห้าร้อยบาทถ้วน</b></div>
+
+            <div class="rcp-foot">
+              <small data-i18n="rcpFoot">ใบเสร็จนี้ใช้เป็นหลักฐานเพื่อขอลดหย่อนภาษีเงินได้ตามที่กฎหมายกำหนด · ออกโดยระบบอัตโนมัติ</small>
+              <div style="text-align:center;font-size:10px;color:var(--muted)">
+                <div style="border-bottom:1px solid var(--line);width:80px;margin-bottom:4px;padding-bottom:14px"></div>
+                <span data-i18n="rcpSign">ผู้รับเงิน</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- IMPACT -->
+<section class="impact" id="impact">
+  <div class="wrap">
+    <span class="eyebrow" data-i18n="impEyebrow">โปร่งใส ตรวจสอบได้</span>
+    <h2 data-i18n="impTitle">เงินบริจาคของคุณเดินทางไปที่ไหนบ้าง</h2>
+    <div class="impact-cards">
+      <div class="icard">
+        <div class="pct">72%</div>
+        <h3 data-i18n="imp1Title">การรักษาโดยตรง</h3>
+        <p data-i18n="imp1Desc">ค่ายา ค่าผ่าตัด และค่ารักษาพยาบาลสำหรับผู้ป่วยยากไร้ที่เข้าไม่ถึงสิทธิ์</p>
+      </div>
+      <div class="icard">
+        <div class="pct">21%</div>
+        <h3 data-i18n="imp2Title">อุปกรณ์การแพทย์</h3>
+        <p data-i18n="imp2Desc">จัดซื้อและซ่อมบำรุงเครื่องมือแพทย์ที่จำเป็นต่อการช่วยชีวิต</p>
+      </div>
+      <div class="icard">
+        <div class="pct">7%</div>
+        <h3 data-i18n="imp3Title">ดำเนินงานมูลนิธิ</h3>
+        <p data-i18n="imp3Desc">ค่าบริหารจัดการที่โปร่งใส ตรวจสอบได้ พร้อมรายงานประจำปี</p>
+      </div>
+    </div>
+    <div class="impact-note">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#E7D6A8" stroke-width="1.5"/><path d="M12 8v5m0 3h.01" stroke="#E7D6A8" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span data-i18n="impNote">เผยแพร่รายงานการเงินที่ผ่านการตรวจสอบทุกไตรมาส — ดูรายงานย้อนหลังได้ที่หน้าความโปร่งใส</span>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="brand">
+        <div class="mark">ก</div>
+        <div><b data-i18n="brand">มูลนิธิการุณยเวช</b><small data-i18n="footAddr">123 ถ.สุขภาพดี เขตกรุงเทพฯ 10110</small></div>
+      </div>
+      <div class="foot-col">
+        <b data-i18n="footCol1">การบริจาค</b>
+        <a href="#donate" data-i18n="navDonate">ร่วมบริจาค</a>
+        <a href="#" data-i18n="footTax">การลดหย่อนภาษี</a>
+        <a href="#" data-i18n="footRecurring">บริจาครายเดือน</a>
+      </div>
+      <div class="foot-col">
+        <b data-i18n="footCol2">เกี่ยวกับเรา</b>
+        <a href="#impact" data-i18n="navImpact">เงินไปที่ไหน</a>
+        <a href="#" data-i18n="footReport">รายงานประจำปี</a>
+        <a href="#" data-i18n="navContact">ติดต่อเรา</a>
+      </div>
+      <div class="foot-col">
+        <b data-i18n="footCol3">ติดต่อ</b>
+        <a href="tel:021234567">02-123-4567</a>
+        <a href="mailto:donate@karunyavej.org">donate@karunyavej.org</a>
+        <a href="#" data-i18n="footPdpa">นโยบายความเป็นส่วนตัว</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span>© 2568 มูลนิธิการุณยเวช · Karunyavej Foundation</span>
+      <span data-i18n="footRights">สงวนลิขสิทธิ์ · ใบอนุโมทนาบุญออกโดยระบบ DonaRec</span>
+    </div>
+  </div>
+</footer>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ---------- state ---------- */
+let amount = 500;
+let freq = 'once';
+let lang = 'th';
+
+/* ---------- Thai baht text ---------- */
+function bahtText(a){
+  a = Number(a); if(isNaN(a)||a<=0) return '';
+  const n=['','หนึ่ง','สอง','สาม','สี่','ห้า','หก','เจ็ด','แปด','เก้า'];
+  const u=['','สิบ','ร้อย','พัน','หมื่น','แสน'];
+  function grp(g){let s='';const L=g.length;for(let i=0;i<L;i++){const d=+g[i],p=L-1-i;if(!d)continue;
+    if(p===0&&d===1&&L>1)s+='เอ็ด';else if(p===1&&d===1)s+='สิบ';else if(p===1&&d===2)s+='ยี่สิบ';else s+=n[d]+u[p];}return s;}
+  function intT(str){str=str.replace(/^0+/,'')||'0';if(str==='0')return 'ศูนย์';
+    const gs=[];while(str.length>6){gs.unshift(str.slice(-6));str=str.slice(0,-6);}gs.unshift(str);
+    let r='';for(let i=0;i<gs.length;i++){r+=grp(gs[i]);if(i<gs.length-1)r+='ล้าน';}return r;}
+  const [ip,dp]=a.toFixed(2).split('.');
+  let t=intT(ip)+'บาท';
+  t+= dp==='00' ? 'ถ้วน' : intT(dp)+'สตางค์';
+  return t;
+}
+
+/* ---------- i18n ---------- */
+const I18N={
+  th:{brand:'มูลนิธิการุณยเวช',brandSub:'โรงพยาบาลการุณยเวช · เพื่อผู้ป่วยทุกคน',
+    navDonate:'ร่วมบริจาค',navImpact:'เงินไปที่ไหน',navContact:'ติดต่อ',
+    heroEyebrow:'ทุกการให้ ช่วยต่อชีวิต',heroTitle:'มอบโอกาสในการ<br>รักษา ให้กับ<em>คนที่รอ</em>',
+    heroSub:'เงินบริจาคของคุณช่วยจัดหาอุปกรณ์การแพทย์ ค่ารักษาผู้ป่วยยากไร้ และดูแลผู้ป่วยที่ต้องการความช่วยเหลืออย่างเร่งด่วน พร้อมรับใบอนุโมทนาบุญเพื่อลดหย่อนภาษีได้ทันที',
+    heroCta1:'บริจาคเลย',heroCta2:'ดูว่าเงินไปที่ไหน',
+    trust1:'ลดหย่อนภาษีได้ 2 เท่า',trust2:'เชื่อมระบบ e-Donation สรรพากร',trust3:'ปลอดภัยตาม PDPA',
+    artRaised:'ยอดบริจาคเดือนนี้',artGoal:'จาก ฿3M',artLives:'ชีวิตที่ได้รับการดูแล',artDonors:'ผู้ร่วมบริจาคล่าสุด',
+    donateEyebrow:'ร่วมบริจาค',donateTitle:'เลือกจำนวนที่คุณอยากให้',
+    donateSub:'ทุกบาททุกสตางค์ถูกส่งต่อถึงผู้ป่วยโดยตรง — และคุณจะเห็นใบอนุโมทนาบุญของคุณเกิดขึ้นแบบเรียลไทม์ทางขวามือ',
+    fLabelFreq:'รูปแบบการบริจาค',freqOnce:'บริจาคครั้งเดียว',freqMonthly:'รายเดือน',
+    fLabelAmount:'เลือกจำนวนเงิน',fLabelPurpose:'สมทบทุนเพื่อ',
+    fLabelDonor:'ข้อมูลผู้บริจาค (สำหรับออกใบอนุโมทนาบุญ)',
+    checkReceipt:'ต้องการรับใบอนุโมทนาบุญเพื่อลดหย่อนภาษี และส่งข้อมูลเข้าระบบ e-Donation ของกรมสรรพากร',
+    checkPdpa:'ยินยอมให้จัดเก็บและใช้ข้อมูลส่วนบุคคลเพื่อออกใบเสร็จ ตามนโยบายความเป็นส่วนตัว (PDPA)',
+    safeNote:'ชำระเงินผ่าน PromptPay / บัตรเครดิต อย่างปลอดภัย',
+    rcpCap:'ตัวอย่างใบอนุโมทนาบุญของคุณ',rcpNo:'เลขที่',rcpDate:'วันที่',rcpDonor:'ได้รับเงินบริจาคจาก',
+    rcpPlaceholder:'คุณ (กรอกชื่อของคุณ)',rcpAmount:'จำนวนเงิน',rcpSeal:'ได้รับ<br>อนุโมทนา<br>บุญ',
+    rcpBahtLabel:'จำนวนเงิน ',rcpFoot:'ใบเสร็จนี้ใช้เป็นหลักฐานเพื่อขอลดหย่อนภาษีเงินได้ตามที่กฎหมายกำหนด · ออกโดยระบบอัตโนมัติ',
+    rcpSign:'ผู้รับเงิน',
+    impEyebrow:'โปร่งใส ตรวจสอบได้',impTitle:'เงินบริจาคของคุณเดินทางไปที่ไหนบ้าง',
+    imp1Title:'การรักษาโดยตรง',imp1Desc:'ค่ายา ค่าผ่าตัด และค่ารักษาพยาบาลสำหรับผู้ป่วยยากไร้ที่เข้าไม่ถึงสิทธิ์',
+    imp2Title:'อุปกรณ์การแพทย์',imp2Desc:'จัดซื้อและซ่อมบำรุงเครื่องมือแพทย์ที่จำเป็นต่อการช่วยชีวิต',
+    imp3Title:'ดำเนินงานมูลนิธิ',imp3Desc:'ค่าบริหารจัดการที่โปร่งใส ตรวจสอบได้ พร้อมรายงานประจำปี',
+    impNote:'เผยแพร่รายงานการเงินที่ผ่านการตรวจสอบทุกไตรมาส — ดูรายงานย้อนหลังได้ที่หน้าความโปร่งใส',
+    footAddr:'123 ถ.สุขภาพดี เขตกรุงเทพฯ 10110',footCol1:'การบริจาค',footTax:'การลดหย่อนภาษี',
+    footRecurring:'บริจาครายเดือน',footCol2:'เกี่ยวกับเรา',footReport:'รายงานประจำปี',
+    footCol3:'ติดต่อ',footPdpa:'นโยบายความเป็นส่วนตัว',footRights:'สงวนลิขสิทธิ์ · ใบอนุโมทนาบุญออกโดยระบบ DonaRec'},
+  en:{brand:'Karunyavej Foundation',brandSub:'Karunyavej Hospital · Care for everyone',
+    navDonate:'Donate',navImpact:'Where it goes',navContact:'Contact',
+    heroEyebrow:'Every gift saves a life',heroTitle:'Give the gift of<br>care to <em>those who wait</em>',
+    heroSub:'Your donation funds medical equipment, treatment for underprivileged patients, and urgent care for those who need it most — with an instant tax-deductible receipt.',
+    heroCta1:'Donate now',heroCta2:'See where it goes',
+    trust1:'Double tax deduction',trust2:'e-Donation connected',trust3:'PDPA compliant',
+    artRaised:'Raised this month',artGoal:'of ฿3M',artLives:'lives cared for',artDonors:'Recent donors',
+    donateEyebrow:'Make a gift',donateTitle:'Choose the amount you want to give',
+    donateSub:'Every satang goes straight to patients — and you can watch your donation receipt appear in real time on the right.',
+    fLabelFreq:'Donation type',freqOnce:'One-time',freqMonthly:'Monthly',
+    fLabelAmount:'Choose an amount',fLabelPurpose:'Support',
+    fLabelDonor:'Donor details (for your receipt)',
+    checkReceipt:'Send me a tax-deductible receipt and submit to the Revenue Department e-Donation system',
+    checkPdpa:'I consent to my personal data being stored to issue a receipt, per the Privacy Policy (PDPA)',
+    safeNote:'Secure payment via PromptPay / credit card',
+    rcpCap:'A live preview of your receipt',rcpNo:'No.',rcpDate:'Date',rcpDonor:'Received with thanks from',
+    rcpPlaceholder:'(Enter your name)',rcpAmount:'Amount',rcpSeal:'RECEIVED<br>WITH<br>THANKS',
+    rcpBahtLabel:'Amount ',rcpFoot:'This receipt serves as evidence for income tax deduction as prescribed by law · Issued automatically',
+    rcpSign:'Received by',
+    impEyebrow:'Transparent & accountable',impTitle:'Where your donation travels',
+    imp1Title:'Direct treatment',imp1Desc:'Medicine, surgery and care for underprivileged patients without coverage.',
+    imp2Title:'Medical equipment',imp2Desc:'Purchasing and maintaining life-saving medical devices.',
+    imp3Title:'Foundation operations',imp3Desc:'Transparent, auditable administration with annual reporting.',
+    impNote:'We publish audited financials every quarter — view past reports on our transparency page.',
+    footAddr:'123 Health Rd, Bangkok 10110',footCol1:'Donate',footTax:'Tax deduction',
+    footRecurring:'Monthly giving',footCol2:'About',footReport:'Annual report',
+    footCol3:'Contact',footPdpa:'Privacy policy',footRights:'All rights reserved · Receipts by DonaRec'}
+};
+
+function setLang(l){
+  lang=l;
+  document.getElementById('th').classList.toggle('on',l==='th');
+  document.getElementById('en').classList.toggle('on',l==='en');
+  document.documentElement.lang=l;
+  document.querySelectorAll('[data-i18n]').forEach(el=>{
+    const k=el.getAttribute('data-i18n');
+    if(I18N[l][k]!==undefined) el.innerHTML=I18N[l][k];
+  });
+  // localize select options
+  document.querySelectorAll('#purpose option').forEach(o=>{
+    if(l==='en'&&o.dataset.en){o.dataset.th=o.dataset.th||o.textContent;o.textContent=o.dataset.en;}
+    else if(o.dataset.th){o.textContent=o.dataset.th;}
+  });
+  renderReceipt();
+}
+
+/* ---------- interactions ---------- */
+function pick(btn,v){
+  amount=v;
+  document.querySelectorAll('.amt').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  document.getElementById('custom').value='';
+  renderReceipt();
+}
+function customAmt(v){
+  document.querySelectorAll('.amt').forEach(b=>b.classList.remove('on'));
+  amount=Number(v)||0;
+  renderReceipt();
+}
+function setFreq(btn,f){
+  freq=f;
+  document.querySelectorAll('.freq button').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  renderReceipt();
+}
+
+function thaiFiscalYear(d){
+  const be=d.getFullYear()+543;
+  return d.getMonth()>=9 ? be+1 : be; // Oct onwards -> next fiscal year
+}
+function fmtDate(d){
+  const m=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+  const me=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return lang==='en'
+    ? `${d.getDate()} ${me[d.getMonth()]} ${d.getFullYear()}`
+    : `${d.getDate()} ${m[d.getMonth()]} ${d.getFullYear()+543}`;
+}
+
+function renderReceipt(){
+  const now=new Date();
+  const fy=thaiFiscalYear(now);
+  document.getElementById('rNo').textContent=`DN-${fy}/00417`;
+  document.getElementById('rDate').textContent=fmtDate(now);
+
+  const donor=document.getElementById('donor').value.trim();
+  const nameEl=document.getElementById('rName');
+  if(donor){nameEl.textContent=(lang==='en'?'':'คุณ')+donor;}
+  else{nameEl.textContent=I18N[lang].rcpPlaceholder;}
+
+  const p=document.getElementById('purpose');
+  document.getElementById('rPurpose').textContent=(lang==='en'?'For ':'เพื่อ')+p.options[p.selectedIndex].text;
+
+  document.getElementById('rAmt').textContent='฿'+Number(amount).toLocaleString('en-US',{minimumFractionDigits:2});
+  document.getElementById('rBaht').textContent = lang==='en'
+    ? '฿'+Number(amount).toLocaleString('en-US',{minimumFractionDigits:2})
+    : (bahtText(amount)||'—');
+
+  const lbl=document.getElementById('submitLabel');
+  const suffix=freq==='monthly'?(lang==='en'?' / month':' ต่อเดือน'):'';
+  lbl.textContent=(lang==='en'?'Donate ':'บริจาค ')+'฿'+Number(amount).toLocaleString('en-US')+suffix;
+}
+
+function donate(){
+  if(!amount||amount<=0){toast(lang==='en'?'Please choose an amount':'กรุณาเลือกจำนวนเงิน');return;}
+  if(!document.getElementById('pdpa').checked){toast(lang==='en'?'Please accept the PDPA consent':'กรุณายอมรับความยินยอม PDPA');return;}
+  toast((lang==='en'?'Thank you! Redirecting to secure payment for ฿':'ขอบคุณสำหรับน้ำใจ! กำลังไปหน้าชำระเงิน ฿')+Number(amount).toLocaleString('en-US'));
+}
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.innerHTML='<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="#E7D6A8" stroke-width="1.6"/><path d="m8 12 2.5 2.5L16 9" stroke="#E7D6A8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span>'+msg+'</span>';
+  t.classList.add('show');
+  clearTimeout(window._tt);window._tt=setTimeout(()=>t.classList.remove('show'),3600);
+}
+
+renderReceipt();
+</script>
+</body>
+</html>
