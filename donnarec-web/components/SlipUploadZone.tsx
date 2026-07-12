@@ -26,6 +26,18 @@ interface SlipUploadZoneProps {
   /** Error message from server (422 magic-byte / 413 size / network) */
   serverError?: string;
   disabled?: boolean;
+  /**
+   * When true, the empty-zone label drops the "(ไม่บังคับ)" hint and renders a
+   * required asterisk (used by the public Flow B form where a slip is mandatory,
+   * D-80). Default false keeps Flow A's optional behavior unchanged.
+   */
+  required?: boolean;
+  /**
+   * Overrides the empty-zone label text. When omitted, falls back to
+   * t("slip.zoneLabel"). Lets the public form supply its own (required) label
+   * without this shared component reaching into a caller-specific i18n namespace.
+   */
+  label?: string;
 }
 
 /**
@@ -47,8 +59,11 @@ export function SlipUploadZone({
   uploading = false,
   serverError,
   disabled = false,
+  required = false,
+  label,
 }: SlipUploadZoneProps) {
   const t = useTranslations();
+  const zoneLabel = label ?? t("slip.zoneLabel");
   const inputRef = useRef<HTMLInputElement>(null);
 
   /** Locally selected file (pending upload — not yet on server) */
@@ -258,12 +273,21 @@ export function SlipUploadZone({
   return (
     <div className="flex flex-col gap-2">
       {/* Accessible label above zone */}
-      <p className="text-[14px] text-slate-600">{t("slip.zoneLabel")}</p>
+      <p className="text-[14px] text-slate-600">
+        {zoneLabel}
+        {required && (
+          <span className="text-red-600" aria-hidden="true">
+            {" "}
+            *
+          </span>
+        )}
+      </p>
 
       <div
         role="button"
         tabIndex={disabled ? -1 : 0}
-        aria-label={t("slip.zoneLabel")}
+        aria-label={zoneLabel}
+        aria-required={required || undefined}
         onClick={() => !disabled && inputRef.current?.click()}
         onKeyDown={(e) => {
           if (!disabled && (e.key === "Enter" || e.key === " ")) {
