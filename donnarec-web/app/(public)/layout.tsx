@@ -1,6 +1,7 @@
 import "./public-theme.css";
 import { cn } from "@/lib/utils";
 import { trirong, ibmPlexSansThai, ibmPlexMono } from "../fonts";
+import { PublicHeader } from "@/components/PublicHeader";
 
 /**
  * (public) route group layout — renders unauthenticated, donor-facing pages
@@ -36,10 +37,7 @@ export default function PublicLayout({
         ibmPlexMono.variable
       )}
     >
-      {/* Placeholder header — replaced by PublicHeader in a later plan */}
-      <header className="border-b border-border px-4 py-3">
-        <span className="font-semibold text-primary">DonaRec</span>
-      </header>
+      <PublicHeader />
       {children}
     </div>
   );
