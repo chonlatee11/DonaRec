@@ -66,11 +66,11 @@
 
 ### Public Donation Website (เว็บไซต์รับบริจาค — Flow B)
 
-- [ ] **FR-01**: ผู้บริจาคกรอกแบบฟอร์มบริจาค (ข้อมูลผู้บริจาค + จำนวนเงิน + วันที่บริจาค) [M]
-- [ ] **FR-02**: ผู้บริจาคอัปโหลดไฟล์สลิป (jpg/png/pdf, จำกัดขนาด, ตรวจชนิดไฟล์) [M]
-- [ ] **FR-03**: แสดงและบันทึกการให้ความยินยอม (consent) ตาม PDPA ก่อนส่งข้อมูล [M]
+- [x] **FR-01**: ผู้บริจาคกรอกแบบฟอร์มบริจาค (ข้อมูลผู้บริจาค + จำนวนเงิน + วันที่บริจาค) [M]
+- [x] **FR-02**: ผู้บริจาคอัปโหลดไฟล์สลิป (jpg/png/pdf, จำกัดขนาด, ตรวจชนิดไฟล์) [M]
+- [x] **FR-03**: แสดงและบันทึกการให้ความยินยอม (consent) ตาม PDPA ก่อนส่งข้อมูล [M]
 - [x] **FR-06**: รองรับการเลือกภาษา ไทย/อังกฤษ บนเว็บฟอร์ม [M]
-- [ ] **FR-05**: แจ้งสถานะ/ส่งอีเมลว่าได้รับรายการแล้ว (ยังไม่ใช่ใบเสร็จ) [S]
+- [x] **FR-05**: แจ้งสถานะ/ส่งอีเมลว่าได้รับรายการแล้ว (ยังไม่ใช่ใบเสร็จ) [S]
 - [x] **FR-04**: ป้องกันสแปม/บอท (CAPTCHA / rate limiting) [S]
 
 ### Reports & Settings (รายงานและการตั้งค่า)
@@ -160,11 +160,11 @@ Which phases cover which requirements.
 | FR-31 | Phase 5 | Complete |
 | FR-32 | Phase 5 | Complete |
 | NFR-08 | Phase 5 | Complete |
-| FR-01 | Phase 6 | Pending |
-| FR-02 | Phase 6 | Pending |
-| FR-03 | Phase 6 | Pending |
+| FR-01 | Phase 6 | Complete |
+| FR-02 | Phase 6 | Complete |
+| FR-03 | Phase 6 | Complete |
 | FR-06 | Phase 6 | Complete |
-| FR-05 | Phase 6 | Pending |
+| FR-05 | Phase 6 | Complete |
 | FR-04 | Phase 6 | Complete |
 | FR-08 | Phase 6 | Complete |
 | NFR-06 | Phase 6 | Complete |

@@ -219,7 +219,7 @@ Plans:
   4. The public form is protected against spam/bots via rate limiting and CAPTCHA, and the donor receives an acknowledgement email stating the request was received (explicitly not yet a receipt).
   5. Staff see a "รอตรวจสอบ" pending-review queue of web submissions, and the back-office UI is responsive and usable in Thai/English on desktop and mobile.
 
-**Plans**: 6/8 plans executed
+**Plans**: 7/8 plans executed
 
 **Wave 1** *(parallel — no cross-deps, disjoint files)*
 
@@ -235,7 +235,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2)*
 
 - [x] 06-04-PLAN.md — ack_email outbox worker (TDD): bilingual "not a receipt" acknowledgement (FR-05)
-- [ ] 06-06-PLAN.md — Public /donate form + Turnstile widget + confirmation + session-less BFF passthrough (FR-01/02/03/05/06)
+- [x] 06-06-PLAN.md — Public /donate form + Turnstile widget + confirmation + session-less BFF passthrough (FR-01/02/03/05/06)
 
 **Wave 4** *(blocked on Wave 3)*
 
@@ -257,4 +257,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
 | 5. e-Donation Export, Reports & Admin Settings | 8/8 | Complete   | 2026-07-07 |
-| 6. Public Donation Web Form (Flow B) | 6/8 | In Progress|  |
+| 6. Public Donation Web Form (Flow B) | 7/8 | In Progress|  |
