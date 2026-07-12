@@ -300,7 +300,9 @@ export function AgingTable() {
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          <div className="overflow-hidden rounded-lg border border-slate-200">
+          {/* overflow-x-auto so wide tables scroll horizontally below 768px
+              (UI-SPEC §Table responsiveness) instead of overflowing */}
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
             <Table role="grid">
               <caption className="sr-only">{t("tabAging")}</caption>
               <TableHeader>

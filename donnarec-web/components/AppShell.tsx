@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { Settings, FileSpreadsheet, BarChart3 } from "lucide-react";
 import { LocaleSwitcher } from "./LocaleSwitcher";
 import { SignOutButton } from "./SignOutButton";
+import { MobileNavDrawer } from "./MobileNavDrawer";
 import { Toaster } from "@/components/ui/toaster";
 import { isAdminViewer, isCheckerOrAdminViewer } from "@/lib/session-role";
 
@@ -37,19 +38,21 @@ export async function AppShell({
   // RequireAnyRole(Checker,Admin) (05-02) is the real authority.
   const isCheckerOrAdmin = await isCheckerOrAdminViewer();
 
-  return (
-    <div className="flex min-h-screen bg-slate-50">
-      {/* ── Sidebar / Nav ── */}
-      <aside className="flex w-64 flex-col bg-slate-100 border-r border-slate-200 shrink-0">
-        {/* Brand */}
-        <div className="flex items-center px-6 py-5 border-b border-slate-200">
-          <span className="text-xl font-semibold text-slate-900 leading-tight">
-            {tApp("title")}
-          </span>
-        </div>
+  // Shared sidebar content (brand + role-gated nav links). Rendered once and
+  // reused by BOTH the desktop fixed sidebar (≥768px) and the mobile slide-in
+  // drawer (<768px) so the two variants can never diverge — same markup, same
+  // role guards (T-06-28: the responsive drawer exposes no new capability).
+  const sidebarContent = (
+    <>
+      {/* Brand */}
+      <div className="flex items-center px-6 py-5 border-b border-slate-200">
+        <span className="text-xl font-semibold text-slate-900 leading-tight">
+          {tApp("title")}
+        </span>
+      </div>
 
-        {/* Nav links */}
-        <nav className="flex-1 px-4 py-6 space-y-1" aria-label="Main navigation">
+      {/* Nav links */}
+      <nav className="flex-1 px-4 py-6 space-y-1" aria-label="Main navigation">
           <Link
             href="/donations"
             className={[
@@ -128,23 +131,36 @@ export async function AppShell({
                 "min-h-[44px]",
               ].join(" ")}
             >
-              <Settings className="h-4 w-4" />
+  <Settings className="h-4 w-4" />
               {t("settings")}
             </Link>
           )}
         </nav>
+    </>
+  );
+
+  return (
+    <div className="flex min-h-screen bg-slate-50">
+      {/* ── Desktop sidebar (≥768px) — hidden below md, replaced by the drawer ── */}
+      <aside className="hidden md:flex w-64 flex-col bg-slate-100 border-r border-slate-200 shrink-0">
+        {sidebarContent}
       </aside>
 
       {/* ── Main area ── */}
       <div className="flex flex-1 flex-col min-w-0">
-        {/* Header */}
-        <header className="flex h-14 shrink-0 items-center justify-end gap-4 border-b border-slate-200 bg-white px-6">
-          <SignOutButton />
-          <LocaleSwitcher />
+        {/* Header — hamburger (left, <768px) + account controls (right) */}
+        <header className="flex h-14 shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 md:px-6">
+          {/* Mobile nav: hamburger trigger + slide-in drawer (same nav markup) */}
+          <MobileNavDrawer>{sidebarContent}</MobileNavDrawer>
+          <div className="ml-auto flex items-center gap-4">
+            <SignOutButton />
+            <LocaleSwitcher />
+          </div>
         </header>
 
-        {/* Page content — 3xl (64px) vertical padding per UI-SPEC Spacing */}
-        <main className="flex-1 py-16 px-6">
+        {/* Page content — 3xl (64px) vertical padding per UI-SPEC Spacing;
+            mobile page-padding override: px-4 below md, px-6 at md+ */}
+        <main className="flex-1 py-16 px-4 md:px-6">
           {children}
         </main>
       </div>

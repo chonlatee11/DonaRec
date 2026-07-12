@@ -273,8 +273,9 @@ export function DonationTable({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Table */}
-      <div className="overflow-hidden rounded-lg border border-slate-200">
+      {/* Table — overflow-x-auto so wide tables scroll horizontally below
+          768px (UI-SPEC §Table responsiveness) instead of overflowing */}
+      <div className="overflow-x-auto rounded-lg border border-slate-200">
         <Table role="grid">
           <caption className="sr-only">{t("donations.title")}</caption>
           <TableHeader>
