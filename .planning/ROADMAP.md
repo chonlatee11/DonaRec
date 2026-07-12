@@ -257,4 +257,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
 | 5. e-Donation Export, Reports & Admin Settings | 8/8 | Complete   | 2026-07-07 |
-| 6. Public Donation Web Form (Flow B) | 8/8 | Complete   | 2026-07-12 |
+| 6. Public Donation Web Form (Flow B) | 8/8 code-complete | In Progress (06-08 human UAT pending) | - |
