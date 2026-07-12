@@ -5,8 +5,8 @@ milestone_name: milestone
 current_phase: 06
 current_phase_name: public-donation-web-form-flow-b
 status: executing
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-07-12T02:47:07.323Z"
+stopped_at: 06-08 code-complete (Task 1 committed a2f2796); Task 2 human UAT pending
+last_updated: "2026-07-12T03:17:55.208Z"
 last_activity: 2026-07-11
 last_activity_desc: Phase 06 execution started
 progress:
@@ -28,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 ## Current Position
 
-Phase: 06 (public-donation-web-form-flow-b) — EXECUTING
-Plan: 8 of 8
+Phase: 06 (public-donation-web-form-flow-b) — EXECUTING (all 8 plans code-complete; NOT Complete — 06-08 Task 2 human UAT pending)
+Plan: 8 of 8 — 06-08 code-complete (Task 1 committed a2f2796); Task 2 responsive/bilingual human walkthrough (NFR-06) PENDING UAT
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
 Status: Ready to execute
 Last activity: 2026-07-11 — Phase 06 execution started
@@ -89,6 +89,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 06 P07 | 35min | 3 tasks | 12 files |
 | Phase 06 P04 | 12min | 1 tasks | 5 files |
 | Phase 06 P06 | 40min | 2 tasks | 14 files |
+| Phase 06 P08 | 15min | 1 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -187,6 +188,10 @@ Phase 4 deferred UAT (blocks marking Phase 4 Complete — Conventions integratio
 
 1. [ ] 04-06 Task 4 — Screen 3b human UI walkthrough (EmailDeliveryPanel status/recipient/attempts, resend re-enqueue with unchanged receipt_no, download PDF renders Thai/English, Maker sees Download but not Resend). DEFERRED by explicit user decision to phase-end `/gsd-verify-work`. Code (Tasks 1-3) complete and E2E-proven over the real HTTP path (commits 6f9ad34, d09419d, 743389c, 7264491, 3659dbf, 2173be9). Full walkthrough steps + credential prerequisites (Keycloak `donnarec-frontend` confidential client secret, `donnarec-web/.env.local`, admin-test/maker-test/checker-test passwords) documented in `.planning/phases/04-receipt-pdf-email-delivery-outbox-worker/04-06-SUMMARY.md` under "Deferred: Task 4 Human UI Walkthrough".
 
+Phase 6 pending UAT (blocks marking Phase 6 Complete — NFR-06 + Success Criterion 5, CONVENTIONS integration/human-walkthrough gate):
+
+1. [ ] 06-08 Task 2 — responsive + bilingual human walkthrough (public /donate form + staff /queue, desktop + ~375px mobile, TH/EN, real Cloudflare Turnstile pass+fail path, ack-email language capture, mobile nav drawer + horizontal table scroll). NOT performed — requires a live local stack (docker compose + seeded users + `donnarec-web/.env.local`) and operator-supplied Turnstile keys (`NEXT_PUBLIC_TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY`; test keys acceptable). Code (Task 1) complete + build-green, committed `a2f2796`. Full 7-step walkthrough documented in `.planning/phases/06-public-donation-web-form-flow-b/06-08-SUMMARY.md` → "Outstanding Human-Verification Items". Resume via `/gsd-verify-work`.
+
 ### Blockers/Concerns
 
 Stakeholder confirmations are gated but NON-blocking for the roadmap; resolve at the relevant phase start:
@@ -205,7 +210,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-12T02:47:02.499Z
-Stopped at: Completed 06-03-PLAN.md
-Resume file: 
-None
+Last session: 2026-07-12T00:00:00.000Z
+Stopped at: 06-08 code-complete (Task 1 committed a2f2796). Task 2 (checkpoint:human-verify, blocking) — responsive/bilingual live-stack walkthrough for NFR-06 — NOT performed; documented as PENDING HUMAN UAT in 06-08-SUMMARY.md. Phase 6 is NOT Complete until this walkthrough passes.
+Resume file: .planning/phases/06-public-donation-web-form-flow-b/06-08-SUMMARY.md (see "Outstanding Human-Verification Items" — 7 walkthrough steps + Turnstile-key prerequisite)

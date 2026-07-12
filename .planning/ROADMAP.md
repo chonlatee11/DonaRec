@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt (completed 2026-07-01)
 - [x] **Phase 4: Receipt PDF + Email Delivery (Outbox Worker)** - Async Thai/EN tax-compliant PDF and email pipeline with retry, decoupled from the issuance transaction (completed 2026-07-04)
 - [x] **Phase 5: e-Donation Export, Reports & Admin Settings** - Access-controlled e-Donation export, donation reports, no-deploy config, and verified backup/restore (completed 2026-07-07)
-- [ ] **Phase 6: Public Donation Web Form (Flow B)** - Public bilingual donation form with slip upload, consent, bot protection, and pending-review queue feeding the existing pipeline
+- [ ] **Phase 6: Public Donation Web Form (Flow B)** - Public bilingual donation form with slip upload, consent, bot protection, and pending-review queue feeding the existing pipeline (all 8 plans code-complete 2026-07-12; NOT Complete — plan 06-08 Task 2 responsive/bilingual human walkthrough (NFR-06) pending UAT)
 
 ## Phase Details
 
@@ -219,7 +219,7 @@ Plans:
   4. The public form is protected against spam/bots via rate limiting and CAPTCHA, and the donor receives an acknowledgement email stating the request was received (explicitly not yet a receipt).
   5. Staff see a "รอตรวจสอบ" pending-review queue of web submissions, and the back-office UI is responsive and usable in Thai/English on desktop and mobile.
 
-**Plans**: 7/8 plans executed
+**Plans**: 8/8 plans executed (06-08 code-complete; Task 2 human UAT pending — phase NOT Complete)
 
 **Wave 1** *(parallel — no cross-deps, disjoint files)*
 
@@ -239,7 +239,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3)*
 
-- [ ] 06-08-PLAN.md — Mobile-nav retrofit + table scroll + responsive/bilingual human walkthrough (NFR-06)
+- [~] 06-08-PLAN.md — Mobile-nav retrofit + table scroll + responsive/bilingual human walkthrough (NFR-06) — Task 1 code-complete (a2f2796); Task 2 human walkthrough PENDING UAT
 
 **UI hint**: yes
 
@@ -257,4 +257,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
 | 5. e-Donation Export, Reports & Admin Settings | 8/8 | Complete   | 2026-07-07 |
-| 6. Public Donation Web Form (Flow B) | 7/8 | In Progress|  |
+| 6. Public Donation Web Form (Flow B) | 8/8 | Complete   | 2026-07-12 |
