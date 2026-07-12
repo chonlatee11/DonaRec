@@ -219,6 +219,8 @@ func (w *Worker) ProcessOnce(ctx context.Context) error {
 	switch job.JobType {
 	case "issue_receipt":
 		procErr = w.handleIssueReceipt(ctx, job)
+	case "ack_email":
+		procErr = w.handleAckEmail(ctx, job)
 	default:
 		procErr = fmt.Errorf("worker: unknown job_type %q", job.JobType)
 	}
