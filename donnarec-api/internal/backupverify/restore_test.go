@@ -54,6 +54,14 @@ const (
 	expectedAuditLogs = 4
 )
 
+// migrationSeededUsers counts rows the migrations themselves insert into `users`
+// before seedFixture runs. Migration 000016 (Phase 6, Flow B) seeds exactly one
+// fixed-UUID public-web system user (D-76). The dump carries it, so both the
+// migrated source and the restored target hold expectedUsers + migrationSeededUsers
+// user rows. donations/audit_log get no migration-seeded rows, so only the users
+// assertions add this baseline.
+const migrationSeededUsers = 1
+
 // startMigratedPostgres starts a source Postgres 17 testcontainer with ALL migrations
 // applied. It mirrors testutil.SetupTestPostgres's shape, but also returns the
 // *postgres.PostgresContainer itself (not just the pool): this test needs
@@ -214,7 +222,7 @@ func TestRestoreProof(t *testing.T) {
 	require.NoError(t, sourcePool.QueryRow(ctx, `SELECT count(*) FROM users`).Scan(&seededUsers))
 	require.NoError(t, sourcePool.QueryRow(ctx, `SELECT count(*) FROM donations`).Scan(&seededDonations))
 	require.NoError(t, sourcePool.QueryRow(ctx, `SELECT count(*) FROM audit_log`).Scan(&seededAuditLogs))
-	require.Equal(t, expectedUsers, seededUsers)
+	require.Equal(t, expectedUsers+migrationSeededUsers, seededUsers)
 	require.Equal(t, expectedDonations, seededDonations)
 	require.Equal(t, expectedAuditLogs, seededAuditLogs)
 
@@ -273,7 +281,7 @@ func TestRestoreProof(t *testing.T) {
 	require.NoError(t, targetPool.QueryRow(ctx, `SELECT count(*) FROM donations`).Scan(&restoredDonations))
 	require.NoError(t, targetPool.QueryRow(ctx, `SELECT count(*) FROM audit_log`).Scan(&restoredAuditLogs))
 
-	require.Equal(t, expectedUsers, restoredUsers, "restored users count must exactly match seeded fixture")
+	require.Equal(t, expectedUsers+migrationSeededUsers, restoredUsers, "restored users count must exactly match seeded fixture plus migration-seeded system users")
 	require.Equal(t, expectedDonations, restoredDonations, "restored donations count must exactly match seeded fixture")
 	require.Equal(t, expectedAuditLogs, restoredAuditLogs, "restored audit_log count must exactly match seeded fixture")
 
