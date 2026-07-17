@@ -28,6 +28,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -109,6 +110,14 @@ func (h *e2eHarness) doPublicSubmissionXFF(
 	w := httptest.NewRecorder()
 	h.router.ServeHTTP(w, req)
 	return w
+}
+
+// oversizedSlipBytes returns a PNG-magic-byte-prefixed payload sized well
+// past main.go's publicBodyLimitBytes (11 MB) cap — used by the SEC-06-FLAG1
+// oversized-body regression test below.
+func oversizedSlipBytes() []byte {
+	b := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	return append(b, make([]byte, 12<<20)...) // 12 MB > 11 MB cap
 }
 
 // validPublicFields returns a complete, valid public donor submission field set.
@@ -283,5 +292,53 @@ func TestPublicDonationE2E(t *testing.T) {
 			"the request past the burst must be 429 despite a fresh spoofed XFF value — RemoteAddr must govern the rate-limit bucket; body: %s",
 			w.Body.String())
 		assert.Contains(t, w.Body.String(), "rate_limited")
+	})
+
+	t.Run("OversizedBody_Rejected_NoRow_NoHang", func(t *testing.T) {
+		// SEC-06-FLAG1 regression: main.go's bodyLimitMiddleware wraps the
+		// request body in http.MaxBytesReader(11<<20) BEFORE
+		// captchaMW.VerifyTurnstile()'s own c.PostForm call would otherwise
+		// force gin to fully parse (and, for >32MB parts, disk-spill) the
+		// entire oversized multipart body during its own token read — no
+		// valid CAPTCHA solve required to trigger that spill pre-fix.
+		//
+		// PRODUCTION divergence (confirmed, not a test gap — see 260717-spx
+		// plan context): in production, an oversized body ->
+		// ParseMultipartForm fails inside VerifyTurnstile -> c.PostForm
+		// returns "" -> the REAL Turnstile verifier rejects the empty token
+		// -> 400 {"error":"captcha_failed"}, UNCHANGED shape. This E2E
+		// harness wires fakeCaptchaVerifier (e2e_test.go), whose Verify()
+		// ALWAYS returns nil regardless of token value, so in-harness the
+		// (now-failed) parse still lets the fake verifier PASS and the
+		// request reaches the handler, which then rejects on the
+		// missing/unreadable slip. This subtest therefore asserts the DoS
+		// property that holds under BOTH paths — a bounded 4xx rejection,
+		// no donation row, and no hang — NOT the specific captcha_failed
+		// error shape (which only production's real verifier produces).
+		var before int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM donations`).Scan(&before))
+
+		const ip = "203.0.113.55:9999" // fresh RemoteAddr, isolated from other subtests' buckets
+		const donorName = "นาย ทดสอบ Oversized Body"
+
+		start := time.Now()
+		w := h.doPublicSubmission(t, validPublicFields(donorName), "oversized.png", oversizedSlipBytes(), ip)
+		elapsed := time.Since(start)
+
+		assert.Less(t, elapsed, 10*time.Second,
+			"an oversized body must be rejected promptly by the body-limit middleware, not hang; took %s", elapsed)
+		assert.GreaterOrEqual(t, w.Code, http.StatusBadRequest,
+			"an oversized body must be rejected with a 4xx status (bounded rejection); body: %s", w.Body.String())
+		assert.Less(t, w.Code, http.StatusInternalServerError,
+			"an oversized body must not 5xx; body: %s", w.Body.String())
+
+		var after int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM donations`).Scan(&after))
+		assert.Equal(t, before, after, "an oversized body must create NO donation row")
+
+		var orphan int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM donations WHERE donor_name = $1`, donorName).Scan(&orphan))
+		assert.Equal(t, 0, orphan, "no donation row for the oversized-body submission")
 	})
 }
