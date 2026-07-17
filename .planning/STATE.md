@@ -32,7 +32,7 @@ Phase: 06 (public-donation-web-form-flow-b) — EXECUTING (all 8 plans code-comp
 Plan: 8 of 8 — 06-08 code-complete (Task 1 committed a2f2796); Task 2 responsive/bilingual human walkthrough (NFR-06) PENDING UAT
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
 Status: Ready to execute
-Last activity: 2026-07-11 — Phase 06 execution started
+Last activity: 2026-07-17 — Completed quick task 260717-spx: fix 2 High public-endpoint security flags (Phase 06)
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -199,6 +199,12 @@ Stakeholder confirmations are gated but NON-blocking for the roadmap; resolve at
 - Phase 1: PDPA retention period (~5y vs erasure); email provider / KMS / hosting choices.
 - Phase 4: §6 receipt wording + 1x/2x deduction eligibility (accounting/legal sign-off).
 - Phase 5: exact e-Donation field spec + 1 Jan 2026 mandate obligation.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260717-spx | Fix public-endpoint security flags (trusted-proxies IP-spoof + multipart disk-exhaustion), Phase 06 | 2026-07-17 | 72dca94 | [260717-spx-fix-public-endpoint-security-flags-trust](./quick/260717-spx-fix-public-endpoint-security-flags-trust/) |
 
 ## Deferred Items
 
