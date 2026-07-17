@@ -118,6 +118,39 @@ type Config struct {
 
 	// Worker (Phase 4) — outbox worker poll/retry knobs + chrome sidecar CDP URL
 	Worker WorkerConfig
+
+	// CAPTCHA (D-82, FR-04, Phase 6) — Cloudflare Turnstile secret key. Env-only,
+	// never DB-stored (T-06-08); no default — an empty key means Verify will
+	// always fail siteverify (fail-closed, Pitfall 5), never silently pass.
+	TurnstileSecretKey string
+
+	// RateLimit (D-83, FR-04, Phase 6) — per-IP token-bucket knobs for the
+	// public donation submission endpoint.
+	RateLimit RateLimitConfig
+
+	// TrustedProxies (SEC-06-FLAG2) is the CIDRs/IPs of trusted upstream
+	// proxies/load balancers, loaded from the comma-separated TRUSTED_PROXIES
+	// env var. nil (unset/empty) means trust NO proxy — gin's c.ClientIP()
+	// then returns the direct RemoteAddr and IGNORES any attacker-supplied
+	// X-Forwarded-For/X-Real-IP header, the safe default for a
+	// directly-exposed service. Set this to the real reverse-proxy/load-
+	// balancer CIDR only when one actually fronts this service.
+	TrustedProxies []string
+}
+
+// RateLimitConfig holds the per-IP token-bucket rate-limit knobs (D-83,
+// T-06-05) for the public donation submission endpoint (Phase 6). Both count
+// and window are env-configurable from day one (06-RESEARCH Open Question 2
+// — real donor traffic volume is unknown, matches WorkerConfig's existing
+// env-driven-tunable pattern) so they can be adjusted without a code change.
+type RateLimitConfig struct {
+	// SubmissionsPerWindow is the burst size — the max requests an IP may
+	// make before the token bucket must refill — and, combined with Window,
+	// derives the sustained refill rate (SubmissionsPerWindow per Window).
+	SubmissionsPerWindow int
+	// Window is the period over which SubmissionsPerWindow requests are
+	// allowed to sustain.
+	Window time.Duration
 }
 
 // RetentionConfig holds data-retention policy defaults loaded from environment.
@@ -171,6 +204,15 @@ func Load() (*Config, error) {
 			MaxAttempts:     getEnvInt("WORKER_MAX_ATTEMPTS", 5),
 			StuckJobTimeout: getEnvDuration("WORKER_STUCK_JOB_TIMEOUT", 10*time.Minute),
 		},
+		TurnstileSecretKey: os.Getenv("TURNSTILE_SECRET_KEY"),
+		RateLimit: RateLimitConfig{
+			// Conservative MVP default (06-RESEARCH Open Question 2): 5
+			// submissions per IP per 10 minutes. Env-overridable without a
+			// code change once real donor traffic patterns are known.
+			SubmissionsPerWindow: getEnvInt("RATE_LIMIT_SUBMISSIONS_PER_WINDOW", 5),
+			Window:               getEnvDuration("RATE_LIMIT_WINDOW", 10*time.Minute),
+		},
+		TrustedProxies: getEnvStrSlice("TRUSTED_PROXIES"),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -262,4 +304,23 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+// getEnvStrSlice reads a comma-separated env var into a []string, trimming
+// whitespace and dropping empty elements. Returns nil (NOT an empty
+// non-nil slice) when the env var is unset or empty — nil is the safe
+// "trust no proxy" default for TrustedProxies (SEC-06-FLAG2).
+func getEnvStrSlice(key string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

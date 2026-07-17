@@ -29,6 +29,30 @@ type CreateDonationRequest struct {
 	DonorLanguage      string  `json:"donor_language"       validate:"omitempty,oneof=th en"` // D-55, FR-23
 }
 
+// PublicDonationRequest is the donor-supplied payload for a Flow B public web
+// submission (plan 06-03, FR-01/02/03). It is DELIBERATELY donor-fields-only:
+// the CAPTCHA token (turnstile_token) and any rate-limit concern are handled in
+// the middleware layer BEFORE the handler parses this struct — never as a
+// validated field here (Pitfall 3, 06-RESEARCH.md), mirroring how RequireAuth is
+// middleware and never a request-body field.
+//
+// Mirrors CreateDonationRequest's donor field set (D-79 keeps DonorTaxID
+// mandatory). ConsentTextVersion carries the Flow-B-specific consent string
+// (D-81). DonorLanguage drives the bilingual ack email / eventual receipt (D-55).
+type PublicDonationRequest struct {
+	DonorName          string  `json:"donor_name"           validate:"required,min=1,max=255"`
+	DonorTaxID         string  `json:"donor_tax_id"         validate:"required,len=13,numeric"` // D-79: mandatory
+	DonorAddress       string  `json:"donor_address"        validate:"max=1000"`
+	DonorEmail         string  `json:"donor_email"          validate:"omitempty,email,max=255"`
+	Amount             float64 `json:"amount"               validate:"required,gt=0"`
+	DonatedAt          string  `json:"donated_at"           validate:"required"` // "YYYY-MM-DD"
+	Notes              string  `json:"notes"                validate:"max=2000"`
+	ConsentGiven       bool    `json:"consent_given"`
+	ConsentTextVersion string  `json:"consent_text_version"`
+	ConsentPurpose     string  `json:"consent_purpose"`
+	DonorLanguage      string  `json:"donor_language"       validate:"omitempty,oneof=th en"` // D-55, FR-23
+}
+
 // UpdateDraftRequest is the JSON request body for editing a donation still in draft status (FR-09).
 // All donor fields may be changed while the record remains in draft.
 // Submitting after edit requires a separate Submit call.
@@ -153,6 +177,9 @@ type DonationDetailResponse struct {
 	// users.id UUID string so the UI can route to "my drafts" / compare identity.
 	CreatedBy   string     `json:"created_by"`
 	CreatedByID string     `json:"created_by_id"`
+	// Source ("flow_a"/"flow_b", D-77/FR-08) — lets Screen 3 render a source-aware
+	// creator label (never leak the public-web system user's name for flow_b).
+	Source      string     `json:"source"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 	SubmittedAt *time.Time `json:"submitted_at,omitempty"`
@@ -199,12 +226,16 @@ type ReviewRequest struct {
 // ListFilter holds optional search/filter criteria for listing donations (FR-10, D-53).
 // All fields are optional — nil/zero means no restriction applied to that dimension.
 // Tax ID is intentionally excluded as a filter parameter (D-53, T-03-29).
+// Source is nil = skip the filter (returns both flow_a and flow_b, D-53 nil-skip
+// semantics); otherwise must be "flow_a" or "flow_b" — enforced by the handler
+// before it reaches this struct (FR-08, D-77).
 type ListFilter struct {
 	DonorName *string
 	Status    *string
 	FromDate  *time.Time
 	ToDate    *time.Time
 	ReceiptNo *string
+	Source    *string
 	Offset    int32
 	Limit     int32
 }
@@ -217,6 +248,9 @@ type ListFilter struct {
 //     raw users.id UUID string (so the UI can route to "my drafts"). If the creator's
 //     user row is missing (LEFT JOIN NULL), CreatedBy falls back to "" while
 //     CreatedByID still carries the raw UUID from donations.created_by.
+//   - Source ("flow_a"/"flow_b", D-77) lets the pending-review queue (plan 07)
+//     separate staff-entered records from public web submissions without a
+//     second round-trip.
 type DonationListItem struct {
 	ID               string  `json:"id"`
 	Status           string  `json:"status"`
@@ -226,6 +260,12 @@ type DonationListItem struct {
 	ReceiptFormatted *string `json:"receipt_formatted,omitempty"`
 	CreatedBy        string  `json:"created_by"`
 	CreatedByID      string  `json:"created_by_id"`
+	Source           string  `json:"source"`
+	// CreatedAt is the submission timestamp (RFC3339) — the pending-review queue
+	// (Screen 11, plan 07) shows it as its "วันที่ส่ง" column, distinct from
+	// DonatedAt (the donation date). Already SELECTed by SearchDonations; exposed
+	// here so the queue needs no second round-trip.
+	CreatedAt string `json:"created_at"`
 }
 
 // DonationListResult is the D-R2 pagination envelope payload for GET /api/donations.

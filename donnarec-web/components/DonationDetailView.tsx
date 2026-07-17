@@ -18,6 +18,7 @@ import {
 } from "@/lib/donations";
 import { DonnaRecApiError } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SourceBadge } from "@/components/SourceBadge";
 import { MaskedIdField } from "@/components/MaskedIdField";
 import { ReviewActionPanel } from "@/components/ReviewActionPanel";
 import { EmailDeliveryPanel } from "@/components/EmailDeliveryPanel";
@@ -461,6 +462,28 @@ export function DonationDetailView({
                   </dd>
                 </div>
               )}
+
+              {/*
+               * ผู้สร้าง — source-aware creator label (UI-SPEC Amendment to
+               * Screen 3, T-06-26). For a flow_b (public web) submission the
+               * value must NEVER render the synthetic public-web system user's
+               * display name — it reads "ผู้บริจาคส่งเอง (ผ่านเว็บไซต์)" with the
+               * blue SourceBadge. flow_a shows the real staff creator name with
+               * the slate SourceBadge alongside for visual parity.
+               */}
+              <div className="grid grid-cols-[180px_1fr] gap-2">
+                <dt className="text-[14px] text-slate-600">
+                  {t("fields.createdBy")}
+                </dt>
+                <dd className="flex flex-wrap items-center gap-2 text-[16px] text-slate-900">
+                  <span>
+                    {donation.source === "flow_b"
+                      ? t("detail.creatorSelfSubmitted")
+                      : donation.created_by}
+                  </span>
+                  <SourceBadge source={donation.source} />
+                </dd>
+              </div>
             </dl>
 
             <Separator className="my-4" />

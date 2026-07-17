@@ -64,5 +64,20 @@
     },
     "email.footer": {
         "other": "This is an automated email. Please do not reply."
+    },
+    "ackEmail.subject": {
+        "other": "We have received your donation details (not yet a receipt)"
+    },
+    "ackEmail.greeting": {
+        "other": "Dear Valued Donor"
+    },
+    "ackEmail.body": {
+        "other": "We have received your donation details, which are now under review by our staff. This message is not a receipt. You will receive an official donation receipt once our staff has reviewed and approved your donation."
+    },
+    "ackEmail.reference_label": {
+        "other": "Your reference number for contacting our staff"
+    },
+    "ackEmail.footer": {
+        "other": "This is an automated email. Please do not reply."
     }
 }

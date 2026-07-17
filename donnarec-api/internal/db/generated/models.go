@@ -193,6 +193,18 @@ type Donation struct {
 	ReplacedBy          pgtype.UUID        `db:"replaced_by" json:"replaced_by"`
 	DonorLanguage       string             `db:"donor_language" json:"donor_language"`
 	ReceiptPdfObjectKey *string            `db:"receipt_pdf_object_key" json:"receipt_pdf_object_key"`
+	EdonationKeyedAt    pgtype.Timestamptz `db:"edonation_keyed_at" json:"edonation_keyed_at"`
+	EdonationKeyedBy    pgtype.UUID        `db:"edonation_keyed_by" json:"edonation_keyed_by"`
+	Source              string             `db:"source" json:"source"`
+}
+
+type EdonationConfig struct {
+	ID            bool               `db:"id" json:"id"`
+	FieldMapping  []byte             `db:"field_mapping" json:"field_mapping"`
+	CashTypeLabel string             `db:"cash_type_label" json:"cash_type_label"`
+	NearDueDays   int32              `db:"near_due_days" json:"near_due_days"`
+	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	UpdatedBy     pgtype.UUID        `db:"updated_by" json:"updated_by"`
 }
 
 type EmailDelivery struct {

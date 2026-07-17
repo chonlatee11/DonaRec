@@ -1,0 +1,101 @@
+/**
+ * .theme-public — scoped warm-token variable layer for the (public) route
+ * group (06-UI-SPEC "Dual-Theme Architecture" §1-§4).
+ *
+ * This file is imported ONLY by app/(public)/layout.tsx. It never touches
+ * :root (app/globals.css) or tailwind.config.ts's existing colors.* mapping
+ * — (app) keeps resolving the slate/blue :root values unchanged. The
+ * isolation mechanism mirrors shadcn's own `.dark` class: a scoped selector
+ * overriding the same custom-property NAMES for its descendant subtree only.
+ *
+ * Locked hex palette source: 06-design-reference.html / 06-UI-SPEC.md
+ * "Color" section. HSL triplets below were recomputed directly from the
+ * locked hex values with a converter (UI-SPEC flags its own HSL column as
+ * needing re-verification before pasting — one row (destructive text) had a
+ * transposed-digit typo there, 32 vs 3.2, confirmed by recomputation).
+ */
+
+.theme-public {
+  /* ---- shadcn semantic variables (SAME names (app) uses; scoped here) ---- */
+
+  /* paper #F5F3EC — dominant background (60%) */
+  --background: 46.7 31% 94.3%;
+  /* ink #17241F — primary text */
+  --foreground: 156.9 22% 11.6%;
+
+  /* white (card) #FCFBF6 — card/popover surfaces (30%) */
+  --card: 50 50% 97.6%;
+  --card-foreground: 156.9 22% 11.6%;
+  --popover: 50 50% 97.6%;
+  --popover-foreground: 156.9 22% 11.6%;
+
+  /* pine #1E4A43 — primary structural/brand color */
+  --primary: 170.5 42.3% 20.4%;
+  /* gold-soft #E7D6A8 — text-on-pine (button labels) */
+  --primary-foreground: 43.8 56.8% 78.2%;
+
+  /* paper-2 #EFEBE0 — secondary panel bg */
+  --secondary: 44 31.9% 90.8%;
+  --secondary-foreground: 156.9 22% 11.6%;
+
+  --muted: 44 31.9% 90.8%;
+  /* muted #5C6B63 — secondary text/helper */
+  --muted-foreground: 148 7.5% 39%;
+
+  /* gold-wash #FBF6E9 — highlight/acknowledgement surface */
+  --accent: 43.3 69.2% 94.9%;
+  /* pine text/icon on gold-wash acknowledgement surfaces */
+  --accent-foreground: 170.5 42.3% 20.4%;
+
+  /* destructive text #B3261E — error/blocking states */
+  --destructive: 3.2 71.3% 41%;
+  --destructive-foreground: 0 0% 100%;
+
+  /* line #DAD4C4 — borders */
+  --border: 43.6 22.9% 81.2%;
+  --input: 43.6 22.9% 81.2%;
+
+  /* focus ring base var (Radix ring-* utilities); pine, see focus-visible
+     override below for the actual WCAG-passing outline treatment */
+  --ring: 170.5 42.3% 20.4%;
+
+  /* scoped radius: 18px (vs. (app)'s 0.5rem/8px at :root) */
+  --radius: 18px;
+
+  /* ---- extra, non-shadcn palette tokens for bespoke elements ---- */
+  --public-pine: 170.5 42.3% 20.4%; /* pine #1E4A43 — same value as --primary, direct-name access for non-shadcn markup */
+  --public-pine-2: 168.7 37.6% 27.6%; /* pine-2 #2C6157 — primary hover state */
+  --public-sage: 157.2 14.1% 59.8%; /* sage #8AA79C — decorative/illustrative only */
+  --public-gold: 40.6 51.4% 51.6%; /* gold #C39A44 — sparing accent (10%), NOT focus ring */
+  --public-gold-wash: 43.3 69.2% 94.9%; /* gold-wash #FBF6E9 */
+  --public-ink: 156.9 22% 11.6%; /* ink #17241F */
+  --public-line: 43.6 22.9% 81.2%; /* line #DAD4C4 */
+  /* destructive-bg #FBEAE7 — light wash for error/blocking banners (Rule 2:
+     UI-SPEC's destructive row pairs a text color with this bg wash; needed
+     for CAPTCHA/rate-limit/validation banners built in later plans) */
+  --public-destructive-wash: 9 71.4% 94.5%;
+
+  /* Card elevation — back-office Cards stay flat/border-only, unchanged */
+  --shadow-public-card: 0 14px 34px -26px rgba(23, 36, 31, 0.4);
+
+  /* Warm (public) body font — Trirong is applied per-heading by components
+     built in later plans; this sets the scope's default/body font. */
+  font-family: var(--font-ibm-plex-sans-thai), var(--font-trirong), system-ui,
+    sans-serif;
+}
+
+/* WCAG 1.4.11 fix — gold (#C39A44) measures ~2.36-2.53:1 on paper/card,
+   fails the >=3:1 non-text contrast requirement. Pine measures ~8.94:1.
+   06-UI-SPEC "Accessibility Contract — (public) focus ring". */
+.theme-public :focus-visible {
+  outline: 2px solid hsl(var(--primary)); /* pine, --primary in this scope */
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* Touch target minimum (NFR-06 responsive contract) */
+.theme-public input,
+.theme-public select,
+.theme-public textarea {
+  min-height: 44px;
+}

@@ -25,6 +25,11 @@ FOR UPDATE;
 -- Insert a new donation record in 'draft' status with donor snapshot + PII ciphertext.
 -- created_at/updated_at omitted from VALUES — rely on DEFAULT now() (IN-01).
 -- donor_tax_id_enc/dek accept ciphertext only — plaintext is encrypted at service layer (D-44).
+-- source ('flow_a'|'flow_b', D-77) is passed EXPLICITLY by the caller: Flow A staff
+-- entry passes 'flow_a'; Flow B public submission (CreatePublicSubmission, plan 06-03)
+-- passes 'flow_b'. Set here at INSERT time so the row is born with the correct source
+-- (no post-insert UPDATE) — the column still DEFAULTs 'flow_a' at the schema level as a
+-- backstop for any path that does not select it.
 INSERT INTO donations (
     created_by,
     donor_name,
@@ -41,7 +46,8 @@ INSERT INTO donations (
     consent_purpose,
     retain_until,
     legal_basis,
-    donor_language
+    donor_language,
+    source
 ) VALUES (
     @created_by,
     @donor_name,
@@ -58,7 +64,8 @@ INSERT INTO donations (
     @consent_purpose,
     @retain_until,
     @legal_basis,
-    @donor_language
+    @donor_language,
+    @source
 )
 RETURNING
     id, created_by, status, created_at, updated_at;
@@ -101,7 +108,10 @@ SELECT
     replaces,
     replaced_by,
     donor_language,
-    receipt_pdf_object_key
+    receipt_pdf_object_key,
+    edonation_keyed_at,
+    edonation_keyed_by,
+    source
 FROM donations
 WHERE id = @id;
 
@@ -242,6 +252,7 @@ SELECT
     d.approved_at,
     d.created_by,
     d.edonation_keyed,
+    d.source,
     u.display_name AS created_by_name
 FROM donations d
 LEFT JOIN users u ON u.id = d.created_by
@@ -251,6 +262,7 @@ WHERE
     AND (sqlc.narg('from_date')::DATE         IS NULL OR d.donated_at   >= sqlc.narg('from_date'))
     AND (sqlc.narg('to_date')::DATE           IS NULL OR d.donated_at   <= sqlc.narg('to_date'))
     AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'))
+    AND (sqlc.narg('source')::TEXT            IS NULL OR d.source        = sqlc.narg('source'))
 ORDER BY d.created_at DESC
 LIMIT  @limit_n
 OFFSET @offset_n;
@@ -272,7 +284,8 @@ WHERE
     AND (sqlc.narg('status')::donation_status IS NULL OR d.status        = sqlc.narg('status'))
     AND (sqlc.narg('from_date')::DATE         IS NULL OR d.donated_at   >= sqlc.narg('from_date'))
     AND (sqlc.narg('to_date')::DATE           IS NULL OR d.donated_at   <= sqlc.narg('to_date'))
-    AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'));
+    AND (sqlc.narg('receipt_no')::TEXT        IS NULL OR d.receipt_formatted = sqlc.narg('receipt_no'))
+    AND (sqlc.narg('source')::TEXT            IS NULL OR d.source        = sqlc.narg('source'));
 
 -- name: GetUserDisplayName :one
 -- Returns a user's display_name by users.id — used to enrich the donation detail

@@ -45,14 +45,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 
 	"github.com/donnarec/donnarec-api/internal/audit"
 	"github.com/donnarec/donnarec-api/internal/auth"
+	"github.com/donnarec/donnarec-api/internal/captcha"
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/edonation"
 	"github.com/donnarec/donnarec-api/internal/pdf"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/report"
 	"github.com/donnarec/donnarec-api/internal/settings"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/testutil"
@@ -113,6 +117,37 @@ func (f *fakeSettingsStore) PutTemplateImage(_ context.Context, r io.Reader, siz
 	f.objects[key] = full
 	f.mu.Unlock()
 	return key, detected.String(), nil
+}
+
+// e2ePublicRateBurst is the per-IP token-bucket burst the E2E harness configures
+// for the public route group. Kept small + deterministic (near-zero refill rate)
+// so TestPublicDonationE2E's rate-limit subtest can exhaust one IP's bucket and
+// assert a 429 without a real-time wait.
+const e2ePublicRateBurst = 5
+
+// fakeCaptchaVerifier is a hermetic captcha.Verifier that always passes — it lets
+// the public-donation E2E exercise the REAL router chain
+// (ratelimit -> captcha(middleware) -> handler -> service -> DB) without any
+// outbound Cloudflare siteverify network call. The captcha middleware's own logic
+// (reading the turnstile_token field, aborting on Verify error) still runs for real;
+// only the network verdict is stubbed to nil (success).
+type fakeCaptchaVerifier struct{}
+
+func (fakeCaptchaVerifier) Verify(_ context.Context, _ string, _ string) error { return nil }
+
+// fakePublicSlipStore satisfies donation.SlipPutter. It runs the REAL
+// storage.ValidateSlip (magic-byte + 10 MB size check) so the bad-magic-byte
+// rejection path is genuinely exercised, and fakes only the MinIO network PUT
+// (mirrors fakeSettingsStore's rationale — this test's job is the HTTP seam, not a
+// MinIO round-trip, which internal/storage's own tests already cover).
+type fakePublicSlipStore struct{}
+
+func (fakePublicSlipStore) PutSlip(_ context.Context, r io.Reader, size int64, donationID string) (string, string, error) {
+	detected, _, err := storage.ValidateSlip(r, size)
+	if err != nil {
+		return "", "", err
+	}
+	return fmt.Sprintf("slips/%s/fake%s", donationID, detected.Extension()), detected.String(), nil
 }
 
 // e2eHarness bundles the fully-wired router (via the production setupRouter) plus
@@ -189,10 +224,35 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 	settingsSvc := settings.NewSettingsService(pool, queries, settingsStore, logger)
 	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
 
+	// e-Donation export service + config accessor (Phase 5, plan 05-02, FR-30/D-75) —
+	// mirrors main.go wiring, reusing the SAME auditSvc + keyProvider as donationSvc.
+	edonationSvc := edonation.NewService(pool, queries, auditSvc, keyProvider, logger)
+	edonationCfg := edonation.NewConfig(queries)
+	edonationHandler := edonation.NewHandler(edonationSvc, edonationCfg, logger)
+
+	// Donation summary report service + handler (Phase 5, plan 05-05, FR-32/D-70/
+	// D-71) — mirrors main.go wiring: queries only, no keyProvider/auditSvc.
+	reportSvc := report.NewService(queries)
+	reportHandler := report.NewHandler(reportSvc, logger)
+
 	// Handlers.
 	userHandler := users.NewUserHandler(userSvc, logger)
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
 	slipHandler := donation.NewSlipHandler(slipSvc, logger)
+
+	// Flow B public submission handler (Phase 6, plan 06-03): a fake slip store
+	// (real magic-byte validation, faked PUT) + the seeded public-web users.id.
+	var publicWebUserID pgtype.UUID
+	require.NoError(t, publicWebUserID.Scan(donation.PublicWebUserID),
+		"donation.PublicWebUserID must be a valid UUID")
+	publicDonationHandler := donation.NewPublicDonationHandler(donationSvc, fakePublicSlipStore{}, publicWebUserID, logger)
+
+	// Fake CAPTCHA verifier (always passes) + a deterministic per-IP rate limiter
+	// (near-zero refill, burst = e2ePublicRateBurst) so the public-donation E2E
+	// drives the real router chain without external egress and can exercise 429.
+	captchaMW := captcha.NewMiddleware(fakeCaptchaVerifier{})
+	rlRate := rate.Limit(0.0001)
+	rlBurst := e2ePublicRateBurst
 
 	// appUserResolver: identical closure to main.go — maps Keycloak sub -> users.id,
 	// translating pgx.ErrNoRows to auth.ErrSubjectNotProvisioned (403 in middleware).
@@ -207,7 +267,9 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		return u.ID, nil
 	}
 
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, logger)
+	// trustedProxies=nil keeps the harness's RemoteAddr-based IP resolution
+	// working (matches the safe production default, SEC-06-FLAG2).
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, publicDonationHandler, captchaMW, rlRate, rlBurst, nil, logger)
 
 	return &e2eHarness{router: router, kc: kc, queries: queries, pool: pool, ctx: ctx, settingsStore: settingsStore}
 }
@@ -311,6 +373,24 @@ func validDonorBody(name string) map[string]any {
 		"donor_address":        "123 ถนนทดสอบ กรุงเทพฯ",
 		"amount":               1500.00,
 		"donated_at":           "2026-03-15",
+		"consent_given":        true,
+		"consent_text_version": "v1",
+		"consent_purpose":      "tax-receipt",
+	}
+}
+
+// donorBodyWithAmountDate returns a valid Create donor payload with an
+// explicit amount/donated_at (mirrors validDonorBody's fixed-value shape) —
+// used by TestE2E_Reports to seed donations across distinct months/amounts
+// for the summary report's breakdown assertions.
+func donorBodyWithAmountDate(t *testing.T, name, taxID string, amount float64, donatedAt string) map[string]any {
+	t.Helper()
+	return map[string]any{
+		"donor_name":           name,
+		"donor_tax_id":         taxID,
+		"donor_address":        "123 ถนนทดสอบ กรุงเทพฯ",
+		"amount":               amount,
+		"donated_at":           donatedAt,
 		"consent_given":        true,
 		"consent_text_version": "v1",
 		"consent_purpose":      "tax-receipt",
@@ -847,5 +927,371 @@ func TestE2E_AdminSettings(t *testing.T) {
 		w = h.doMultipart(t, "/api/admin/settings/images/not-a-slot", adminToken, "x.png", settingsPNGBytes())
 		assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "invalid_image_slot")
+	})
+}
+
+// zipSignature is the 4-byte ZIP local file header signature every .xlsx (an OOXML
+// ZIP container) must start with.
+var zipSignature = []byte{0x50, 0x4B, 0x03, 0x04}
+
+// utf8BOM is the 3-byte UTF-8 byte-order-mark exportfile.StreamCSV writes before
+// any CSV content (05-RESEARCH.md Pattern 2).
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// TestE2E_EdonationExport drives the e-Donation export endpoint over the REAL
+// HTTP path: HTTP -> RequireAuth (real Keycloak-shaped token) ->
+// RequireAnyRole(Checker,Admin) -> ResolveAppUser -> edonation.Handler ->
+// edonation.Service (audited decrypt) -> exportfile stream (FR-30, plan 05-02,
+// satisfies the integration-test gate per CLAUDE.md Conventions).
+//
+// Requires Docker testcontainers (Postgres). Skip with -short.
+func TestE2E_EdonationExport(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E integration test in short mode: requires Docker")
+	}
+
+	h := newE2EHarness(t)
+
+	const subMaker = "66666666-6666-6666-6666-666666666666"
+	const subChecker = "77777777-7777-7777-7777-777777777777"
+	const subAdmin = "88888888-8888-8888-8888-888888888888"
+	_ = h.provisionUser(t, "maker-edonation-e2e@example.com", "Maker eDonation E2E", subMaker, db.UserRoleEnumMaker)
+	_ = h.provisionUser(t, "checker-edonation-e2e@example.com", "Checker eDonation E2E", subChecker, db.UserRoleEnumChecker)
+	_ = h.provisionUser(t, "admin-edonation-e2e@example.com", "Admin eDonation E2E", subAdmin, db.UserRoleEnumAdmin)
+
+	makerToken := h.kc.MintTokenForSubject(subMaker, backendClientID, "maker")
+	checkerToken := h.kc.MintTokenForSubject(subChecker, backendClientID, "checker")
+	adminToken := h.kc.MintTokenForSubject(subAdmin, backendClientID, "admin")
+
+	// Seed one issued donation via the existing real approve path (HTTP, not a
+	// direct service call) — proves the export source is real DB state reached
+	// through the same lifecycle every other E2E test exercises.
+	w := h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาย ทดสอบ e-Donation Export"))
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	created := decodeDonation(t, w)
+
+	w = h.do(t, http.MethodPost, "/api/donations/"+created.ID+"/submit", makerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+	w = h.do(t, http.MethodPost, "/api/donations/"+created.ID+"/approve", checkerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	issued := decodeDonation(t, w)
+	require.Equal(t, "issued", issued.Status)
+
+	// Baseline bucket state — no code path in the export flow accepts a
+	// ReceiptsStore/settings-image store reference at all (grep-verified in
+	// 05-02 Task 1: internal/edonation/*.go never imports internal/storage), so
+	// the harness's fake settings-image bucket is the only observable proxy for
+	// "no file was written to a bucket" (D-74).
+	baselineObjectCount := len(h.settingsStore.objects)
+
+	t.Run("Maker_Forbidden_403", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=xlsx", makerToken, nil)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"a Maker-only token must be rejected by RequireAnyRole(Checker,Admin) — body: %s", w.Body.String())
+	})
+
+	var auditCountBeforeChecker int
+	require.NoError(t, h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM audit_log WHERE action = 'edonation.export'`).Scan(&auditCountBeforeChecker))
+
+	t.Run("Checker_200_XLSX_ZipSignature", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=xlsx", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
+		body := w.Body.Bytes()
+		require.GreaterOrEqual(t, len(body), 4)
+		assert.Equal(t, zipSignature, body[:4], "xlsx export body must start with the ZIP signature")
+
+		// D-64/T-05-02-UNAUDITED: exactly ONE new audit_log row for this export.
+		var auditCountAfter int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM audit_log WHERE action = 'edonation.export'`).Scan(&auditCountAfter))
+		assert.Equal(t, auditCountBeforeChecker+1, auditCountAfter,
+			"exactly one new audit_log row with action edonation.export must be written per checker export")
+	})
+
+	t.Run("Admin_200_XLSX", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=xlsx", adminToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		body := w.Body.Bytes()
+		require.GreaterOrEqual(t, len(body), 4)
+		assert.Equal(t, zipSignature, body[:4], "xlsx export body must start with the ZIP signature")
+	})
+
+	t.Run("Checker_200_CSV_BOM", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=csv", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/csv")
+		body := w.Body.Bytes()
+		require.GreaterOrEqual(t, len(body), 3)
+		assert.Equal(t, utf8BOM, body[:3], "csv export body must start with the UTF-8 BOM")
+	})
+
+	t.Run("InvalidFormat_400", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/export?format=pdf", checkerToken, nil)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("NoBucketWrites_D74", func(t *testing.T) {
+		// D-74 stream-only assertion: none of the 5 export/format calls above wrote
+		// any object to the harness's fake settings-image bucket — the only
+		// observable "bucket" reference the wired router holds — proving the
+		// export path never persists a plaintext-PII file (stream-only to the
+		// ResponseWriter, per xlsx.go/csv.go/exportfile.StreamXLSX/StreamCSV).
+		assert.Equal(t, baselineObjectCount, len(h.settingsStore.objects),
+			"export calls must never write an object to any bucket (D-74)")
+	})
+}
+
+// TestE2E_EdonationKeyedAndAging drives POST /api/edonation/keyed and GET
+// /api/edonation/aging over the REAL HTTP path with real signed Keycloak-shaped
+// tokens (FR-31/SC#2, D-67/D-68/D-69) — the CLAUDE.md Conventions
+// integration-test gate: RBAC (Maker 403, Checker/Admin 200), per-donation
+// audit trail, and aging-bucket exclusion of just-keyed rows are all asserted
+// against real DB state reached through the real router, not a direct service
+// call.
+func TestE2E_EdonationKeyedAndAging(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E integration test in short mode: requires Docker")
+	}
+
+	h := newE2EHarness(t)
+
+	const subMaker = "99999999-1111-1111-1111-111111111111"
+	const subChecker = "99999999-2222-2222-2222-222222222222"
+	const subAdmin = "99999999-3333-3333-3333-333333333333"
+	_ = h.provisionUser(t, "maker-keyed-e2e@example.com", "Maker Keyed E2E", subMaker, db.UserRoleEnumMaker)
+	_ = h.provisionUser(t, "checker-keyed-e2e@example.com", "Checker Keyed E2E", subChecker, db.UserRoleEnumChecker)
+	_ = h.provisionUser(t, "admin-keyed-e2e@example.com", "Admin Keyed E2E", subAdmin, db.UserRoleEnumAdmin)
+
+	makerToken := h.kc.MintTokenForSubject(subMaker, backendClientID, "maker")
+	checkerToken := h.kc.MintTokenForSubject(subChecker, backendClientID, "checker")
+
+	// Seed 2 issued donations via the real approve path (HTTP, not a direct
+	// service call) — mirrors TestE2E_EdonationExport's seeding discipline.
+	w := h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาย ทดสอบ e-Donation Keyed หนึ่ง"))
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	created1 := decodeDonation(t, w)
+	w = h.do(t, http.MethodPost, "/api/donations/"+created1.ID+"/submit", makerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	w = h.do(t, http.MethodPost, "/api/donations/"+created1.ID+"/approve", checkerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	issued1 := decodeDonation(t, w)
+	require.Equal(t, "issued", issued1.Status)
+
+	w = h.do(t, http.MethodPost, "/api/donations", makerToken, validDonorBody("นาย ทดสอบ e-Donation Keyed สอง"))
+	require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+	created2 := decodeDonation(t, w)
+	w = h.do(t, http.MethodPost, "/api/donations/"+created2.ID+"/submit", makerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	w = h.do(t, http.MethodPost, "/api/donations/"+created2.ID+"/approve", checkerToken, nil)
+	require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	issued2 := decodeDonation(t, w)
+	require.Equal(t, "issued", issued2.Status)
+
+	keyedBody := map[string]any{
+		"donation_ids": []string{issued1.ID, issued2.ID},
+		"keyed":        true,
+	}
+
+	t.Run("Maker_Forbidden_403_Keyed", func(t *testing.T) {
+		w := h.do(t, http.MethodPost, "/api/edonation/keyed", makerToken, keyedBody)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"a Maker-only token must be rejected by RequireAnyRole(Checker,Admin) — body: %s", w.Body.String())
+	})
+
+	t.Run("Maker_Forbidden_403_Aging", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/aging", makerToken, nil)
+		assert.Equal(t, http.StatusForbidden, w.Code,
+			"a Maker-only token must be rejected by RequireAnyRole(Checker,Admin) — body: %s", w.Body.String())
+	})
+
+	var auditBefore int
+	require.NoError(t, h.pool.QueryRow(h.ctx,
+		`SELECT count(*) FROM audit_log WHERE action = 'edonation.mark_keyed'`).Scan(&auditBefore))
+
+	t.Run("Checker_200_MarksBothIssued", func(t *testing.T) {
+		w := h.do(t, http.MethodPost, "/api/edonation/keyed", checkerToken, keyedBody)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		// DB shows edonation_keyed=true for both donations.
+		for _, id := range []string{issued1.ID, issued2.ID} {
+			var keyed bool
+			require.NoError(t, h.pool.QueryRow(h.ctx,
+				`SELECT edonation_keyed FROM donations WHERE id = $1`, id).Scan(&keyed))
+			assert.True(t, keyed, "donation %s must be marked keyed after POST /keyed", id)
+		}
+
+		// One audit row PER donation — 2 donations → +2 audit rows (D-67), not 1.
+		var auditAfter int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM audit_log WHERE action = 'edonation.mark_keyed'`).Scan(&auditAfter))
+		assert.Equal(t, auditBefore+2, auditAfter,
+			"exactly one audit_log row per donation must be written for a 2-donation bulk mark")
+	})
+
+	t.Run("Malformed_DonationID_422NotDB500", func(t *testing.T) {
+		w := h.do(t, http.MethodPost, "/api/edonation/keyed", checkerToken, map[string]any{
+			"donation_ids": []string{"not-a-real-uuid"},
+			"keyed":        true,
+		})
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code,
+			"a malformed donation id must 4xx before the query runs, never 500 — body: %s", w.Body.String())
+	})
+
+	t.Run("Checker_200_AgingExcludesKeyedRows", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/edonation/aging", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		var resp struct {
+			Data struct {
+				Rows []struct {
+					ID string `json:"id"`
+				} `json:"rows"`
+				Counts map[string]int `json:"counts"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+		for _, row := range resp.Data.Rows {
+			assert.NotEqual(t, issued1.ID, row.ID, "a just-keyed donation must not appear in the aging view")
+			assert.NotEqual(t, issued2.ID, row.ID, "a just-keyed donation must not appear in the aging view")
+		}
+	})
+}
+
+// TestE2E_Reports drives GET /api/reports/summary and GET /api/reports/export
+// over the REAL HTTP path: HTTP -> RequireAuth (real Keycloak-shaped token) ->
+// [no role gate — D-71] -> report.Handler -> report.Service -> DB (FR-32, plan
+// 05-05, satisfies the integration-test gate per CLAUDE.md Conventions).
+//
+// The central assertion is Maker access: unlike every other Checker/Admin-only
+// route this file exercises, /api/reports carries NO RequireAnyRole guard —
+// a Maker token must get 200, not 403, proving D-71's "all staff" access over
+// the real router (not just a code-review claim).
+//
+// Requires Docker testcontainers (Postgres). Skip with -short.
+func TestE2E_Reports(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping E2E integration test in short mode: requires Docker")
+	}
+
+	h := newE2EHarness(t)
+
+	const subMaker = "aaaaaaaa-1111-1111-1111-111111111111"
+	const subChecker = "aaaaaaaa-2222-2222-2222-222222222222"
+	const subAdmin = "aaaaaaaa-3333-3333-3333-333333333333"
+	_ = h.provisionUser(t, "maker-report-e2e@example.com", "Maker Report E2E", subMaker, db.UserRoleEnumMaker)
+	_ = h.provisionUser(t, "checker-report-e2e@example.com", "Checker Report E2E", subChecker, db.UserRoleEnumChecker)
+	_ = h.provisionUser(t, "admin-report-e2e@example.com", "Admin Report E2E", subAdmin, db.UserRoleEnumAdmin)
+
+	makerToken := h.kc.MintTokenForSubject(subMaker, backendClientID, "maker")
+	checkerToken := h.kc.MintTokenForSubject(subChecker, backendClientID, "checker")
+	adminToken := h.kc.MintTokenForSubject(subAdmin, backendClientID, "admin")
+
+	// seedIssuedForReport drives Create->Submit->Approve over the REAL HTTP path
+	// (mirrors TestE2E_EdonationExport/TestE2E_EdonationKeyedAndAging's seeding
+	// discipline) — proves the report source is real DB state reached through
+	// the same lifecycle every other E2E test exercises.
+	seedIssuedForReport := func(name, taxID string, amount float64, donatedAt string) donation.DonationDetailResponse {
+		w := h.do(t, http.MethodPost, "/api/donations", makerToken, donorBodyWithAmountDate(t, name, taxID, amount, donatedAt))
+		require.Equal(t, http.StatusCreated, w.Code, "body: %s", w.Body.String())
+		created := decodeDonation(t, w)
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+created.ID+"/submit", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		w = h.do(t, http.MethodPost, "/api/donations/"+created.ID+"/approve", checkerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		issued := decodeDonation(t, w)
+		require.Equal(t, "issued", issued.Status)
+		return issued
+	}
+
+	// Two donations in July, one in August — mirrors report/service_test.go's
+	// monthly-breakdown fixture shape.
+	seedIssuedForReport("นาย รายงาน อีทูอี หนึ่ง", "9191919191911", 1000.00, "2026-07-05")
+	seedIssuedForReport("นาย รายงาน อีทูอี สอง", "9191919191912", 500.50, "2026-07-20")
+	seedIssuedForReport("นาย รายงาน อีทูอี สาม", "9191919191913", 2000.25, "2026-08-10")
+
+	type summaryEnvelope struct {
+		Data struct {
+			TotalAmount       float64 `json:"total_amount"`
+			ReceiptCount      int     `json:"receipt_count"`
+			AveragePerReceipt float64 `json:"average_per_receipt"`
+			Breakdown         []struct {
+				Period       string  `json:"period"`
+				ReceiptCount int     `json:"receipt_count"`
+				TotalAmount  float64 `json:"total_amount"`
+			} `json:"breakdown"`
+		} `json:"data"`
+	}
+
+	t.Run("Maker_200_AllStaffAccess", func(t *testing.T) {
+		// The central D-71 assertion: a Maker-only token — rejected by every
+		// Checker/Admin-only route in this file — must get 200 here, not 403.
+		w := h.do(t, http.MethodGet, "/api/reports/summary?group_by=month&from=2026-07-01&to=2026-08-31", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code,
+			"a Maker token must be accepted by the reports route — D-71 all-staff access, no RequireAnyRole gate — body: %s", w.Body.String())
+
+		var resp summaryEnvelope
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+
+		assert.Equal(t, 3, resp.Data.ReceiptCount)
+		assert.InDelta(t, 3500.75, resp.Data.TotalAmount, 0.001)
+		assert.InDelta(t, 3500.75/3, resp.Data.AveragePerReceipt, 0.001)
+		require.Len(t, resp.Data.Breakdown, 2, "two monthly buckets: July + August")
+
+		var julyCount, augustCount int
+		var julyTotal, augustTotal float64
+		for _, row := range resp.Data.Breakdown {
+			switch row.Period {
+			case "2026-07-01":
+				julyCount, julyTotal = row.ReceiptCount, row.TotalAmount
+			case "2026-08-01":
+				augustCount, augustTotal = row.ReceiptCount, row.TotalAmount
+			}
+		}
+		assert.Equal(t, 2, julyCount)
+		assert.InDelta(t, 1500.50, julyTotal, 0.001)
+		assert.Equal(t, 1, augustCount)
+		assert.InDelta(t, 2000.25, augustTotal, 0.001)
+	})
+
+	t.Run("Checker_200", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/reports/summary?group_by=month", checkerToken, nil)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("Admin_200", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/reports/summary?group_by=month", adminToken, nil)
+		assert.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("InvalidGroupBy_400", func(t *testing.T) {
+		w := h.do(t, http.MethodGet, "/api/reports/summary?group_by=year", makerToken, nil)
+		assert.Equal(t, http.StatusBadRequest, w.Code, "body: %s", w.Body.String())
+	})
+
+	t.Run("Export_200_XLSX_ZipSignature_NoAuditRow", func(t *testing.T) {
+		var auditBefore int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM audit_log`).Scan(&auditBefore))
+
+		// Maker token again — proves export is equally ungated (D-71).
+		w := h.do(t, http.MethodGet, "/api/reports/export?format=xlsx&group_by=month", makerToken, nil)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+		assert.Equal(t, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", w.Header().Get("Content-Type"))
+		body := w.Body.Bytes()
+		require.GreaterOrEqual(t, len(body), 4)
+		assert.Equal(t, zipSignature, body[:4], "xlsx export body must start with the ZIP signature")
+
+		// Report export is NOT an audited PII reveal (contrast with
+		// edonation.export, which writes exactly one summary audit row per
+		// call) — the report path has zero PII, so it writes NO audit row at all.
+		var auditAfter int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM audit_log`).Scan(&auditAfter))
+		assert.Equal(t, auditBefore, auditAfter,
+			"report export must never write an audit_log row — no PII reveal to audit")
 	})
 }

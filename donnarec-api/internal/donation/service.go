@@ -216,6 +216,9 @@ func (s *DonationService) Create(ctx context.Context, req CreateDonationRequest,
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
 			DonorLanguage:      donorLanguage,
+			// D-77: staff-entered records are source='flow_a'. Flow B public
+			// submissions set 'flow_b' via CreatePublicSubmission (plan 06-03).
+			Source: "flow_a",
 		})
 		if txErr != nil {
 			return txErr
@@ -1060,6 +1063,10 @@ func (s *DonationService) Reissue(ctx context.Context, originalID string, req Re
 			RetainUntil:        retainUntil,
 			LegalBasis:         "consent",
 			DonorLanguage:      "th",
+			// D-77: a Void & Reissue replacement is staff-created — source='flow_a',
+			// even when the original was a Flow B public submission (the correction is
+			// authored by staff, not the donor).
+			Source: "flow_a",
 		})
 		if txErr != nil {
 			return fmt.Errorf("create replacement draft: %w", txErr)
@@ -1355,6 +1362,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 	var status *db.DonationStatus
 	var fromDate, toDate pgtype.Date
 	var receiptNo *string
+	var source *string
 
 	if filter.DonorName != nil {
 		donorName = filter.DonorName
@@ -1372,6 +1380,9 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 	if filter.ReceiptNo != nil {
 		receiptNo = filter.ReceiptNo
 	}
+	if filter.Source != nil {
+		source = filter.Source
+	}
 
 	rows, queryErr := s.queries.SearchDonations(ctx, db.SearchDonationsParams{
 		LimitN:    limit,
@@ -1381,6 +1392,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 		FromDate:  fromDate,
 		ToDate:    toDate,
 		ReceiptNo: receiptNo,
+		Source:    source,
 	})
 	if queryErr != nil {
 		return nil, 0, fmt.Errorf("search donations: %w", queryErr)
@@ -1392,6 +1404,7 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 		FromDate:  fromDate,
 		ToDate:    toDate,
 		ReceiptNo: receiptNo,
+		Source:    source,
 	})
 	if countErr != nil {
 		return nil, 0, fmt.Errorf("count donations: %w", countErr)
@@ -1412,6 +1425,8 @@ func (s *DonationService) Search(ctx context.Context, filter ListFilter, claims 
 			ReceiptFormatted: row.ReceiptFormatted,
 			CreatedBy:        createdByName,
 			CreatedByID:      row.CreatedBy.String(),
+			Source:           row.Source,
+			CreatedAt:        row.CreatedAt.Time.Format(time.RFC3339),
 		})
 	}
 	return result, total, nil
@@ -1542,6 +1557,7 @@ func (s *DonationService) buildDetailResponse(ctx context.Context, row db.Donati
 		ReceiptFormatted:    row.ReceiptFormatted,
 		CreatedBy:           createdByName,
 		CreatedByID:         row.CreatedBy.String(),
+		Source:              row.Source,
 		CreatedAt:           row.CreatedAt.Time,
 		UpdatedAt:           row.UpdatedAt.Time,
 		EdonationKeyed:      row.EdonationKeyed,

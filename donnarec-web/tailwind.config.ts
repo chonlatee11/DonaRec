@@ -58,6 +58,19 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // (public) route group only — additive namespace, resolves via the
+        // .theme-public --public-* custom properties (public-theme.css).
+        // Does NOT mutate any (app) color above. 06-UI-SPEC "Dual-Theme
+        // Architecture" §2.
+        public: {
+          pine: "hsl(var(--public-pine))",
+          "pine-2": "hsl(var(--public-pine-2))",
+          sage: "hsl(var(--public-sage))",
+          gold: "hsl(var(--public-gold))",
+          "gold-wash": "hsl(var(--public-gold-wash))",
+          ink: "hsl(var(--public-ink))",
+          line: "hsl(var(--public-line))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",

@@ -6,7 +6,34 @@
   "nav": {
     "donations": "Donations",
     "queue": "Pending Review",
-    "settings": "Settings"
+    "settings": "Settings",
+    "eDonation": "e-Donation Export",
+    "reports": "Reports"
+  },
+  "source": {
+    "flow_a": "Staff-Entered",
+    "flow_b": "From Website"
+  },
+  "queue": {
+    "title": "Pending Review Queue",
+    "columns": {
+      "submittedAt": "Submitted",
+      "source": "Source"
+    },
+    "filter": {
+      "ariaLabel": "Source filter",
+      "all": "All",
+      "fromWebsite": "From Website",
+      "staffEntered": "Staff-Entered"
+    },
+    "empty": {
+      "heading": "No items pending review",
+      "body": "Records awaiting review — from both staff and the website — will appear here"
+    },
+    "emptyFiltered": {
+      "heading": "No records in this group",
+      "body": "Try changing the source filter"
+    }
   },
   "locale": {
     "th": "ภาษาไทย",
@@ -18,6 +45,7 @@
   },
   "detail": {
     "title": "Donation Detail",
+    "creatorSelfSubmitted": "Submitted by donor (via website)",
     "receiptLabel": "Receipt Number",
     "cancelledSuffix": "(Cancelled)",
     "noSlip": "No slip attached",
@@ -138,6 +166,7 @@
     "receiptNumber": "Receipt Number",
     "createdBy": "Created By",
     "status": "Status",
+    "source": "Source",
     "managedAt": "Manage",
     "donorLanguage": "Document Language",
     "donorLanguageTh": "Thai",
@@ -183,6 +212,37 @@
   "consent": {
     "label": "I confirm that the donor has been informed of and consented to the hospital collecting, using, and disclosing their personal data for the purpose of issuing the donation receipt and tax filing, in accordance with the Privacy Policy version {version}"
   },
+  "publicDonation": {
+    "brandName": "Example Hospital",
+    "pageTitle": "Donation Form",
+    "intro": "Fill in your details to request a donation receipt. Staff will review and issue the receipt within 3–5 business days.",
+    "section1": "Donor Information",
+    "section2": "Donation Details",
+    "section3": "Transfer Slip",
+    "section4": "PDPA Consent",
+    "emailHelper": "Used to send your acknowledgement and receipt by email (recommended).",
+    "slipLabel": "Attach transfer slip",
+    "submit": "Submit Donation",
+    "submitting": "Submitting...",
+    "captchaLoadFailed": "Could not load the verification system — please check your connection and try again.",
+    "captchaFailed": "Verification failed. Please try again.",
+    "captchaRequired": "Please complete the verification before submitting.",
+    "rateLimit": "Too many requests from this device. Please try again later.",
+    "slipRequired": "Please attach the transfer slip before submitting.",
+    "submitError": "Submission failed — please try again.",
+    "consentLabel": "I consent to the hospital collecting, using, and disclosing my personal data for the purpose of issuing the donation receipt and tax filing, in accordance with the Privacy Policy version {version}",
+    "confirmation": {
+      "heading": "We have received your information",
+      "body": "Your donation request is under review by our staff. This is not yet a receipt. Once approved, you will receive the full receipt by email.",
+      "referenceLabel": "Your request reference number",
+      "referenceHelper": "Please keep this reference number to quote when contacting staff.",
+      "copy": "Copy Reference No.",
+      "copyAria": "Copy request reference number",
+      "copied": "Copied",
+      "noEmail": "You did not provide an email — please contact staff using the reference number above to check your status.",
+      "submitAnother": "Submit Another"
+    }
+  },
   "pii": {
     "revealTooltip": "Revealed data will be hidden when you reload the page",
     "revealAuditNote": "This reveal has been recorded in the audit log"
@@ -211,7 +271,8 @@
       "template": "Receipt Template",
       "images": "Images",
       "taxText": "Tax Deduction Text",
-      "numberFormat": "Number Format"
+      "numberFormat": "Number Format",
+      "edonation": "e-Donation"
     },
     "save": "Save Settings",
     "saving": "Saving...",
@@ -269,6 +330,110 @@
       "prefixLabel": "Prefix (optional)",
       "exampleLabel": "Example",
       "freezeNote": "Changing the format only affects new receipts — already-issued receipts keep their original format"
+    },
+    "edonation": {
+      "heading": "e-Donation Config",
+      "save": "Save e-Donation Config",
+      "saving": "Saving...",
+      "saveSuccessToast": "e-Donation config saved successfully",
+      "saveError": "Failed to save e-Donation config — please try again",
+      "loadError": "Could not load e-Donation config — please try again",
+      "fieldMappingLabel": "Export field mapping",
+      "fieldMappingHelper": "Set the column order and Thai/English header labels for the e-Donation export file",
+      "columnKeyLabel": "Column key",
+      "headerThLabel": "Header (Thai)",
+      "headerEnLabel": "Header (English)",
+      "moveColumnUpAria": "Move column {column} up",
+      "moveColumnDownAria": "Move column {column} down",
+      "cashTypeLabelLabel": "Cash type label",
+      "nearDueDaysLabel": "Days before due (near-due threshold)",
+      "nearDueDaysHelper": "Number of days before the keying deadline to count as \"near due\""
     }
+  },
+  "eDonationExport": {
+    "pageTitle": "e-Donation Export",
+    "tabExport": "Export Data",
+    "tabAging": "Keyed-Status Tracking",
+    "filterFrom": "Donation date from",
+    "filterTo": "to",
+    "keyedStatusLabel": "Keyed status",
+    "keyedStatusAll": "All",
+    "keyedStatusNotKeyed": "Not keyed",
+    "keyedStatusKeyed": "Keyed",
+    "countPreview": "{n} records match",
+    "countPreviewUnavailable": "A count preview is not available for this filter",
+    "exportExcel": "Export Excel (.xlsx)",
+    "exportCsv": "Export CSV",
+    "generating": "Generating file...",
+    "noRecordsHeading": "No records match the filter",
+    "noRecordsBody": "Try a different date range or keyed status",
+    "exportFailed": "Export failed — please try again",
+    "noRecordsError": "No records match the filter to export — please change the filter",
+    "successToast": "Export complete — {n} records",
+    "successToastNoCount": "Export complete",
+    "confirmDialog": {
+      "title": "Confirm e-Donation Export",
+      "warning": "This file contains the full 13-digit national/tax ID of {n} donors. This export will be logged in the audit trail with the operator's name, time, and selected data range. Please store and delete the file securely after use. Do not upload it to any insecure system.",
+      "warningNoCount": "This file may contain the full 13-digit national/tax ID of donors. This export will be logged in the audit trail with the operator's name, time, and selected data range. Please store and delete the file securely after use. Do not upload it to any insecure system.",
+      "confirm": "Confirm Export"
+    }
+  },
+  "aging": {
+    "bucketNotDue": "Not due",
+    "bucketNearDue": "Near due",
+    "bucketOverdue": "Overdue",
+    "clearBucketFilter": "All",
+    "keyedStatusKeyedBadge": "Keyed",
+    "keyedStatusNotKeyedBadge": "Not keyed",
+    "tabAging": "Keyed-Status Tracking",
+    "columnSelect": "Select",
+    "columnIssuedDate": "Issued Date / Approved Date",
+    "columnDonorName": "Donor Name",
+    "columnReceiptNo": "Receipt No.",
+    "columnDeadline": "Keying Deadline",
+    "columnBucket": "Bucket",
+    "columnKeyedStatus": "Keyed Status",
+    "selectAllAria": "Select all",
+    "selectRowAria": "Select record {receipt}",
+    "markKeyed": "Mark as Keyed",
+    "unmarkKeyed": "Unmark as Keyed",
+    "clearSelection": "Clear Selection",
+    "selectionCount": "{n} selected",
+    "markSuccessToast": "Marked {n} records as keyed",
+    "unmarkSuccessToast": "Unmarked {n} records",
+    "markFailed": "Failed to save keyed status — please try again",
+    "loadFailed": "Failed to load keyed-status tracking data — please try again",
+    "noUnkeyedHeading": "All records are keyed",
+    "noUnkeyedBody": "No records pending keying at this time",
+    "ariaBucketFilterLabel": "Filter by deadline bucket: {bucket}",
+    "ariaBucketLabel": "Deadline bucket: {bucket}",
+    "ariaKeyedStatusLabel": "Keyed status: {status}"
+  },
+  "reports": {
+    "pageTitle": "Donation Summary Reports",
+    "filterFrom": "Period from",
+    "filterTo": "to",
+    "applyFilter": "Show Report",
+    "clearFilter": "Clear Filters",
+    "cardTotalAmount": "Total Donations (THB)",
+    "cardReceiptCount": "Receipt Count",
+    "cardAveragePerReceipt": "Average per Receipt (THB)",
+    "ariaCardTotalAmount": "Total donations {value} baht",
+    "ariaCardReceiptCount": "Receipt count {value}",
+    "ariaCardAveragePerReceipt": "Average per receipt {value} baht",
+    "breakdownHeading": "Breakdown by Period",
+    "groupByMonth": "Monthly",
+    "groupByDay": "Daily",
+    "columnPeriod": "Period",
+    "columnReceiptCount": "Receipt Count",
+    "columnTotalAmount": "Total (THB)",
+    "noDataHeading": "No donation data in this period",
+    "noDataBody": "Try a different date range",
+    "loadFailed": "Failed to load the report — please check your connection and try again",
+    "exportExcel": "Export Report (Excel)",
+    "exportCsv": "Export Report (CSV)",
+    "generating": "Generating file...",
+    "exportSuccessToast": "Report exported successfully",
+    "exportFailed": "Failed to export the report — please try again"
   }
 }

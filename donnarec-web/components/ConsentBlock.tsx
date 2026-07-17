@@ -16,6 +16,13 @@ interface ConsentBlockProps {
   error?: string;
   /** When true the checkbox is disabled (e.g. non-draft status view) */
   disabled?: boolean;
+  /**
+   * Overrides the rendered consent label. When omitted, falls back to the
+   * back-office t("consent.label"). The public Flow B form supplies its own
+   * first-person consent text (distinct consent_text_version, D-81) without
+   * this shared component depending on a caller-specific i18n namespace.
+   */
+  labelText?: string;
 }
 
 /**
@@ -35,6 +42,7 @@ export function ConsentBlock({
   consentTextVersion = "1.0",
   error,
   disabled = false,
+  labelText,
 }: ConsentBlockProps) {
   const t = useTranslations();
 
@@ -53,10 +61,10 @@ export function ConsentBlock({
           disabled={disabled}
           aria-required="true"
           aria-describedby={error ? "consent-error" : undefined}
-          className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-blue-600 focus:ring-2 focus:ring-blue-600 focus:ring-offset-1"
+          className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-slate-300 accent-[hsl(var(--primary))] focus:ring-2 focus:ring-blue-600 focus:ring-offset-1"
         />
         <span className="text-[14px] leading-relaxed text-slate-700">
-          {t("consent.label", { version: consentTextVersion })}
+          {labelText ?? t("consent.label", { version: consentTextVersion })}
         </span>
       </label>
 

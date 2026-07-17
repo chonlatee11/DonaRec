@@ -26,3 +26,10 @@ graphify-out/
 
 # local-only port/infra overrides (not for staging/prod)
 docker-compose.override.yml
+
+# Backup dump artifacts (NFR-08, D-72/D-73, T-05-03-DUMPLEAK): pg_dump -Fc snapshots +
+# mirrored MinIO objects contain ciphertext + KEK-adjacent PII and must NEVER enter VCS.
+# The `backup` compose service uses a named Docker volume (never a repo bind mount) —
+# this entry is defense-in-depth in case a local/manual `docker cp` extraction or a
+# future bind-mount lands one under the repo root.
+backups/

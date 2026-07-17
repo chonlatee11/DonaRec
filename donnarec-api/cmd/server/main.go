@@ -16,14 +16,18 @@ import (
 
 	"github.com/donnarec/donnarec-api/internal/audit"
 	"github.com/donnarec/donnarec-api/internal/auth"
+	"github.com/donnarec/donnarec-api/internal/captcha"
 	"github.com/donnarec/donnarec-api/internal/config"
 	"github.com/donnarec/donnarec-api/internal/crypto"
 	db "github.com/donnarec/donnarec-api/internal/db/generated"
 	"github.com/donnarec/donnarec-api/internal/donation"
+	"github.com/donnarec/donnarec-api/internal/edonation"
 	"github.com/donnarec/donnarec-api/internal/i18n"
 	"github.com/donnarec/donnarec-api/internal/mailer"
 	"github.com/donnarec/donnarec-api/internal/pdf"
+	"github.com/donnarec/donnarec-api/internal/ratelimit"
 	"github.com/donnarec/donnarec-api/internal/receiptno"
+	"github.com/donnarec/donnarec-api/internal/report"
 	"github.com/donnarec/donnarec-api/internal/settings"
 	"github.com/donnarec/donnarec-api/internal/storage"
 	"github.com/donnarec/donnarec-api/internal/users"
@@ -33,6 +37,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 func main() {
@@ -211,6 +216,18 @@ func main() {
 	// (D-61 — preview must go through the identical sandboxed pipeline as production).
 	settingsSvc := settings.NewSettingsService(pool, queries, receiptsStore, logger)
 
+	// e-Donation export service + config accessor (Phase 5, plan 05-02, FR-30/D-75).
+	// Reuses the SAME auditSvc + keyProvider as donationSvc — the export's audited
+	// decrypt (Service.Export) mirrors RevealPII's discipline exactly (D-64).
+	edonationSvc := edonation.NewService(pool, queries, auditSvc, keyProvider, logger)
+	edonationCfg := edonation.NewConfig(queries)
+
+	// Donation summary report service (Phase 5, plan 05-05, FR-32/D-70/D-71).
+	// Deliberately constructed with ONLY queries — no keyProvider, no auditSvc —
+	// since SummaryByMonth/SummaryByDay select no PII column and there is no
+	// decrypt/audit-reveal step anywhere on this path.
+	reportSvc := report.NewService(queries)
+
 	// App user resolver: maps a Keycloak subject ("sub") -> internal users.id for the
 	// auth.ResolveAppUser middleware (bug: created-by-fk-mismatch). Kept as a closure here
 	// (not in internal/auth) so the auth package stays DB-agnostic; pgx.ErrNoRows is
@@ -233,11 +250,35 @@ func main() {
 	donationHandler := donation.NewDonationHandler(donationSvc, logger)
 	slipHandler := donation.NewSlipHandler(slipSvc, logger)
 	settingsHandler := settings.NewHandler(settingsSvc, pdfRenderer, logger)
+	edonationHandler := edonation.NewHandler(edonationSvc, edonationCfg, logger)
+	reportHandler := report.NewHandler(reportSvc, logger)
+
+	// --------------------------------------------------------
+	// Flow B public submission (Phase 6, plan 06-03): the FIRST unauthenticated
+	// route. Its handler holds the slip StorageClient + the resolved public-web
+	// system users.id (D-76). The route group swaps RequireAuth for a per-IP
+	// rate limiter + a Cloudflare Turnstile CAPTCHA verifier (D-78/82/83).
+	// --------------------------------------------------------
+	var publicWebUserID pgtype.UUID
+	if err := publicWebUserID.Scan(donation.PublicWebUserID); err != nil {
+		logger.Fatal("public-web system user id parse failed", zap.Error(err))
+	}
+	publicDonationHandler := donation.NewPublicDonationHandler(donationSvc, storageClient, publicWebUserID, logger)
+
+	// Cloudflare Turnstile verifier (fail-closed) + gin middleware. The secret is
+	// env-only (TURNSTILE_SECRET_KEY); an empty secret still fails closed against
+	// the real siteverify API (rejects every submission) rather than accepting bots.
+	captchaMW := captcha.NewMiddleware(captcha.NewTurnstileVerifier(cfg.TurnstileSecretKey))
+
+	// Per-IP token bucket: burst = SubmissionsPerWindow, sustained refill =
+	// SubmissionsPerWindow per Window (env-tunable, default 5 per 10 minutes).
+	rlRate := rate.Limit(float64(cfg.RateLimit.SubmissionsPerWindow) / cfg.RateLimit.Window.Seconds())
+	rlBurst := cfg.RateLimit.SubmissionsPerWindow
 
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, publicDonationHandler, captchaMW, rlRate, rlBurst, cfg.TrustedProxies, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -288,8 +329,22 @@ func main() {
 //  4. Public routes — /healthz (no auth required)
 //  5. Protected /api group — RequireAuth()
 //  6. Admin /api/admin group — RequireAuth() + RequireRoles(RoleAdmin) + ResolveAppUser
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, logger *zap.Logger) *gin.Engine {
+//  7. e-Donation /api/edonation group — RequireAuth() + RequireAnyRole(Checker,Admin) + ResolveAppUser
+//  8. Reports /api/reports group — RequireAuth() ONLY, deliberately NO role gate (D-71,
+//     Phase 5 plan 05-05) — the report has no PII column, so every authenticated staff
+//     member (Maker/Checker/Admin) may view/export it.
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, edonationHandler *edonation.Handler, reportHandler *report.Handler, publicDonationHandler *donation.PublicDonationHandler, captchaMW *captcha.Middleware, rlRate rate.Limit, rlBurst int, trustedProxies []string, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
+
+	// SEC-06-FLAG2: narrow gin's trusted-proxy set. gin defaults to trusting
+	// EVERY remote address as a legitimate proxy (0.0.0.0/0, ::/0), which lets
+	// a direct-connection attacker spoof X-Forwarded-For and defeat
+	// ratelimit.PerIP's c.ClientIP()-keyed bucket. Passing nil/empty here is
+	// the intended safe default: it trusts no proxy, so c.ClientIP() returns
+	// RemoteAddr and ignores XFF.
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		logger.Fatal("router.SetTrustedProxies failed", zap.Error(err))
+	}
 
 	// 1. Recover from panics — must be first
 	router.Use(gin.Recovery())
@@ -306,6 +361,25 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	router.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
+
+	// ---- Flow B unauthenticated public submission (Phase 6, plan 06-03, D-78) ----
+	// The FIRST route group WITHOUT authMW.RequireAuth. It hangs off the ROOT router
+	// (NOT the /api group, which applies RequireAuth), so donors reach it without a
+	// session. RequireAuth is substituted by three defensive middlewares, in order:
+	//   1. ratelimit.PerIP — cheapest rejection first, before any outbound siteverify
+	//   2. bodyLimitMiddleware — bounds + cleans the multipart body BEFORE captcha's
+	//      own token read triggers gin's parse (SEC-06-FLAG1)
+	//   3. captcha.VerifyTurnstile — server-side Cloudflare token verification
+	// It still inherits the router-level Recovery/zapLogger/AuditMiddleware above.
+	//
+	// ASVS V4 (T-06-11): this group registers EXACTLY ONE handler (POST /donations,
+	// create one pending_review record) — no update/delete/reveal/approve is ever
+	// exposed unauthenticated.
+	publicGroup := router.Group("/api/public")
+	publicGroup.Use(ratelimit.PerIP(rlRate, rlBurst))
+	publicGroup.Use(bodyLimitMiddleware(publicBodyLimitBytes))
+	publicGroup.Use(captchaMW.VerifyTurnstile())
+	publicGroup.POST("/donations", publicDonationHandler.CreatePublic)
 
 	// ---- Protected /api group ----
 	api := router.Group("/api")
@@ -334,6 +408,11 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	adminGroup.POST("/settings/images/:slot", settingsHandler.UploadImage)
 	adminGroup.POST("/settings/preview", settingsHandler.Preview)
 	adminGroup.POST("/settings/preview/pdf", settingsHandler.PreviewPDF)
+
+	// ---- e-Donation field-mapping/threshold config: Admin-only (Phase 5, plan
+	// 05-02, D-75/NFR-09 — editable without a deploy) ----
+	adminGroup.GET("/edonation-config", edonationHandler.GetConfig)
+	adminGroup.PUT("/edonation-config", edonationHandler.UpdateConfig)
 
 	// ---- Maker/Checker/Admin — /api/donations (all staff) ----
 	// Pattern E: RequireRoles after RequireAuth — claims must already exist in context.
@@ -389,7 +468,59 @@ func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appU
 	// (D-56/D-57, FR-27, plan 04-06). Never allocates a new number or re-renders.
 	checkerGroup.POST("/:id/resend", donationHandler.Resend)
 
+	// ---- Checker/Admin — /api/edonation (Phase 5, plan 05-02, FR-30, D-63) ----
+	// RequireAnyRole (OR-guard, not RequireRoles/AND — D-63) so a Checker-only or
+	// Admin-only user both pass; a Maker-only user gets 403.
+	edonationGroup := api.Group("/edonation")
+	edonationGroup.Use(auth.RequireAnyRole(auth.RoleChecker, auth.RoleAdmin))
+	edonationGroup.Use(auth.ResolveAppUser(appUserResolver, logger))
+	edonationGroup.GET("/export", edonationHandler.Export)
+	// POST /keyed + GET /aging (Phase 5, plan 05-04, FR-31, D-67/D-68) — same
+	// RequireAnyRole(Checker,Admin) OR-guard as /export; a Maker-only user gets 403.
+	edonationGroup.POST("/keyed", edonationHandler.SetKeyed)
+	edonationGroup.GET("/aging", edonationHandler.Aging)
+
+	// ---- Reports /api/reports (Phase 5, plan 05-05, FR-32, D-71) ----
+	// Deliberately NO RequireAnyRole/RequireRoles — every authenticated staff
+	// member (Maker/Checker/Admin) may view/export this PII-free summary report.
+	// Region-scoped negative assertion (05-05 Task 2 acceptance criteria) relies
+	// on this block containing no role-guard call.
+	reportGroup := api.Group("/reports")
+	reportGroup.GET("/summary", reportHandler.Summary)
+	reportGroup.GET("/export", reportHandler.Export)
+
 	return router
+}
+
+// publicBodyLimitBytes bounds the unauthenticated public submission's request
+// body (SEC-06-FLAG1). 11 MB is comfortably above the handler's existing
+// 10 MB slip cap (storage.validateSlip, internal/storage/client.go) so
+// legitimate submissions are unaffected, while bounding an attacker's
+// ability to force gin to disk-spill an oversized multipart body.
+const publicBodyLimitBytes = 11 << 20 // 11 MB
+
+// bodyLimitMiddleware returns a gin.HandlerFunc that (1) wraps the request
+// body in http.MaxBytesReader(maxBytes) so any read past the cap fails
+// immediately instead of buffering unbounded data to disk, and (2) after the
+// downstream handler chain runs, removes any multipart temp files the parse
+// created via c.Request.MultipartForm.RemoveAll().
+//
+// SEC-06-FLAG1: gin parses the multipart body inside captcha.VerifyTurnstile's
+// own c.PostForm(TokenField) call — BEFORE the CAPTCHA token is validated —
+// so an attacker needs no valid Turnstile solve to trigger the parse. This
+// middleware MUST run after ratelimit.PerIP (cheapest rejection first) and
+// BEFORE captchaMW.VerifyTurnstile() so the size cap is already in effect
+// when that parse happens.
+func bodyLimitMiddleware(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		defer func() {
+			if c.Request.MultipartForm != nil {
+				_ = c.Request.MultipartForm.RemoveAll()
+			}
+		}()
+		c.Next()
+	}
 }
 
 // mailDevEnabled reports whether the dev/local capture EmailSender (DevSender)

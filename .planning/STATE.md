@@ -1,45 +1,55 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-current_phase: 5
-current_phase_name: e-Donation Export, Reports & Admin Settings
-status: "Phase 04 shipped — PR #4"
-stopped_at: "Completed Phase 04 code-review fixes (04-REVIEW.md): CR-01, CR-02, WR-01, WR-02, WR-04, WR-05, WR-06, WR-07 fixed; WR-03 documented as known limitation"
-last_updated: "2026-07-05T04:30:05.645Z"
-last_activity: 2026-07-05
+milestone_name: MVP
+closeout_type: override_closeout
+current_phase: 0
+status: Awaiting next milestone
+stopped_at: "Milestone v1.0 MVP shipped and archived (7 phases, 47 plans, 91 tasks). Closeout type: override_closeout — 2 non-blocking verification overrides deferred (see Deferred Items)."
+last_updated: "2026-07-17T16:11:28.366Z"
+last_activity: 2026-07-17
+last_activity_desc: Milestone v1.0 completed and archived
 progress:
-  total_phases: 6
-  completed_phases: 4
-  total_plans: 30
-  completed_plans: 31
-  percent: 67
+  total_phases: 7
+  completed_phases: 7
+  total_plans: 47
+  completed_plans: 48
+  percent: 100
+current_phase_name: close-gap-flow-b-composite-e2e-public-submit-through-approve
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-22)
+See: .planning/PROJECT.md (updated 2026-07-17)
 
 **Core value:** ออกใบเสร็จบริจาคที่มีเลขที่รันต่อเนื่องไม่ซ้ำ ห้ามข้ามเลข (gap-less) ตามปีงบประมาณ หลังผ่านการอนุมัติโดยมนุษย์ และส่งถึงผู้บริจาคได้อย่างถูกต้องน่าเชื่อถือ
-**Current focus:** Phase 04 — receipt-pdf-email-delivery-outbox-worker
+**Current focus:** Planning next milestone (v1.0 MVP shipped 2026-07-17)
 
 ## Current Position
 
-Phase: 5 — e-Donation Export, Reports & Admin Settings
-Plan: Not started
-Plans: 8/8 complete (criteria 1–5, unit/service-level). Integration gate (criterion 6) NOT met.
-Status: Phase 04 shipped — PR #4
-Last activity: 2026-07-05
+Phase: Milestone v1.0 MVP complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-17 — Milestone v1.0 completed and archived
 
-Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-07-17 (closeout_type: override_closeout):
+
+| Category | Item | Status | Note |
+|----------|------|--------|------|
+| debug | frontend-auth-gating-missing | awaiting_human_verify | Route-protection code complete + TDD-green (curl 307 + PKCE verified); final interactive Keycloak browser login is a human-only checkpoint. |
+| uat | 01-HUMAN-UAT Test 2 (HTTPS/TLS, NFR-02) | blocked_by: deploy-time | Reverse-proxy TLS + sslmode=verify-full confirmed at production deploy; app-level AES-256-GCM encryption boundary complete. |
+
+_Phase 04 UAT is `passed` 2/2 (surfaced by audit query, not a real gap). Full audit: milestones/v1.0-MILESTONE-AUDIT.md._
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 14
+- Total plans completed: 22
 - Average duration: —
 - Total execution time: —
 
@@ -49,6 +59,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 |-------|-------|-------|----------|
 | 01 | 5 | - | - |
 | 04 | 9 | - | - |
+| 06 | 8 | - | - |
 
 **Recent Trend:**
 
@@ -74,6 +85,22 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 04 P06 | 35min | 3 tasks | 20 files |
 | Phase 04 P07 | 20min | 2 tasks | 11 files |
 | Phase 04 P08 | 13min | 2 tasks | 24 files |
+| Phase 05 P01 | 20min | 2 tasks | 20 files |
+| Phase 05 P03 | 20min | 3 tasks | 9 files |
+| Phase 05 P02 | 40min | 3 tasks | 10 files |
+| Phase 05 P04 | 30min | 3 tasks | 8 files |
+| Phase 05 P05 | 8min | 3 tasks | 10 files |
+| Phase 05 P06 | 6min | 3 tasks | 19 files |
+| Phase 05 P07 | 3min | 2 tasks | 12 files |
+| Phase 06 P01 | 25min | 2 tasks | 13 files |
+| Phase 06 P02 | 8min | 1 tasks | 9 files |
+| Phase 06 P05 | 15min | 2 tasks | 16 files |
+| Phase 06 P03 | 14min | 3 tasks | 11 files |
+| Phase 06 P07 | 35min | 3 tasks | 12 files |
+| Phase 06 P04 | 12min | 1 tasks | 5 files |
+| Phase 06 P06 | 40min | 2 tasks | 14 files |
+| Phase 06 P08 | 15min | 1 tasks | 4 files |
+| Phase 07 P01 | 25min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -123,24 +150,59 @@ Recent decisions affecting current work:
 - [Phase 04]: 04-08: TemplateEditor.tsx split into TemplateEditorFields + TemplateLivePreview so the live preview persists across all four tabs, not just the template tab
 - [Phase 04]: 04-08: TH Sarabun New font remains unsourced (same open licensing item as backend) — preview iframe falls back to Google-Fonts Sarabun until public/fonts/THSarabunNew.woff2 is provided
 - [Phase 04]: [Phase 04] Code-review fixes (04-REVIEW.md): CR-01/CR-02 (blockers) and WR-01/02/04/05/06/07 fixed with RED/GREEN tests; WR-03 (deduction_multiplier frozen-at-approval) documented as a known limitation rather than reworking the Approve transaction — see 04-REVIEW-FIXES-SUMMARY.md
+- [Phase ?]: [Phase 05] 05-01: GetDonationByID's SELECT list extended to include edonation_keyed_at/edonation_keyed_by (physical column order) so sqlc keeps reusing the Donation model type after migration 000013's ALTER TABLE — required to keep go build green
+- [Phase ?]: [Phase 05] 05-01: edonation.Config merges DTO+accessor into one type (NewConfig(*db.Queries)); FieldMapping.RowValues takes a plain map[string]string, not a concrete ExportRow type owned by a later plan
+- [Phase 05]: 05-03: pg_restore test-scope uses --no-owner --no-privileges (fresh unmigrated target has no roles); production restore.sh uses --role=donnarec_app and documents the role-provisioning prerequisite
+- [Phase 05]: 05-03: TestRestoreProof_MinIO uses minio-go SDK round trip instead of the mc CLI (not installed on test-runner host); functionally equivalent restore-completeness proof
+- [Phase ?]: [Phase 05] 05-02: Service.Export mirrors donation.RevealPII's audited-decrypt discipline (Pattern 3) — role gate before any DB call, one WithTx closure for query+decrypt+ONE summary audit row, commit, then return plaintext; never imports internal/exportfile (Pitfall 3: streaming stays outside the tx, in xlsx.go/csv.go/handler).
+- [Phase ?]: [Phase 05] 05-02: empty-result 404 check lives in the handler (len(rows)==0), not the service — Service.Export always returns rows plus a committed audit row; HTTP semantics stay out of the service layer.
+- [Phase 05]: 05-04: computeBucket's deadline-instant boundary uses a strict !now.Before(deadline) time comparison (not a truncated-integer days>=0 check) so now==deadline classifies as overdue, not near_due
+- [Phase 05]: 05-04: SetKeyed's per-donation audit loop is driven by a pre-update raw-SQL SELECT of caller ids WHERE status='issued' inside the same WithTx, not the raw caller input list — a cancelled id in the same bulk request is a silent no-op (no audit row)
+- [Phase 05]: 05-04: Service.Aging stays pure/testable (now + near_due_days as explicit params, never reads wall clock/config internally); the handler resolves now (default wall clock, overridable via ?now=RFC3339) and near_due_days (via Config.GetConfig), mirroring Export's handler-owns-config-resolution precedent
+- [Phase 05]: 05-05: SUM(amount) in reports.sql needed an explicit ::numeric cast — sqlc v1.31.1 mis-infers SUM() over NUMERIC(15,2) as int64, which cannot losslessly hold a fractional (satang) total; regenerated sqlc after the fix
+- [Phase 05]: 05-05: report.Service takes only *db.Queries (no keyProvider/auditSvc) — reportGroup carries NO RequireAnyRole/RequireRoles gate (D-71), and Export writes zero audit_log rows since there is no PII to reveal
+- [Phase 05]: Record-count preview (Export tab) derives an exact client-side count from the shared aging query for the default not_keyed filter; hidden (not fabricated) for all/keyed since no backend count endpoint exists for those scopes
+- [Phase 05]: AgingTable is the Tab B smart container owning the shared aging query/mutation/selection state; AgingStatCards/BulkActionBar stay presentational
+- [Phase ?]: 05-07: added lib/reports.ts as shared typed client-fetcher module (mirrors 05-06 lib/edonation.ts precedent) plus currentFiscalYearDateRange() default for the Screen 8 filter bar
+- [Phase ?]: 05-07: EdonationConfigTab is a self-contained 5th SettingsTabs tab with its own save button, independent of the top-level 'save all tabs' button, since it persists edonation_config (not receipt settings)
+- [Phase ?]: [Phase 06] 06-01: donations.source is TEXT+CHECK (flow_a/flow_b), not an enum — matches existing sqlc.narg D-53 filter pattern; DEFAULT 'flow_a' backfills all pre-existing rows
+- [Phase ?]: [Phase 06] 06-01: public-web system user seeded with id=keycloak_subject=00000000-0000-4000-8000-000000000006 (SAME fixed UUID, not a readable sentinel) — prevents audit.parseUUID rollback (Pitfall 1); assigned least-privileged 'maker' role (T-06-03), never issued a real Keycloak credential
+- [Phase ?]: [Phase 06] 06-01: ListFilter.Source/DonationListItem.Source live in internal/donation/model.go (plan's files_modified inaccurately pointed to service.go); DonationListItem.Source exposed per-row for plan 07's queue screen
+- [Phase 06]: [Phase 06] 06-02: captcha.Middleware is a struct wrapping Verifier with a VerifyTurnstile() method, matching 06-PATTERNS.md's captchaMW.VerifyTurnstile() wiring call site for plan 03
+- [Phase 06]: [Phase 06] 06-02: TurnstileVerifier has two constructors (NewTurnstileVerifier for prod, NewTurnstileVerifierWithClient as test seam) instead of exported fields, preserving the black-box _test package convention
+- [Phase 06]: [Phase 06] 06-02: TURNSTILE_SECRET_KEY loaded into config but not added to validate()'s required-env map -- enforcement deferred to plan 03 when the route is wired
+- [Phase 06]: [Phase 06] 06-05: public fonts live in app/fonts.ts (not app/layout.tsx) — Next.js rejects named exports from layout.tsx files; .variable applied only in (public)/layout.tsx, never globally
+- [Phase 06]: [Phase 06] 06-05: .theme-public HSL triplets recomputed from locked hex (not copied from UI-SPEC's HSL column, which had a transposed-digit typo on destructive text: 32 -> 3.2)
+- [Phase 06]: [Phase 06] 06-05: added --public-destructive-wash + scoped --card-foreground/--popover-foreground=ink in .theme-public beyond the plan's literal var list, for rendering-fidelity correctness
+- [Phase ?]: 06-03: CreateDonation carries an explicit source param; Flow A passes flow_a, CreatePublicSubmission passes flow_b
+- [Phase ?]: 06-03: PublicWebUserID Go constant mirrors migration 000016 UUID; used as created_by FK and in-tx audit actor (avoids parseUUID rollback, Pitfall 1)
+- [Phase ?]: Queue source-filter + pagination are local page state (not URL); QueueTable pagination is onPageChange-driven
+- [Phase ?]: Queue BFF pins status=pending_review server-side and maps UI token to plan 01 flow_a/flow_b filter (T-06-27)
+- [Phase ?]: Exposed created_at (list) and source (detail) — already selected by sqlc rows, no SQL/sqlc regen
+- [Phase ?]: 06-06: public form posts multipart with Go field names verbatim through a session-less Next passthrough; donor_language from useLocale as single source of truth (FR-06)
+- [Phase ?]: [Phase 07] 07-01: Added TestE2E_FlowBCompositePublicSubmitToIssued locking the public-submit -> Checker-approve -> issued composite handoff (closes v1.0 audit WARNING-1); no production code changed, no seam defect found
 
 ### Pending Todos
 
-Phase 3 integration-gate remediation (blocks marking Phase 3 Complete):
+Phase 3 integration-gate remediation — ✅ **RESOLVED / CLOSED 2026-07-04** (Phase 3 is Complete; ROADMAP criterion 6 met — automated E2E + human walkthrough 7/7, `03-UAT.md` / `03-VERIFICATION.md` frontmatter `status: passed`, commit f1f5b0e). Items below retained for history.
 
 1. [x] Bug #1 `created-by-fk-mismatch` — resolve sub→users.id in `auth.ResolveAppUser` middleware. FIXED + committed (ef7ede6, refactor a1e348e).
 2. [x] Bug #2 `fe-be-audience-mismatch` — audience mapper + confidential frontend client + web env. FIXED + committed (8604caa; debug doc 369dcce).
 3. [x] Bug #3 RBAC AND-bug — added `RequireAnyRole` (OR); switched donationGroup + checkerGroup guards; test added. FIXED + committed (b10fae8).
 4. [x] E2E HTTP integration test (real router + real signed token) — `cmd/server/e2e_test.go`: happy path + unprovisioned-403 + RBAC + SoD + audience. 5/5 subtests PASS (-race). COMMITTED (c5b0c4f). **Automated integration gate SATISFIED.**
 5. [x] Gap #4 `frontend-auth-gating-missing` — frontend had NO route protection / login gating (root was a placeholder, no middleware, custom signin 404'd). Added middleware.ts (withAuth) + app/auth/signin (auto signIn keycloak) + `/`→`/donations` redirect + SessionProvider + SignOutButton. FIXED + committed (63c7a40; debug doc 71345e5). Verified: unauth /,/donations → 307 to signin; /auth/signin → 200.
-6. [~] Human UI browser walkthrough — LAST remaining gate item, now UNBLOCKED (login works). Stack up (API :8000, Keycloak :8080, web :3000); users seeded (maker1/checker1/admin/makerchecker @ DonaRec123). Live E2E already proven via curl (Maker create→submit→Checker approve→issued, receipt 2569/000001). 5 visual items from 03-VERIFICATION human_verification need a human at the browser.
-7. [ ] (Optional) wider auth/RBAC/wiring seam audit before formally re-closing Phase 3.
+6. [x] Human UI browser walkthrough — **DONE 2026-07-04: ran full-stack walkthrough, 7/7 checkpoints passed (03-UAT.md).** 3 issues found+fixed in-session (stale api container 3b3aeda, federated logout 78b04f1, hydration skeleton 88e82ff). Criterion 6b satisfied.
+7. [ ] (Optional) wider auth/RBAC/wiring seam audit — not required for phase completion; leave as optional follow-up.
 
-Once item 5 passes, Phase 3 integration gate (ROADMAP criterion 6) is met → Phase 3 can be re-marked Complete.
+Phase 3 integration gate (ROADMAP criterion 6) is MET → Phase 3 is Complete. ✅
 
 Phase 4 deferred UAT (blocks marking Phase 4 Complete — Conventions integration-test gate):
 
 1. [ ] 04-06 Task 4 — Screen 3b human UI walkthrough (EmailDeliveryPanel status/recipient/attempts, resend re-enqueue with unchanged receipt_no, download PDF renders Thai/English, Maker sees Download but not Resend). DEFERRED by explicit user decision to phase-end `/gsd-verify-work`. Code (Tasks 1-3) complete and E2E-proven over the real HTTP path (commits 6f9ad34, d09419d, 743389c, 7264491, 3659dbf, 2173be9). Full walkthrough steps + credential prerequisites (Keycloak `donnarec-frontend` confidential client secret, `donnarec-web/.env.local`, admin-test/maker-test/checker-test passwords) documented in `.planning/phases/04-receipt-pdf-email-delivery-outbox-worker/04-06-SUMMARY.md` under "Deferred: Task 4 Human UI Walkthrough".
+
+Phase 6 pending UAT (blocks marking Phase 6 Complete — NFR-06 + Success Criterion 5, CONVENTIONS integration/human-walkthrough gate):
+
+1. [ ] 06-08 Task 2 — responsive + bilingual human walkthrough (public /donate form + staff /queue, desktop + ~375px mobile, TH/EN, real Cloudflare Turnstile pass+fail path, ack-email language capture, mobile nav drawer + horizontal table scroll). NOT performed — requires a live local stack (docker compose + seeded users + `donnarec-web/.env.local`) and operator-supplied Turnstile keys (`NEXT_PUBLIC_TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY`; test keys acceptable). Code (Task 1) complete + build-green, committed `a2f2796`. Full 7-step walkthrough documented in `.planning/phases/06-public-donation-web-form-flow-b/06-08-SUMMARY.md` → "Outstanding Human-Verification Items". Resume via `/gsd-verify-work`.
 
 ### Blockers/Concerns
 
@@ -149,6 +211,16 @@ Stakeholder confirmations are gated but NON-blocking for the roadmap; resolve at
 - Phase 1: PDPA retention period (~5y vs erasure); email provider / KMS / hosting choices.
 - Phase 4: §6 receipt wording + 1x/2x deduction eligibility (accounting/legal sign-off).
 - Phase 5: exact e-Donation field spec + 1 Jan 2026 mandate obligation.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260717-spx | Fix public-endpoint security flags (trusted-proxies IP-spoof + multipart disk-exhaustion), Phase 06 | 2026-07-17 | 72dca94 | [260717-spx-fix-public-endpoint-security-flags-trust](./quick/260717-spx-fix-public-endpoint-security-flags-trust/) |
+
+### Roadmap Evolution
+
+- Phase 7 added: Close gap: Flow B composite E2E (public-submit -> approve -> issued receipt) — from v1.0 milestone audit WARNING-1
 
 ## Deferred Items
 
@@ -160,7 +232,10 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-04T13:06:47.282Z
-Stopped at: Completed Phase 04 code-review fixes (04-REVIEW.md): CR-01, CR-02, WR-01, WR-02, WR-04, WR-05, WR-06, WR-07 fixed; WR-03 documented as known limitation
-Resume file: 
-None
+Last session: 2026-07-17T15:10:15.035Z
+Stopped at: 06-08 code-complete (Task 1 committed a2f2796). Task 2 (checkpoint:human-verify, blocking) — responsive/bilingual live-stack walkthrough for NFR-06 — NOT performed; documented as PENDING HUMAN UAT in 06-08-SUMMARY.md. Phase 6 is NOT Complete until this walkthrough passes.
+Resume file: .planning/phases/06-public-donation-web-form-flow-b/06-08-SUMMARY.md (see "Outstanding Human-Verification Items" — 7 walkthrough steps + Turnstile-key prerequisite)
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

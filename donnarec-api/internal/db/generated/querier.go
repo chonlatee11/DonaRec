@@ -51,6 +51,11 @@ type Querier interface {
 	// Insert a new donation record in 'draft' status with donor snapshot + PII ciphertext.
 	// created_at/updated_at omitted from VALUES — rely on DEFAULT now() (IN-01).
 	// donor_tax_id_enc/dek accept ciphertext only — plaintext is encrypted at service layer (D-44).
+	// source ('flow_a'|'flow_b', D-77) is passed EXPLICITLY by the caller: Flow A staff
+	// entry passes 'flow_a'; Flow B public submission (CreatePublicSubmission, plan 06-03)
+	// passes 'flow_b'. Set here at INSERT time so the row is born with the correct source
+	// (no post-insert UPDATE) — the column still DEFAULTs 'flow_a' at the schema level as a
+	// backstop for any path that does not select it.
 	CreateDonation(ctx context.Context, arg CreateDonationParams) (CreateDonationRow, error)
 	// internal/db/queries/users.sql
 	// sqlc-annotated queries for the users and user_roles tables.
@@ -87,6 +92,10 @@ type Querier interface {
 	// call (see internal/donation/service.go): '/api/donations/<id>/return' or '/reject'.
 	// reason is extracted from the JSONB after_json snapshot (->> 'review_reason').
 	GetDonationReviewHistory(ctx context.Context, donationID string) ([]GetDonationReviewHistoryRow, error)
+	// Read the single e-Donation config row (field mapping + cash-type label +
+	// aging threshold). Called by the export/aging services and by the admin
+	// settings 5th tab (D-75, Pattern 6).
+	GetEdonationConfig(ctx context.Context) (GetEdonationConfigRow, error)
 	// audit.sql — sqlc queries for the audit_log table
 	// All queries use explicit column lists (no SELECT * in writes per Foundational Rule 4).
 	// Parameterized queries only — no string concatenation (T-1-tamper-01).
@@ -270,6 +279,34 @@ type Querier interface {
 	// (D-R2 remediation — list envelope carries created_by/created_by_id).
 	// Pagination: caller passes @limit_n rows starting at @offset_n.
 	SearchDonations(ctx context.Context, arg SearchDonationsParams) ([]SearchDonationsRow, error)
+	// internal/db/queries/edonation.sql
+	// sqlc queries for Phase 5: e-Donation export source, keyed/aging status, and
+	// the edonation_config accessor (FR-30/FR-31, D-51, D-66, D-67, D-68, D-75).
+	// All filter params are optional via the sqlc.narg('...') pattern, matching
+	// donations.sql's discipline (D-53) — nullable params compile to nullable Go
+	// fields, so a nil filter is skip-this-filter, never an accidental empty match.
+	// Export source (FR-30/D-66): issued donations only, optional donated_at range
+	// and optional keyed-status filter. Ciphertext columns are decrypted at the
+	// SERVICE layer (05-RESEARCH.md Pattern 3) — never in SQL. No FOR UPDATE — this
+	// is a plain read, not part of the approval-locking path (D-52 is unrelated).
+	SearchIssuedForExport(ctx context.Context, arg SearchIssuedForExportParams) ([]SearchIssuedForExportRow, error)
+	// Aging view source (FR-31/D-68): all issued, not-yet-keyed donations with
+	// their approval timestamp — approved_at is the D-68 aging base date (donations
+	// has NO issued_at column); the aging bucket itself is computed in Go
+	// (internal/edonation/aging.go, 05-RESEARCH.md Pattern 5), not in SQL.
+	// donated_at is also returned so the Export tab's client-side count preview can
+	// filter on the SAME date field the export endpoint filters on (donated_at,
+	// D-66) — see WR-01: without it the preview filtered a different field than the
+	// actual export, so the count shown in the PII-warning dialog could diverge
+	// from the rows actually streamed.
+	SearchUnkeyedIssued(ctx context.Context) ([]SearchUnkeyedIssuedRow, error)
+	// Bulk mark/unmark keyed status (D-67) — one statement covers the whole
+	// selection. This stays a plain boolean UPDATE — no sequence/allocator
+	// machinery (05-RESEARCH.md Anti-Patterns). The caller writes one audit row
+	// PER donation_id afterward (Pattern 4 — distinct from export's single
+	// summary-row audit rationale). status='issued' guard mirrors the other
+	// lifecycle UPDATEs' defense-in-depth precondition style (donations.sql).
+	SetKeyedBulk(ctx context.Context, arg SetKeyedBulkParams) error
 	// Record the frozen receipt PDF's MinIO object key after the worker (04-05)
 	// renders and stores it (D-56, FR-24 immutability). Called exactly once per
 	// donation, outside the issuance transaction (worker's own commit) — resend
@@ -290,10 +327,36 @@ type Querier interface {
 	// Transition draft → pending_review (FR-11 state machine).
 	// submitted_at records when the Maker sent it for review.
 	SubmitDonation(ctx context.Context, id pgtype.UUID) error
+	// Same shape, daily granularity — donated_at is already a DATE so no
+	// truncation is needed.
+	SummaryByDay(ctx context.Context, arg SummaryByDayParams) ([]SummaryByDayRow, error)
+	// internal/db/queries/reports.sql
+	// sqlc queries for Phase 5: no-PII aggregate reports (FR-32, D-70, D-71).
+	// Report period basis is donated_at (วันที่บริจาค — A1 default assumption,
+	// 05-RESEARCH.md Assumptions Log); the date-range filter also keys off
+	// donated_at. No PII columns are selected on this path — no decrypt/mask
+	// step needed anywhere here, matching donated_at's column type (DATE,
+	// migration 000005), so no timezone conversion is needed.
+	//
+	// SUM(amount)::numeric is an EXPLICIT cast (Rule 1 fix, plan 05-05): without
+	// it, sqlc v1.31.1's offline catalog inference for SUM() over a NUMERIC(15,2)
+	// column defaults to int64, which does not match Postgres's actual sum(numeric)
+	// -> numeric return type and would corrupt/fail to scan any total that has a
+	// fractional (satang) component — verified empirically (`SELECT SUM(amount),
+	// pg_typeof(SUM(amount))` on a scratch NUMERIC(15,2) table returns `numeric`).
+	// The explicit cast makes sqlc emit `pgtype.Numeric`, matching every other
+	// money column in this codebase (donations.amount, receiptfmt.FormatAmount).
+	// Aggregates issued donations by calendar month. Excludes non-issued statuses
+	// — cancelled/draft/rejected are not "donations received" (D-70 assumption).
+	SummaryByMonth(ctx context.Context, arg SummaryByMonthParams) ([]SummaryByMonthRow, error)
 	// Update Maker-editable donor fields. Only allowed while status = 'draft' (FR-09).
 	// Checker-set fields (reviewed_by/at/reason) are NOT included here.
 	// PII columns accept ciphertext — re-encrypt at service layer before calling.
 	UpdateDraftDonation(ctx context.Context, arg UpdateDraftDonationParams) error
+	// Update the single config row (Admin-only, D-75). updated_by is set to the
+	// acting admin's app-user id for the audit trail (Pattern D, FR-13), mirroring
+	// settings.sql's UpdateReceiptTemplateConfig shape.
+	UpdateEdonationConfig(ctx context.Context, arg UpdateEdonationConfigParams) error
 	// Update the single number-format config row (Admin-only, Phase 4 D-58 settings
 	// UI — CONTEXT.md canonical_refs note: consolidate number-format editing into
 	// the same Admin settings screen as the template config, rather than a

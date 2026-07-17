@@ -54,6 +54,7 @@ WHERE
     AND ($3::DATE         IS NULL OR d.donated_at   >= $3)
     AND ($4::DATE           IS NULL OR d.donated_at   <= $4)
     AND ($5::TEXT        IS NULL OR d.receipt_formatted = $5)
+    AND ($6::TEXT            IS NULL OR d.source        = $6)
 `
 
 type CountDonationsParams struct {
@@ -62,6 +63,7 @@ type CountDonationsParams struct {
 	FromDate  pgtype.Date     `db:"from_date" json:"from_date"`
 	ToDate    pgtype.Date     `db:"to_date" json:"to_date"`
 	ReceiptNo *string         `db:"receipt_no" json:"receipt_no"`
+	Source    *string         `db:"source" json:"source"`
 }
 
 // Count donations matching the SAME filter predicate as SearchDonations (D-R2).
@@ -80,6 +82,7 @@ func (q *Queries) CountDonations(ctx context.Context, arg CountDonationsParams) 
 		arg.FromDate,
 		arg.ToDate,
 		arg.ReceiptNo,
+		arg.Source,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -103,7 +106,8 @@ INSERT INTO donations (
     consent_purpose,
     retain_until,
     legal_basis,
-    donor_language
+    donor_language,
+    source
 ) VALUES (
     $1,
     $2,
@@ -120,7 +124,8 @@ INSERT INTO donations (
     $13,
     $14,
     $15,
-    $16
+    $16,
+    $17
 )
 RETURNING
     id, created_by, status, created_at, updated_at
@@ -143,6 +148,7 @@ type CreateDonationParams struct {
 	RetainUntil        pgtype.Date        `db:"retain_until" json:"retain_until"`
 	LegalBasis         string             `db:"legal_basis" json:"legal_basis"`
 	DonorLanguage      string             `db:"donor_language" json:"donor_language"`
+	Source             string             `db:"source" json:"source"`
 }
 
 type CreateDonationRow struct {
@@ -156,6 +162,11 @@ type CreateDonationRow struct {
 // Insert a new donation record in 'draft' status with donor snapshot + PII ciphertext.
 // created_at/updated_at omitted from VALUES — rely on DEFAULT now() (IN-01).
 // donor_tax_id_enc/dek accept ciphertext only — plaintext is encrypted at service layer (D-44).
+// source ('flow_a'|'flow_b', D-77) is passed EXPLICITLY by the caller: Flow A staff
+// entry passes 'flow_a'; Flow B public submission (CreatePublicSubmission, plan 06-03)
+// passes 'flow_b'. Set here at INSERT time so the row is born with the correct source
+// (no post-insert UPDATE) — the column still DEFAULTs 'flow_a' at the schema level as a
+// backstop for any path that does not select it.
 func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) (CreateDonationRow, error) {
 	row := q.db.QueryRow(ctx, createDonation,
 		arg.CreatedBy,
@@ -174,6 +185,7 @@ func (q *Queries) CreateDonation(ctx context.Context, arg CreateDonationParams) 
 		arg.RetainUntil,
 		arg.LegalBasis,
 		arg.DonorLanguage,
+		arg.Source,
 	)
 	var i CreateDonationRow
 	err := row.Scan(
@@ -222,7 +234,10 @@ SELECT
     replaces,
     replaced_by,
     donor_language,
-    receipt_pdf_object_key
+    receipt_pdf_object_key,
+    edonation_keyed_at,
+    edonation_keyed_by,
+    source
 FROM donations
 WHERE id = $1
 `
@@ -268,6 +283,9 @@ func (q *Queries) GetDonationByID(ctx context.Context, id pgtype.UUID) (Donation
 		&i.ReplacedBy,
 		&i.DonorLanguage,
 		&i.ReceiptPdfObjectKey,
+		&i.EdonationKeyedAt,
+		&i.EdonationKeyedBy,
+		&i.Source,
 	)
 	return i, err
 }
@@ -526,6 +544,7 @@ SELECT
     d.approved_at,
     d.created_by,
     d.edonation_keyed,
+    d.source,
     u.display_name AS created_by_name
 FROM donations d
 LEFT JOIN users u ON u.id = d.created_by
@@ -535,9 +554,10 @@ WHERE
     AND ($3::DATE         IS NULL OR d.donated_at   >= $3)
     AND ($4::DATE           IS NULL OR d.donated_at   <= $4)
     AND ($5::TEXT        IS NULL OR d.receipt_formatted = $5)
+    AND ($6::TEXT            IS NULL OR d.source        = $6)
 ORDER BY d.created_at DESC
-LIMIT  $7
-OFFSET $6
+LIMIT  $8
+OFFSET $7
 `
 
 type SearchDonationsParams struct {
@@ -546,6 +566,7 @@ type SearchDonationsParams struct {
 	FromDate  pgtype.Date     `db:"from_date" json:"from_date"`
 	ToDate    pgtype.Date     `db:"to_date" json:"to_date"`
 	ReceiptNo *string         `db:"receipt_no" json:"receipt_no"`
+	Source    *string         `db:"source" json:"source"`
 	OffsetN   int32           `db:"offset_n" json:"offset_n"`
 	LimitN    int32           `db:"limit_n" json:"limit_n"`
 }
@@ -561,6 +582,7 @@ type SearchDonationsRow struct {
 	ApprovedAt       pgtype.Timestamptz `db:"approved_at" json:"approved_at"`
 	CreatedBy        pgtype.UUID        `db:"created_by" json:"created_by"`
 	EdonationKeyed   bool               `db:"edonation_keyed" json:"edonation_keyed"`
+	Source           string             `db:"source" json:"source"`
 	CreatedByName    *string            `db:"created_by_name" json:"created_by_name"`
 }
 
@@ -582,6 +604,7 @@ func (q *Queries) SearchDonations(ctx context.Context, arg SearchDonationsParams
 		arg.FromDate,
 		arg.ToDate,
 		arg.ReceiptNo,
+		arg.Source,
 		arg.OffsetN,
 		arg.LimitN,
 	)
@@ -603,6 +626,7 @@ func (q *Queries) SearchDonations(ctx context.Context, arg SearchDonationsParams
 			&i.ApprovedAt,
 			&i.CreatedBy,
 			&i.EdonationKeyed,
+			&i.Source,
 			&i.CreatedByName,
 		); err != nil {
 			return nil, err
