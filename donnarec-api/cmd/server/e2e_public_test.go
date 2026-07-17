@@ -22,11 +22,13 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -72,6 +74,50 @@ func (h *e2eHarness) doPublicSubmission(
 	w := httptest.NewRecorder()
 	h.router.ServeHTTP(w, req)
 	return w
+}
+
+// doPublicSubmissionXFF is a variant of doPublicSubmission that also sets a
+// caller-supplied X-Forwarded-For header — used by the SEC-06-FLAG2 spoofed-IP
+// regression test below. Kept as a separate helper (rather than extending
+// doPublicSubmission's signature) so every existing caller stays untouched.
+// Slip is deliberately never attached (mirrors doPublicSubmission(..., "",
+// nil, ...) callers) — a 400 slip_required still consumes a rate token since
+// ratelimit.PerIP runs before the handler.
+func (h *e2eHarness) doPublicSubmissionXFF(
+	t *testing.T,
+	fields map[string]string,
+	remoteAddr string,
+	xForwardedFor string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		require.NoError(t, mw.WriteField(k, v))
+	}
+	require.NoError(t, mw.WriteField(captcha.TokenField, "fake-turnstile-token"))
+	require.NoError(t, mw.Close())
+
+	req, err := http.NewRequest(http.MethodPost, "/api/public/donations", &buf)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if remoteAddr != "" {
+		req.RemoteAddr = remoteAddr
+	}
+	if xForwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", xForwardedFor)
+	}
+	w := httptest.NewRecorder()
+	h.router.ServeHTTP(w, req)
+	return w
+}
+
+// oversizedSlipBytes returns a PNG-magic-byte-prefixed payload sized well
+// past main.go's publicBodyLimitBytes (11 MB) cap — used by the SEC-06-FLAG1
+// oversized-body regression test below.
+func oversizedSlipBytes() []byte {
+	b := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	return append(b, make([]byte, 12<<20)...) // 12 MB > 11 MB cap
 }
 
 // validPublicFields returns a complete, valid public donor submission field set.
@@ -216,5 +262,83 @@ func TestPublicDonationE2E(t *testing.T) {
 		require.Equal(t, http.StatusTooManyRequests, w.Code,
 			"the request past the per-IP burst must be 429; body: %s", w.Body.String())
 		assert.Contains(t, w.Body.String(), "rate_limited")
+	})
+
+	t.Run("SpoofedXFF_SharesRemoteAddrBucket_NotBypassed", func(t *testing.T) {
+		// SEC-06-FLAG2 regression: router.SetTrustedProxies(nil) (main.go)
+		// must make gin's c.ClientIP() IGNORE an attacker-supplied
+		// X-Forwarded-For on a direct connection and always return
+		// RemoteAddr. A dedicated RemoteAddr gets its own fresh token
+		// bucket (burst = e2ePublicRateBurst). Send burst requests that
+		// share ONE RemoteAddr but each carry a DIFFERENT spoofed XFF value
+		// — before the fix, gin's default trust-all-proxies config would
+		// have honored each spoofed XFF as the "real" client IP, handing
+		// every request a fresh, never-throttled bucket and none of them
+		// would ever hit 429.
+		const ip = "198.51.100.42:9999"
+		fields := validPublicFields("นาย ทดสอบ Spoof XFF")
+		for i := 0; i < e2ePublicRateBurst; i++ {
+			spoofedXFF := fmt.Sprintf("10.0.0.%d", i+1)
+			w := h.doPublicSubmissionXFF(t, fields, ip, spoofedXFF)
+			require.NotEqual(t, http.StatusTooManyRequests, w.Code,
+				"request %d (spoofed XFF=%s, shared RemoteAddr) within the burst must pass; body: %s",
+				i+1, spoofedXFF, w.Body.String())
+		}
+		// One more request, SAME RemoteAddr, yet another distinct spoofed
+		// XFF — must be 429: proves the spoofed header did NOT create a
+		// fresh per-header bucket and RemoteAddr governs.
+		w := h.doPublicSubmissionXFF(t, fields, ip, "10.0.0.99")
+		require.Equal(t, http.StatusTooManyRequests, w.Code,
+			"the request past the burst must be 429 despite a fresh spoofed XFF value — RemoteAddr must govern the rate-limit bucket; body: %s",
+			w.Body.String())
+		assert.Contains(t, w.Body.String(), "rate_limited")
+	})
+
+	t.Run("OversizedBody_Rejected_NoRow_NoHang", func(t *testing.T) {
+		// SEC-06-FLAG1 regression: main.go's bodyLimitMiddleware wraps the
+		// request body in http.MaxBytesReader(11<<20) BEFORE
+		// captchaMW.VerifyTurnstile()'s own c.PostForm call would otherwise
+		// force gin to fully parse (and, for >32MB parts, disk-spill) the
+		// entire oversized multipart body during its own token read — no
+		// valid CAPTCHA solve required to trigger that spill pre-fix.
+		//
+		// PRODUCTION divergence (confirmed, not a test gap — see 260717-spx
+		// plan context): in production, an oversized body ->
+		// ParseMultipartForm fails inside VerifyTurnstile -> c.PostForm
+		// returns "" -> the REAL Turnstile verifier rejects the empty token
+		// -> 400 {"error":"captcha_failed"}, UNCHANGED shape. This E2E
+		// harness wires fakeCaptchaVerifier (e2e_test.go), whose Verify()
+		// ALWAYS returns nil regardless of token value, so in-harness the
+		// (now-failed) parse still lets the fake verifier PASS and the
+		// request reaches the handler, which then rejects on the
+		// missing/unreadable slip. This subtest therefore asserts the DoS
+		// property that holds under BOTH paths — a bounded 4xx rejection,
+		// no donation row, and no hang — NOT the specific captcha_failed
+		// error shape (which only production's real verifier produces).
+		var before int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM donations`).Scan(&before))
+
+		const ip = "203.0.113.55:9999" // fresh RemoteAddr, isolated from other subtests' buckets
+		const donorName = "นาย ทดสอบ Oversized Body"
+
+		start := time.Now()
+		w := h.doPublicSubmission(t, validPublicFields(donorName), "oversized.png", oversizedSlipBytes(), ip)
+		elapsed := time.Since(start)
+
+		assert.Less(t, elapsed, 10*time.Second,
+			"an oversized body must be rejected promptly by the body-limit middleware, not hang; took %s", elapsed)
+		assert.GreaterOrEqual(t, w.Code, http.StatusBadRequest,
+			"an oversized body must be rejected with a 4xx status (bounded rejection); body: %s", w.Body.String())
+		assert.Less(t, w.Code, http.StatusInternalServerError,
+			"an oversized body must not 5xx; body: %s", w.Body.String())
+
+		var after int
+		require.NoError(t, h.pool.QueryRow(h.ctx, `SELECT count(*) FROM donations`).Scan(&after))
+		assert.Equal(t, before, after, "an oversized body must create NO donation row")
+
+		var orphan int
+		require.NoError(t, h.pool.QueryRow(h.ctx,
+			`SELECT count(*) FROM donations WHERE donor_name = $1`, donorName).Scan(&orphan))
+		assert.Equal(t, 0, orphan, "no donation row for the oversized-body submission")
 	})
 }
