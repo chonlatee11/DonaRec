@@ -127,6 +127,15 @@ type Config struct {
 	// RateLimit (D-83, FR-04, Phase 6) — per-IP token-bucket knobs for the
 	// public donation submission endpoint.
 	RateLimit RateLimitConfig
+
+	// TrustedProxies (SEC-06-FLAG2) is the CIDRs/IPs of trusted upstream
+	// proxies/load balancers, loaded from the comma-separated TRUSTED_PROXIES
+	// env var. nil (unset/empty) means trust NO proxy — gin's c.ClientIP()
+	// then returns the direct RemoteAddr and IGNORES any attacker-supplied
+	// X-Forwarded-For/X-Real-IP header, the safe default for a
+	// directly-exposed service. Set this to the real reverse-proxy/load-
+	// balancer CIDR only when one actually fronts this service.
+	TrustedProxies []string
 }
 
 // RateLimitConfig holds the per-IP token-bucket rate-limit knobs (D-83,
@@ -203,6 +212,7 @@ func Load() (*Config, error) {
 			SubmissionsPerWindow: getEnvInt("RATE_LIMIT_SUBMISSIONS_PER_WINDOW", 5),
 			Window:               getEnvDuration("RATE_LIMIT_WINDOW", 10*time.Minute),
 		},
+		TrustedProxies: getEnvStrSlice("TRUSTED_PROXIES"),
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -294,4 +304,23 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+// getEnvStrSlice reads a comma-separated env var into a []string, trimming
+// whitespace and dropping empty elements. Returns nil (NOT an empty
+// non-nil slice) when the env var is unset or empty — nil is the safe
+// "trust no proxy" default for TrustedProxies (SEC-06-FLAG2).
+func getEnvStrSlice(key string) []string {
+	v := os.Getenv(key)
+	if v == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(v, ",") {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

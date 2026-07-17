@@ -267,7 +267,9 @@ func newE2EHarness(t *testing.T) *e2eHarness {
 		return u.ID, nil
 	}
 
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, publicDonationHandler, captchaMW, rlRate, rlBurst, logger)
+	// trustedProxies=nil keeps the harness's RemoteAddr-based IP resolution
+	// working (matches the safe production default, SEC-06-FLAG2).
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, publicDonationHandler, captchaMW, rlRate, rlBurst, nil, logger)
 
 	return &e2eHarness{router: router, kc: kc, queries: queries, pool: pool, ctx: ctx, settingsStore: settingsStore}
 }

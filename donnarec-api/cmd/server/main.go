@@ -278,7 +278,7 @@ func main() {
 	// --------------------------------------------------------
 	// Router: middleware chain order matters — see Pattern D
 	// --------------------------------------------------------
-	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, publicDonationHandler, captchaMW, rlRate, rlBurst, logger)
+	router := setupRouter(authMW, auditSvc, appUserResolver, userHandler, donationHandler, slipHandler, settingsHandler, edonationHandler, reportHandler, publicDonationHandler, captchaMW, rlRate, rlBurst, cfg.TrustedProxies, logger)
 
 	// --------------------------------------------------------
 	// HTTP server with graceful shutdown
@@ -333,8 +333,18 @@ func main() {
 //  8. Reports /api/reports group — RequireAuth() ONLY, deliberately NO role gate (D-71,
 //     Phase 5 plan 05-05) — the report has no PII column, so every authenticated staff
 //     member (Maker/Checker/Admin) may view/export it.
-func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, edonationHandler *edonation.Handler, reportHandler *report.Handler, publicDonationHandler *donation.PublicDonationHandler, captchaMW *captcha.Middleware, rlRate rate.Limit, rlBurst int, logger *zap.Logger) *gin.Engine {
+func setupRouter(authMW *auth.AuthMiddleware, auditSvc *audit.AuditService, appUserResolver auth.UserIDResolver, userHandler *users.UserHandler, donationHandler *donation.DonationHandler, slipHandler *donation.SlipHandler, settingsHandler *settings.Handler, edonationHandler *edonation.Handler, reportHandler *report.Handler, publicDonationHandler *donation.PublicDonationHandler, captchaMW *captcha.Middleware, rlRate rate.Limit, rlBurst int, trustedProxies []string, logger *zap.Logger) *gin.Engine {
 	router := gin.New()
+
+	// SEC-06-FLAG2: narrow gin's trusted-proxy set. gin defaults to trusting
+	// EVERY remote address as a legitimate proxy (0.0.0.0/0, ::/0), which lets
+	// a direct-connection attacker spoof X-Forwarded-For and defeat
+	// ratelimit.PerIP's c.ClientIP()-keyed bucket. Passing nil/empty here is
+	// the intended safe default: it trusts no proxy, so c.ClientIP() returns
+	// RemoteAddr and ignores XFF.
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		logger.Fatal("router.SetTrustedProxies failed", zap.Error(err))
+	}
 
 	// 1. Recover from panics — must be first
 	router.Use(gin.Recovery())

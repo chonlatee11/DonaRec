@@ -22,6 +22,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -68,6 +69,42 @@ func (h *e2eHarness) doPublicSubmission(
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	if remoteAddr != "" {
 		req.RemoteAddr = remoteAddr
+	}
+	w := httptest.NewRecorder()
+	h.router.ServeHTTP(w, req)
+	return w
+}
+
+// doPublicSubmissionXFF is a variant of doPublicSubmission that also sets a
+// caller-supplied X-Forwarded-For header — used by the SEC-06-FLAG2 spoofed-IP
+// regression test below. Kept as a separate helper (rather than extending
+// doPublicSubmission's signature) so every existing caller stays untouched.
+// Slip is deliberately never attached (mirrors doPublicSubmission(..., "",
+// nil, ...) callers) — a 400 slip_required still consumes a rate token since
+// ratelimit.PerIP runs before the handler.
+func (h *e2eHarness) doPublicSubmissionXFF(
+	t *testing.T,
+	fields map[string]string,
+	remoteAddr string,
+	xForwardedFor string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for k, v := range fields {
+		require.NoError(t, mw.WriteField(k, v))
+	}
+	require.NoError(t, mw.WriteField(captcha.TokenField, "fake-turnstile-token"))
+	require.NoError(t, mw.Close())
+
+	req, err := http.NewRequest(http.MethodPost, "/api/public/donations", &buf)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if remoteAddr != "" {
+		req.RemoteAddr = remoteAddr
+	}
+	if xForwardedFor != "" {
+		req.Header.Set("X-Forwarded-For", xForwardedFor)
 	}
 	w := httptest.NewRecorder()
 	h.router.ServeHTTP(w, req)
@@ -215,6 +252,36 @@ func TestPublicDonationE2E(t *testing.T) {
 		w := h.doPublicSubmission(t, fields, "", nil, ip)
 		require.Equal(t, http.StatusTooManyRequests, w.Code,
 			"the request past the per-IP burst must be 429; body: %s", w.Body.String())
+		assert.Contains(t, w.Body.String(), "rate_limited")
+	})
+
+	t.Run("SpoofedXFF_SharesRemoteAddrBucket_NotBypassed", func(t *testing.T) {
+		// SEC-06-FLAG2 regression: router.SetTrustedProxies(nil) (main.go)
+		// must make gin's c.ClientIP() IGNORE an attacker-supplied
+		// X-Forwarded-For on a direct connection and always return
+		// RemoteAddr. A dedicated RemoteAddr gets its own fresh token
+		// bucket (burst = e2ePublicRateBurst). Send burst requests that
+		// share ONE RemoteAddr but each carry a DIFFERENT spoofed XFF value
+		// — before the fix, gin's default trust-all-proxies config would
+		// have honored each spoofed XFF as the "real" client IP, handing
+		// every request a fresh, never-throttled bucket and none of them
+		// would ever hit 429.
+		const ip = "198.51.100.42:9999"
+		fields := validPublicFields("นาย ทดสอบ Spoof XFF")
+		for i := 0; i < e2ePublicRateBurst; i++ {
+			spoofedXFF := fmt.Sprintf("10.0.0.%d", i+1)
+			w := h.doPublicSubmissionXFF(t, fields, ip, spoofedXFF)
+			require.NotEqual(t, http.StatusTooManyRequests, w.Code,
+				"request %d (spoofed XFF=%s, shared RemoteAddr) within the burst must pass; body: %s",
+				i+1, spoofedXFF, w.Body.String())
+		}
+		// One more request, SAME RemoteAddr, yet another distinct spoofed
+		// XFF — must be 429: proves the spoofed header did NOT create a
+		// fresh per-header bucket and RemoteAddr governs.
+		w := h.doPublicSubmissionXFF(t, fields, ip, "10.0.0.99")
+		require.Equal(t, http.StatusTooManyRequests, w.Code,
+			"the request past the burst must be 429 despite a fresh spoofed XFF value — RemoteAddr must govern the rate-limit bucket; body: %s",
+			w.Body.String())
 		assert.Contains(t, w.Body.String(), "rate_limited")
 	})
 }
