@@ -9,8 +9,9 @@ threats_accept: 7
 threats_closed: 37
 threats_open: 0
 unregistered_flags: 2
-status: ESCALATED
-escalation_note: "Declared threat register is 37/37 CLOSED (threats_open=0 at block_on:high). Escalating per this audit's explicit mandate to flag obvious high-severity public-attack-surface gaps: two verified, OPEN, causally-compounding High findings (unauthenticated multipart disk-exhaustion + rate-limiter-defeating IP spoof) on the phase's newest and widest attack surface. Human ship decision required; see Unregistered Flags section."
+unregistered_flags_open: 0
+status: SECURED
+escalation_note: "RESOLVED 2026-07-17 (quick task 260717-spx). Declared threat register was 37/37 CLOSED; the two escalated High public-surface flags (unauthenticated multipart disk-exhaustion + rate-limiter-defeating IP spoof) are now both fixed with code + threat-model-grade evidence + new E2E regression tests (commits becedfd, 72dca94; TestPublicDonationE2E 7/7 pass). User chose fix-both over accept-risk. See Unregistered Flags → Resolution section."
 ---
 
 # Phase 06: Security Audit Report
@@ -145,8 +146,18 @@ burst-limited nuisance into a sustained, unbounded disk-exhaustion vector):
 
 | # | Flag | Category | Severity (auditor-assigned) | Found in | Status |
 |---|------|----------|-------------------------------|----------|--------|
-| 1 | Unbounded multipart request body on the FIRST unauthenticated endpoint (`POST /api/public/donations`), and Go never cleans up the resulting disk temp files — **triggered by the CAPTCHA middleware itself, before any token is validated; no valid Turnstile solve required** | Denial of Service | **High** | `internal/captcha/middleware.go:38` (`c.PostForm(TokenField)`) → gin `initFormCache` → `ParseMultipartForm` | **OPEN — not fixed** |
-| 2 | `gin.Engine.trustedProxies` left at its default `["0.0.0.0/0","::/0"]` — `c.ClientIP()` (the sole identity key for `ratelimit.PerIP`, T-06-05, AND the `remoteip` field sent to Cloudflare siteverify) honors an attacker-supplied `X-Forwarded-For`/`X-Real-IP` header on a DIRECT, unproxied connection | Elevation of Privilege / Denial of Service | **High** | `cmd/server/main.go` (no `SetTrustedProxies`/`TrustedPlatform`/`ForwardedByClientIP` call anywhere in `cmd/server` or `internal`) | **OPEN — not fixed** |
+| 1 | Unbounded multipart request body on the FIRST unauthenticated endpoint (`POST /api/public/donations`), and Go never cleans up the resulting disk temp files — **triggered by the CAPTCHA middleware itself, before any token is validated; no valid Turnstile solve required** | Denial of Service | **High** | `internal/captcha/middleware.go:38` (`c.PostForm(TokenField)`) → gin `initFormCache` → `ParseMultipartForm` | **RESOLVED — commit `72dca94`** |
+| 2 | `gin.Engine.trustedProxies` left at its default `["0.0.0.0/0","::/0"]` — `c.ClientIP()` (the sole identity key for `ratelimit.PerIP`, T-06-05, AND the `remoteip` field sent to Cloudflare siteverify) honors an attacker-supplied `X-Forwarded-For`/`X-Real-IP` header on a DIRECT, unproxied connection | Elevation of Privilege / Denial of Service | **High** | `cmd/server/main.go` (no `SetTrustedProxies`/`TrustedPlatform`/`ForwardedByClientIP` call anywhere in `cmd/server` or `internal`) | **RESOLVED — commit `becedfd`** |
+
+### Resolution (quick task 260717-spx, 2026-07-17)
+
+Both High-severity flags were fixed before phase advancement (user chose "fix both"). Verified on the merged phase branch: `go build ./...` clean; `go test -run TestPublicDonationE2E ./cmd/server/` → **7/7 pass**, including the two new adversarial regression tests.
+
+**Flag 2 — RESOLVED (`becedfd`).** Added a config-driven trusted-proxy allowlist. `internal/config/config.go:138` (`TrustedProxies []string`), loaded from env `TRUSTED_PROXIES` at `config.go:215` (comma-split, trimmed, empty→nil). `cmd/server/main.go:345` calls `router.SetTrustedProxies(trustedProxies)` right after `gin.New()` (fatal on error). Default nil = trust no proxy → `c.ClientIP()` returns `RemoteAddr`, ignoring attacker `X-Forwarded-For`; operator sets `TRUSTED_PROXIES=<LB CIDR>` in prod. New E2E test `TestPublicDonationE2E/SpoofedXFF_SharesRemoteAddrBucket_NotBypassed` asserts a rotating spoofed XFF no longer moves the per-IP bucket (burst+1 → 429).
+
+**Flag 1 — RESOLVED (`72dca94`).** Added `bodyLimitMiddleware` (`cmd/server/main.go:514`) registered on `publicGroup` at `main.go:380` — **after `PerIP`, before `VerifyTurnstile`** so it bounds the body before captcha's `PostForm` triggers the parse. It wraps the body in `http.MaxBytesReader(c.Writer, c.Request.Body, publicBodyLimitBytes)` (`main.go:500`, `11<<20` ≈ 11 MB) and `defer`s `c.Request.MultipartForm.RemoveAll()` around `c.Next()`. Production 400 `{"error":"captcha_failed"}` response shape unchanged. New E2E test `TestPublicDonationE2E/OversizedBody_Rejected_NoRow_NoHang` asserts an oversized body is bounded-rejected (4xx), creates no donation row, and returns promptly (the test harness's fake captcha verifier always passes, so the assertion targets the DoS property that holds under it, not `captcha_failed`).
+
+Both flags are now closed with threat-model-grade evidence + code + tests, per the audit's ship-gate requirement (fix, not silent deferral).
 
 **Flag 1 — evidence.** `go doc mime/multipart.Reader.ReadForm`: "File parts which
 can't be stored in memory will be stored on disk in temporary files" — no upper bound
