@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 06
-status: executing
-stopped_at: "06-08 code-complete (Task 1 committed a2f2796). Task 2 (checkpoint:human-verify, blocking) — responsive/bilingual live-stack walkthrough for NFR-06 — NOT performed; documented as PENDING HUMAN UAT in 06-08-SUMMARY.md. Phase 6 is NOT Complete until this walkthrough passes."
-last_updated: "2026-07-17T14:24:46.140Z"
+current_phase: 07
+status: complete
+stopped_at: "07-01 complete — TestE2E_FlowBCompositePublicSubmitToIssued added, passing under -race against real Postgres testcontainer stack. Closes v1.0 audit WARNING-1. No production code changed."
+last_updated: "2026-07-17T22:10:00.000Z"
 last_activity: 2026-07-17
-last_activity_desc: Phase 06 complete
+last_activity_desc: Phase 07 complete — Flow B composite E2E test closes v1.0 audit WARNING-1
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 46
-  completed_plans: 47
+  total_phases: 7
+  completed_phases: 7
+  total_plans: 48
+  completed_plans: 48
   percent: 100
-current_phase_name: public-donation-web-form-flow-b
+current_phase_name: close-gap-flow-b-composite-e2e-public-submit-through-approve
 ---
 
 # Project State
@@ -24,15 +24,15 @@ current_phase_name: public-donation-web-form-flow-b
 See: .planning/PROJECT.md (updated 2026-06-22)
 
 **Core value:** ออกใบเสร็จบริจาคที่มีเลขที่รันต่อเนื่องไม่ซ้ำ ห้ามข้ามเลข (gap-less) ตามปีงบประมาณ หลังผ่านการอนุมัติโดยมนุษย์ และส่งถึงผู้บริจาคได้อย่างถูกต้องน่าเชื่อถือ
-**Current focus:** Phase 06 — public-donation-web-form-flow-b
+**Current focus:** Phase 07 — close-gap-flow-b-composite-e2e-public-submit-through-approve (Complete)
 
 ## Current Position
 
-Phase: 06
-Plan: Not started
-Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
-Status: Ready to execute
-Last activity: 2026-07-17 — Phase 06 complete
+Phase: 07
+Plan: 01 of 01 (Complete)
+Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items. Phase 06 complete (UAT 3/3, security gate cleared).
+Status: Phase 07 complete — v1.0 milestone audit WARNING-1 closed
+Last activity: 2026-07-17 — Phase 07 complete
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -91,6 +91,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 | Phase 06 P04 | 12min | 1 tasks | 5 files |
 | Phase 06 P06 | 40min | 2 tasks | 14 files |
 | Phase 06 P08 | 15min | 1 tasks | 4 files |
+| Phase 07 P01 | 25min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -170,6 +171,7 @@ Recent decisions affecting current work:
 - [Phase ?]: Queue BFF pins status=pending_review server-side and maps UI token to plan 01 flow_a/flow_b filter (T-06-27)
 - [Phase ?]: Exposed created_at (list) and source (detail) — already selected by sqlc rows, no SQL/sqlc regen
 - [Phase ?]: 06-06: public form posts multipart with Go field names verbatim through a session-less Next passthrough; donor_language from useLocale as single source of truth (FR-06)
+- [Phase ?]: [Phase 07] 07-01: Added TestE2E_FlowBCompositePublicSubmitToIssued locking the public-submit -> Checker-approve -> issued composite handoff (closes v1.0 audit WARNING-1); no production code changed, no seam defect found
 
 ### Pending Todos
 
@@ -207,6 +209,10 @@ Stakeholder confirmations are gated but NON-blocking for the roadmap; resolve at
 |---|-------------|------|--------|-----------|
 | 260717-spx | Fix public-endpoint security flags (trusted-proxies IP-spoof + multipart disk-exhaustion), Phase 06 | 2026-07-17 | 72dca94 | [260717-spx-fix-public-endpoint-security-flags-trust](./quick/260717-spx-fix-public-endpoint-security-flags-trust/) |
 
+### Roadmap Evolution
+
+- Phase 7 added: Close gap: Flow B composite E2E (public-submit -> approve -> issued receipt) — from v1.0 milestone audit WARNING-1
+
 ## Deferred Items
 
 Items acknowledged and carried forward from previous milestone close:
@@ -217,6 +223,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-12T00:00:00.000Z
+Last session: 2026-07-17T15:10:15.035Z
 Stopped at: 06-08 code-complete (Task 1 committed a2f2796). Task 2 (checkpoint:human-verify, blocking) — responsive/bilingual live-stack walkthrough for NFR-06 — NOT performed; documented as PENDING HUMAN UAT in 06-08-SUMMARY.md. Phase 6 is NOT Complete until this walkthrough passes.
 Resume file: .planning/phases/06-public-donation-web-form-flow-b/06-08-SUMMARY.md (see "Outstanding Human-Verification Items" — 7 walkthrough steps + Turnstile-key prerequisite)

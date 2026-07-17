@@ -264,8 +264,8 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 **Goal:** Lock the highest-value cross-flow seam with one automated E2E test that spans the full Flow B composite: a public donation submission (POST /api/public/donations) creates a flow_b pending_review record, then a Checker approves that same record (POST /api/donations/{id}/approve with a real Keycloak-shaped Checker token) and the test asserts status=issued, a non-empty gap-less receipt_formatted, and exactly one issue_receipt outbox job. Closes v1.0 milestone audit WARNING-1 (both halves were tested independently; the composite handoff was never driven by an automated test). Per the project CONVENTIONS integration-test gate.
 **Requirements**: FR-01, FR-03, FR-04, FR-08, FR-14, FR-15, FR-16 (integration coverage — no new product behavior; assert existing wiring end-to-end)
 **Depends on:** Phase 6
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
 
-- [ ] 07-01-PLAN.md — Flow B composite E2E: public-submit → DB flow_b lookup → Checker-approve → assert issued + gap-less receipt + one issue_receipt outbox job + approval audit (closes v1.0 audit WARNING-1)
+- [x] 07-01-PLAN.md — Flow B composite E2E: public-submit → DB flow_b lookup → Checker-approve → assert issued + gap-less receipt + one issue_receipt outbox job + approval audit (closes v1.0 audit WARNING-1)
