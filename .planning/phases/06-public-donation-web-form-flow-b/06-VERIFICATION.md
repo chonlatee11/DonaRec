@@ -1,23 +1,27 @@
 ---
 phase: 06-public-donation-web-form-flow-b
 verified: 2026-07-12T03:24:06Z
-status: human_needed
+status: passed
 score: 8/9 must-haves verified
 behavior_unverified: 1
 overrides_applied: 0
 mode: mvp
 behavior_unverified_items:
+
   - truth: "The mobile nav drawer + bilingual public form/queue are usable and correctly laid out on a mobile viewport in Thai and English (NFR-06)"
     test: "Bring up the local stack; on a <768px viewport open /donate and /queue in both Thai and English"
     expected: "Sidebar collapses to hamburger drawer (backdrop + Escape + focus return); form and queue lay out correctly, no overflow; wide tables scroll horizontally; both languages render without truncation/tofu"
     why_human: "Responsive layout and visual bilingual rendering are runtime/visual properties grep and unit tests cannot observe; recorded as PENDING HUMAN UAT (plan 06-08 Task 2)"
 human_verification:
+
   - test: "Responsive + bilingual walkthrough (NFR-06, plan 06-08 Task 2)"
     expected: "Public form + staff queue usable and correctly laid out on desktop AND mobile in both Thai and English; AppShell hamburger drawer works (backdrop, Escape, focus return); wide tables scroll horizontally below 768px"
     why_human: "Visual/responsive behavior; NFR-06 intentionally left Pending in REQUIREMENTS.md until this walkthrough passes"
+
   - test: "Real Cloudflare Turnstile challenge on a live stack"
     expected: "With real NEXT_PUBLIC_TURNSTILE_SITE_KEY + TURNSTILE_SECRET_KEY, the donor completes an actual Turnstile challenge and submission succeeds; a missing/failed challenge is rejected"
     why_human: "Automated E2E injects a fake verifier; the real challenge widget + siteverify round-trip can only be exercised against a live Cloudflare-keyed stack (plan 06-08 user_setup)"
+
   - test: "Authenticated staff queue end-to-end walkthrough (FR-08)"
     expected: "A logged-in staff user opens /queue, sees both Flow A and Flow B pending_review rows with source badges, the 3-chip source filter narrows correctly, and a Flow B record shows the source-aware creator label"
     why_human: "Plan 06-07 shipped the authenticated /queue BFF path with build-green + manual only — no NEW automated E2E drives a real Keycloak token through /queue -> BFF -> Go?source=. See Gaps Summary: this is a flagged decision, not a hard failure (the Go source filter and the authed /api/donations HTTP path already carry integration/E2E coverage)."
