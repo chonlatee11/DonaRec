@@ -1,17 +1,18 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
-current_phase: 07
-status: complete
-stopped_at: "07-01 complete — TestE2E_FlowBCompositePublicSubmitToIssued added, passing under -race against real Postgres testcontainer stack. Closes v1.0 audit WARNING-1. No production code changed."
-last_updated: "2026-07-17T22:10:00.000Z"
+milestone_name: MVP
+closeout_type: override_closeout
+current_phase: 0
+status: Awaiting next milestone
+stopped_at: "Milestone v1.0 MVP shipped and archived (7 phases, 47 plans, 91 tasks). Closeout type: override_closeout — 2 non-blocking verification overrides deferred (see Deferred Items)."
+last_updated: "2026-07-17T16:11:28.366Z"
 last_activity: 2026-07-17
-last_activity_desc: Phase 07 complete — Flow B composite E2E test closes v1.0 audit WARNING-1
+last_activity_desc: Milestone v1.0 completed and archived
 progress:
   total_phases: 7
   completed_phases: 7
-  total_plans: 48
+  total_plans: 47
   completed_plans: 48
   percent: 100
 current_phase_name: close-gap-flow-b-composite-e2e-public-submit-through-approve
@@ -21,20 +22,28 @@ current_phase_name: close-gap-flow-b-composite-e2e-public-submit-through-approve
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-22)
+See: .planning/PROJECT.md (updated 2026-07-17)
 
 **Core value:** ออกใบเสร็จบริจาคที่มีเลขที่รันต่อเนื่องไม่ซ้ำ ห้ามข้ามเลข (gap-less) ตามปีงบประมาณ หลังผ่านการอนุมัติโดยมนุษย์ และส่งถึงผู้บริจาคได้อย่างถูกต้องน่าเชื่อถือ
-**Current focus:** Phase 07 — close-gap-flow-b-composite-e2e-public-submit-through-approve (Complete)
+**Current focus:** Planning next milestone (v1.0 MVP shipped 2026-07-17)
 
 ## Current Position
 
-Phase: 07
-Plan: 01 of 01 (Complete)
-Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items. Phase 06 complete (UAT 3/3, security gate cleared).
-Status: Phase 07 complete — v1.0 milestone audit WARNING-1 closed
-Last activity: 2026-07-17 — Phase 07 complete
+Phase: Milestone v1.0 MVP complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-17 — Milestone v1.0 completed and archived
 
-Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-07-17 (closeout_type: override_closeout):
+
+| Category | Item | Status | Note |
+|----------|------|--------|------|
+| debug | frontend-auth-gating-missing | awaiting_human_verify | Route-protection code complete + TDD-green (curl 307 + PKCE verified); final interactive Keycloak browser login is a human-only checkpoint. |
+| uat | 01-HUMAN-UAT Test 2 (HTTPS/TLS, NFR-02) | blocked_by: deploy-time | Reverse-proxy TLS + sslmode=verify-full confirmed at production deploy; app-level AES-256-GCM encryption boundary complete. |
+
+_Phase 04 UAT is `passed` 2/2 (surfaced by audit query, not a real gap). Full audit: milestones/v1.0-MILESTONE-AUDIT.md._
 
 ## Performance Metrics
 
@@ -226,3 +235,7 @@ Items acknowledged and carried forward from previous milestone close:
 Last session: 2026-07-17T15:10:15.035Z
 Stopped at: 06-08 code-complete (Task 1 committed a2f2796). Task 2 (checkpoint:human-verify, blocking) — responsive/bilingual live-stack walkthrough for NFR-06 — NOT performed; documented as PENDING HUMAN UAT in 06-08-SUMMARY.md. Phase 6 is NOT Complete until this walkthrough passes.
 Resume file: .planning/phases/06-public-donation-web-form-flow-b/06-08-SUMMARY.md (see "Outstanding Human-Verification Items" — 7 walkthrough steps + Turnstile-key prerequisite)
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone
