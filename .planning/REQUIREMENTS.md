@@ -12,9 +12,9 @@
 
 - [x] **NFR-01**: ผู้ใช้เข้าสู่ระบบด้วยบัญชี, รหัสผ่านถูกเข้ารหัส (hash), และจำกัดสิทธิ์ตามบทบาท RBAC [M]
 - [x] **FR-34**: Admin จัดการผู้ใช้และสิทธิ์ (RBAC) — Maker / Checker / Admin แยกบทบาท [M]
-- [ ] **NFR-02**: เข้ารหัสข้อมูลขณะส่ง (HTTPS/TLS) และเข้ารหัสข้อมูลอ่อนไหวขณะจัดเก็บ (เลขบัตร ปชช./เลขผู้เสียภาษี) [M]
+- [x] **NFR-02**: เข้ารหัสข้อมูลขณะส่ง (HTTPS/TLS) และเข้ารหัสข้อมูลอ่อนไหวขณะจัดเก็บ (เลขบัตร ปชช./เลขผู้เสียภาษี) [M]
 - [x] **NFR-05**: เก็บ audit log ทุกการกระทำสำคัญแบบลบไม่ได้ และเก็บได้ตามระยะเวลาที่กำหนด [M]
-- [ ] **FR-13**: บันทึก audit trail ทุกการกระทำ (ใคร ทำอะไร เมื่อไร) [M]
+- [x] **FR-13**: บันทึก audit trail ทุกการกระทำ (ใคร ทำอะไร เมื่อไร) [M]
 
 ### Receipt Numbering (เลขที่ใบเสร็จ — gap-less)
 
@@ -62,7 +62,7 @@
 
 ### PDPA & Compliance
 
-- [ ] **NFR-03**: บันทึกความยินยอม (consent) พร้อมวันเวลา/เวอร์ชันข้อความ, ระบุวัตถุประสงค์, และรองรับสิทธิเจ้าของข้อมูล (เข้าถึง/แก้ไข; สิทธิขอลบถูกจำกัดโดยกฎหมายภาษี — retention policy ไม่ hard-delete) [M]
+- [x] **NFR-03**: บันทึกความยินยอม (consent) พร้อมวันเวลา/เวอร์ชันข้อความ, ระบุวัตถุประสงค์, และรองรับสิทธิเจ้าของข้อมูล (เข้าถึง/แก้ไข; สิทธิขอลบถูกจำกัดโดยกฎหมายภาษี — retention policy ไม่ hard-delete) [M]
 
 ### Public Donation Website (เว็บไซต์รับบริจาค — Flow B)
 
@@ -81,7 +81,7 @@
 
 ### Cross-cutting Non-functional
 
-- [x] **NFR-06**: UI รองรับ 2 ภาษา ใช้งานบนเดสก์ท็อปและมือถือได้ (responsive) [M] — code-complete (06-08 Task 1); human walkthrough (Task 2) PENDING UAT
+- [x] **NFR-06**: UI รองรับ 2 ภาษา ใช้งานบนเดสก์ท็อปและมือถือได้ (responsive) [M] — Complete (06-08 responsive/bilingual walkthrough passed; UAT 3/3, 2026-07-17)
 - [x] **NFR-08**: สำรองข้อมูล (backup) สม่ำเสมอและกู้คืนได้ [M]
 
 ## v2 Requirements
@@ -127,10 +127,10 @@ Which phases cover which requirements.
 |-------------|-------|--------|
 | NFR-01 | Phase 1 | Complete |
 | FR-34 | Phase 1 | Complete |
-| NFR-02 | Phase 1 | Pending |
+| NFR-02 | Phase 1 | Complete |
 | NFR-05 | Phase 1 | Complete |
-| FR-13 | Phase 1 | Pending |
-| NFR-03 | Phase 1 | Pending |
+| FR-13 | Phase 1 | Complete |
+| NFR-03 | Phase 1 | Complete |
 | FR-15 | Phase 2 | Complete |
 | FR-16 | Phase 2 | Complete |
 | FR-17 | Phase 2 | Complete |
