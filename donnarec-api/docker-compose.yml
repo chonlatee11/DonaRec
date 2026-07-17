@@ -226,6 +226,10 @@ services:
       MINIO_RECEIPTS_BUCKET: ${MINIO_RECEIPTS_BUCKET:-donnarec-receipts}
       # Chrome sidecar (Phase 4, D-58) — reached over the internal network only.
       CHROME_WS_URL: ${CHROME_WS_URL:-ws://chrome:9222}
+      # Cloudflare Turnstile CAPTCHA secret (D-82, FR-04, Phase 6) — env-only,
+      # never DB-stored (T-06-08). Set TURNSTILE_SECRET_KEY in donnarec-api/.env.
+      # Empty default keeps the verifier fail-closed until a real secret is set.
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
     ports:
       - "${API_PORT:-8000}:8000"
     networks:
