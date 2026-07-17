@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 06
-current_phase_name: public-donation-web-form-flow-b
 status: executing
-stopped_at: 06-08 code-complete (Task 1 committed a2f2796); Task 2 human UAT pending
-last_updated: "2026-07-12T03:17:55.208Z"
-last_activity: 2026-07-11
-last_activity_desc: Phase 06 execution started
+stopped_at: "06-08 code-complete (Task 1 committed a2f2796). Task 2 (checkpoint:human-verify, blocking) — responsive/bilingual live-stack walkthrough for NFR-06 — NOT performed; documented as PENDING HUMAN UAT in 06-08-SUMMARY.md. Phase 6 is NOT Complete until this walkthrough passes."
+last_updated: "2026-07-17T14:24:46.140Z"
+last_activity: 2026-07-17
+last_activity_desc: Phase 06 complete
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 46
-  completed_plans: 46
-  percent: 83
+  completed_plans: 47
+  percent: 100
+current_phase_name: public-donation-web-form-flow-b
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-06-22)
 
 ## Current Position
 
-Phase: 06 (public-donation-web-form-flow-b) — EXECUTING (all 8 plans code-complete; NOT Complete — 06-08 Task 2 human UAT pending)
-Plan: 8 of 8 — 06-08 code-complete (Task 1 committed a2f2796); Task 2 responsive/bilingual human walkthrough (NFR-06) PENDING UAT
+Phase: 06
+Plan: Not started
 Prior phases: Phase 3 Complete (integration gate met — automated E2E + human walkthrough 7/7, 2026-07-04); Phase 4 Complete + shipped (PR #4). Phase 4 deferred human UI walkthroughs (04-06 Task 4 Screen 3b + 04-08 Task 3 Screen 6) driven live through Chrome and PASSED 2026-07-04 (04-UAT.md 2/2 passed, 04-VERIFICATION.md status: passed) — no outstanding Phase 4 items.
 Status: Ready to execute
-Last activity: 2026-07-17 — Completed quick task 260717-spx: fix 2 High public-endpoint security flags (Phase 06)
+Last activity: 2026-07-17 — Phase 06 complete
 
 Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. On 2026-07-02, standing up the real stack (docker compose; postgres remapped to host 5433 via docker-compose.override.yml; 4 users seeded) and driving it with a real Keycloak token surfaced three runtime-integration-seam bugs that unit tests structurally could not catch. New done-criterion added (Conventions → Integration-test gate; ROADMAP Phase 3 criterion 6).
 
@@ -40,7 +40,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 
 **Velocity:**
 
-- Total plans completed: 14
+- Total plans completed: 22
 - Average duration: —
 - Total execution time: —
 
@@ -50,6 +50,7 @@ Context: Phase 3 was marked Complete 2026-07-01 on 5/5 unit-level verification. 
 |-------|-------|-------|----------|
 | 01 | 5 | - | - |
 | 04 | 9 | - | - |
+| 06 | 8 | - | - |
 
 **Recent Trend:**
 

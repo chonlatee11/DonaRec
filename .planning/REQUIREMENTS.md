@@ -81,7 +81,7 @@
 
 ### Cross-cutting Non-functional
 
-- [ ] **NFR-06**: UI รองรับ 2 ภาษา ใช้งานบนเดสก์ท็อปและมือถือได้ (responsive) [M] — code-complete (06-08 Task 1); human walkthrough (Task 2) PENDING UAT
+- [x] **NFR-06**: UI รองรับ 2 ภาษา ใช้งานบนเดสก์ท็อปและมือถือได้ (responsive) [M] — code-complete (06-08 Task 1); human walkthrough (Task 2) PENDING UAT
 - [x] **NFR-08**: สำรองข้อมูล (backup) สม่ำเสมอและกู้คืนได้ [M]
 
 ## v2 Requirements
@@ -167,7 +167,7 @@ Which phases cover which requirements.
 | FR-05 | Phase 6 | Complete |
 | FR-04 | Phase 6 | Complete |
 | FR-08 | Phase 6 | Complete |
-| NFR-06 | Phase 6 | Pending |
+| NFR-06 | Phase 6 | Complete |
 
 **Coverage:**
 

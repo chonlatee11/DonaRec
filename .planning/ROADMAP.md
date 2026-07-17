@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Donation Lifecycle & Maker-Checker Issuance** - Donation records, encrypted donor PII, and the single approval transaction that issues a numbered receipt (completed 2026-07-01)
 - [x] **Phase 4: Receipt PDF + Email Delivery (Outbox Worker)** - Async Thai/EN tax-compliant PDF and email pipeline with retry, decoupled from the issuance transaction (completed 2026-07-04)
 - [x] **Phase 5: e-Donation Export, Reports & Admin Settings** - Access-controlled e-Donation export, donation reports, no-deploy config, and verified backup/restore (completed 2026-07-07)
-- [ ] **Phase 6: Public Donation Web Form (Flow B)** - Public bilingual donation form with slip upload, consent, bot protection, and pending-review queue feeding the existing pipeline (all 8 plans code-complete 2026-07-12; NOT Complete — plan 06-08 Task 2 responsive/bilingual human walkthrough (NFR-06) pending UAT)
+- [x] **Phase 6: Public Donation Web Form (Flow B)** - Public bilingual donation form with slip upload, consent, bot protection, and pending-review queue feeding the existing pipeline (all 8 plans code-complete 2026-07-12; NOT Complete — plan 06-08 Task 2 responsive/bilingual human walkthrough (NFR-06) pending UAT) (completed 2026-07-17)
 
 ## Phase Details
 
@@ -257,4 +257,4 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 3. Donation Lifecycle & Maker-Checker Issuance | 13/13 | Complete (E2E + walkthrough 7/7) | 2026-07-04 |
 | 4. Receipt PDF + Email Delivery (Outbox Worker) | 9/8 | Complete    | 2026-07-04 |
 | 5. e-Donation Export, Reports & Admin Settings | 8/8 | Complete   | 2026-07-07 |
-| 6. Public Donation Web Form (Flow B) | 8/8 code-complete | In Progress (06-08 human UAT pending) | - |
+| 6. Public Donation Web Form (Flow B) | 8/8 | Complete    | 2026-07-17 |
